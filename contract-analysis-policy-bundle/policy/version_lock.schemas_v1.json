@@ -50,6 +50,6 @@
     "require_exact_tag": true,
     "require_all_present": true,
     "require_versions_match": true,
-    "enforce_sha256": false
+    "enforce_sha256": true
   }
 }
