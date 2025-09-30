@@ -1,7 +1,7 @@
 {
   "manifest_version": "1.0",
   "generated_at": "2025-10-01T00:00:00Z",
-  "manifest_sha256": "d52947bc0abc15d5d7d959e6baab15b0468f78afdc7f232e8ae1973bfc94296e",
+  "manifest_sha256": "7cfe85b4c0affeb847e040f2f241e09f6b5a47cba638e5afd3fc1d7fd93cc292",
   "artifacts": [
     {
       "name": "rulebook_v1",
@@ -48,8 +48,8 @@
     {
       "name": "version_lock.schemas_v1",
       "path": "contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json",
-      "size_bytes": 1477,
-      "sha256": "1bd0710b55c4d2e50341a08f28916b18077dddaf14dde1af490c3091c9ac465c"
+      "size_bytes": 1476,
+      "sha256": "4ef9ef781fc32169a90d877fcd60794963db8f6dd737885280aa47fb9867f8d6"
     }
   ]
 }
