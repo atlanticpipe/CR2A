@@ -59,12 +59,37 @@ JSON
           jq -e . "$MAN" >/dev/null
           echo "Manifest is parseable JSON"
 
+- name: Compute per-artifact sizes and sha256 digests
+  run: |
+    set -euo pipefail
+    MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+    TMP="$(mktemp)"
 
-      - name: Compute per-artifact sizes and sha256 digests
-        id: artifacts
-        run: |
-          set -euo pipefail
-          MAN="${{ steps.setup.outputs.MAN }}"
+    # Sanity: manifest must parse
+    jq -e . "$MAN" >/dev/null
+
+    # Update each artifact's size and sha (overwrite any placeholder like "<pending>")
+    jq -c '.artifacts[]' "$MAN" | while read -r ART; do
+      P=$(jq -r '.path'  <<<"$ART")
+      N=$(jq -r '.name'  <<<"$ART")
+
+      if [ ! -f "$P" ]; then
+        echo "❌ Missing artifact file: $P" >&2
+        exit 1
+      fi
+
+      SIZE=$(stat -c%s "$P")
+      SHA=$(sha256sum "$P" | cut -d' ' -f1)
+
+      # Write back size and sha for this path
+      jq --arg p "$P" --arg sz "$SIZE" --arg sha "$SHA" '
+        (.artifacts[] | select(.path == $p) | .size_bytes) = ($sz | tonumber)
+        | (.artifacts[] | select(.path == $p) | .sha256)    = $sha
+      ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
+
+      echo "✅ $N updated size=$SIZE sha256=$SHA"
+    done
+
 
           # 1) Extract artifacts array as TSV: name \t path
           mapfile -t LINES < <(jq -r '.artifacts[] | [.name, .path] | @tsv' "$MAN")
