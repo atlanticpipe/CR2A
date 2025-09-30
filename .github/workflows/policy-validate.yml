@@ -1,0 +1,33 @@
+# This workflow is the starting point for our CI/CD pipeline.
+# It doesn’t enforce validation yet. For now it just proves that GitHub Actions is wired up.
+
+name: Repo Smoke   # The display name you’ll see in the Actions tab
+
+on:                # When to trigger this workflow
+  push:            # 1. Trigger when code is pushed to the repo
+    branches: [ main ]  # Only on the "main" branch
+  pull_request:    # 2. Trigger when a pull request is opened/updated
+    branches: [ main ]  # Only PRs targeting "main"
+
+jobs:              # A workflow can have multiple jobs, we start with one
+  validate:        # Job name: "validate"
+    runs-on: ubuntu-latest   # Runs inside GitHub’s Ubuntu VM
+
+    steps:         # Steps inside the job
+      - name: Checkout
+        uses: actions/checkout@v4
+        # Pulls down the repository code into the runner so other steps can see the files
+
+      - name: Print repo tree (debug)
+        run: |
+          echo "::group::TREE"   # Creates a collapsible log group called "TREE"
+          ls -la                 # List files in the root of the repo
+          echo
+          echo "Recursive:"      
+          ls -R                  # Recursively list all files/folders
+          echo "::endgroup::"
+
+      - name: Success marker
+        run: echo "CI is live. We will tighten checks as files are added."
+        # This step ensures the workflow always exits successfully.
+        # Later we’ll replace this with real schema and checksum validation.
