@@ -1,0 +1,167 @@
+{
+  // =====================================================================
+  // APS Contract Analysis — Output Schemas v1
+  // Location: contract-analysis-policy-bundle/schemas/output_schemas_v1.json
+  // Purpose: Defines the rigid structures every output must conform to.
+  // =====================================================================
+
+  "$schema": "http://json-schema.org/draft-07/schema#", 
+  "title": "APS Contract Analysis Output Schemas",
+  "version": "1.0",
+
+  "definitions": {
+    // ---------------------------------------------------------------
+    // ClauseBlock schema: this is the fundamental building block.
+    // ---------------------------------------------------------------
+    "ClauseBlock": {
+      "type": "object",
+      "required": [
+        "Clause Language",
+        "Clause Summary",
+        "Risk Triggers Identified",
+        "Flow-Down Obligations",
+        "Redline Recommendations",
+        "Harmful Language / Policy Conflicts",
+        "provenance"
+      ],
+      "properties": {
+        "Clause Language": { "type": "string" },
+        "Clause Summary": { "type": "string" },
+        "Risk Triggers Identified": { "type": "string" },
+        "Flow-Down Obligations": { "type": "string" },
+        "Redline Recommendations": { "type": "string" },
+        "Harmful Language / Policy Conflicts": { "type": "string" },
+        "provenance": {
+          "type": "object",
+          "required": ["source", "page", "span"],
+          "properties": {
+            "source": { "type": "string" }, // e.g., contract filename or FDOT year
+            "page": { "type": "integer" }, // page number from contract
+            "span": { "type": "string" }   // text span / reference
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    // ---------------------------------------------------------------
+    // Section II–VI items: each one must contain ClauseBlocks.
+    // ---------------------------------------------------------------
+    "SectionItem": {
+      "type": "object",
+      "required": ["item_number", "item_title", "clauses", "closing_line"],
+      "properties": {
+        "item_number": { "type": "integer" },
+        "item_title": { "type": "string" },
+        "clauses": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ClauseBlock" }
+        },
+        "closing_line": {
+          "type": "string",
+          "pattern": "^All applicable clauses for .+ have been identified and analyzed\\.$"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    // ---------------------------------------------------------------
+    // Section VII: supplemental operational risks.
+    // ---------------------------------------------------------------
+    "SupplementalRiskItem": {
+      "type": "object",
+      "required": ["risk_title", "clauses", "sequence"],
+      "properties": {
+        "risk_title": { "type": "string" },
+        "clauses": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ClauseBlock" }
+        },
+        "sequence": {
+          "type": "string",
+          "pattern": "^[0-9]+ of [0-9]+$" // e.g., "1 of 3"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    // ---------------------------------------------------------------
+    // Section VIII: summary table + general risk level.
+    // ---------------------------------------------------------------
+    "RiskSummaryRow": {
+      "type": "object",
+      "required": ["Risk Area", "Risk Summary", "Redline Recommendation Summary"],
+      "properties": {
+        "Risk Area": { "type": "string" },
+        "Risk Summary": { "type": "string" },
+        "Redline Recommendation Summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "SectionVIII": {
+      "type": "object",
+      "required": ["rows", "general_risk_level"],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/RiskSummaryRow" }
+        },
+        "general_risk_level": { "type": "string" } // e.g., "Low", "Moderate", "High"
+      },
+      "additionalProperties": false
+    },
+
+    // ---------------------------------------------------------------
+    // Section I: Contract overview (fixed 8 fields).
+    // ---------------------------------------------------------------
+    "ContractOverview": {
+      "type": "object",
+      "required": [
+        "PROJECT TITLE:",
+        "SOLICITATION NO.:",
+        "OWNER:",
+        "CONTRACTOR:",
+        "SCOPE:",
+        "GENERAL RISK LEVEL:",
+        "BID MODEL:",
+        "NOTES:"
+      ],
+      "properties": {
+        "PROJECT TITLE:": { "type": "string" },
+        "SOLICITATION NO.:": { "type": "string" },
+        "OWNER:": { "type": "string" },
+        "CONTRACTOR:": { "type": "string" },
+        "SCOPE:": { "type": "string" },
+        "GENERAL RISK LEVEL:": { "type": "string" },
+        "BID MODEL:": { "type": "string" },
+        "NOTES:": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    // ---------------------------------------------------------------
+    // Omission check at the end.
+    // ---------------------------------------------------------------
+    "OmissionCheck": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["No omissions or uncategorized risks identified."]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["missed_clause", "suggested_section", "clause_block"],
+            "properties": {
+              "missed_clause": { "type": "string" },
+              "suggested_section": { "type": "string" },
+              "clause_block": { "$ref": "#/definitions/ClauseBlock" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
