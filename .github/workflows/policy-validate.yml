@@ -36,6 +36,58 @@ jobs:
           ls -R
           echo "::endgroup::"
 
+            # 4) Ensure the checksums manifest is fresh relative to latest file changes
+      - name: Check checksums manifest freshness
+        run: |
+          set -euo pipefail
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+
+          # Tolerance: allow up to 10 minutes of skew between commits and manifest generation
+          ALLOWED_LAG_SEC=600
+
+          # Parse manifest generated_at (UTC) → epoch seconds
+          GEN_STR=$(jq -r '.generated_at // empty' "$MAN")
+          if [ -z "$GEN_STR" ]; then
+            echo "❌ Manifest missing .generated_at" >&2
+            exit 1
+          fi
+          GEN_EPOCH=$(date -u -d "$GEN_STR" +%s || true)
+          if [ -z "${GEN_EPOCH:-}" ]; then
+            echo "❌ Unable to parse manifest .generated_at='$GEN_STR'" >&2
+            exit 1
+          fi
+
+          # Build list of artifact paths from manifest, then find latest commit time touching any of them
+          mapfile -t PATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
+          if [ "${#PATHS[@]}" -eq 0 ]; then
+            echo "❌ No artifacts listed in manifest" >&2
+            exit 1
+          fi
+
+          LATEST_CT=0
+          for p in "${PATHS[@]}"; do
+            # If a file is new and has no commits yet, fall back to '0' silently
+            CT=$(git log -1 --format=%ct -- "$p" || echo 0)
+            [ -z "$CT" ] && CT=0
+            if [ "$CT" -gt "$LATEST_CT" ]; then
+              LATEST_CT="$CT"
+              LATEST_PATH="$p"
+            fi
+          done
+
+          echo "Manifest generated_at: $GEN_STR  (epoch=$GEN_EPOCH)"
+          echo "Latest artifact commit: $(date -u -d @${LATEST_CT} +'%Y-%m-%dT%H:%M:%SZ') (epoch=$LATEST_CT)  path=${LATEST_PATH:-n/a}"
+
+          # Fail if manifest is older than the latest artifact change beyond tolerance
+          if [ $(( GEN_EPOCH + ALLOWED_LAG_SEC )) -lt "$LATEST_CT" ]; then
+            echo "❌ Manifest is stale (older than latest change + ${ALLOWED_LAG_SEC}s tolerance)." >&2
+            echo "   Run the checksums build or push a commit that updates the manifest." >&2
+            exit 1
+          fi
+
+          echo "✅ Manifest freshness OK within ${ALLOWED_LAG_SEC}s tolerance."
+
+      
       # 4) Cross-check that every component path in version_lock exists in manifest
       - name: Cross-check version_lock ↔ checksums_manifest (paths)
         run: |
