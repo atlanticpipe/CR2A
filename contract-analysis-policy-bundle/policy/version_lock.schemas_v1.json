@@ -1,7 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "tag": "schemas@v1.0",
-
   "meta": {
     "owner": "Atlantic Pipe Services (APS)",
     "created_utc": "2025-09-30T00:00:00Z",
@@ -9,58 +8,48 @@
   },
 
   "components": [
-
     {
       "name": "rulebook_v1",
       "version": "1.0",
       "path": "contract-analysis-policy-bundle/policy/rulebook_v1.yaml"
-      // Optional integrity field (fill in later if you want CI to enforce):
-      // "sha256": "<hex-digest>"
+
     },
     {
       "name": "output_schemas",
       "version": "1.0",
       "path": "contract-analysis-policy-bundle/schemas/output_schemas_v1.json"
-      // "sha256": "<hex-digest>"
     },
     {
       "name": "run_manifest_schema",
       "version": "1.0",
       "path": "contract-analysis-policy-bundle/schemas/run_manifest_schema_v1.json"
-      // "sha256": "<hex-digest>"
     },
     {
       "name": "api_schemas",
       "version": "1.0",
       "path": "contract-analysis-policy-bundle/schemas/api_schemas_v1.json"
-      // "sha256": "<hex-digest>"
     },
     {
       "name": "policy_rules",
       "version": "1.0",
       "path": "contract-analysis-policy-bundle/policy/policy_rules_v1.json"
-      // "sha256": "<hex-digest>"
     },
     {
       "name": "control_flags",
       "version": "1.0",
       "path": "contract-analysis-policy-bundle/policy/control_flags_v1.json"
-      // "sha256": "<hex-digest>"
     },
     {
       "name": "validation_rules",
       "version": "1.0",
       "path": "contract-analysis-policy-bundle/policy/validation_rules_v1.json"
-      // "sha256": "<hex-digest>"
     }
   ],
 
   "enforcement": {
-
     "require_exact_tag": true,
     "require_all_present": true,
     "require_versions_match": true,
-
     "enforce_sha256": false
   }
 }
