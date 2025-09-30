@@ -1,0 +1,128 @@
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "APS Run Manifest",
+  "version": "1.0",
+
+  "type": "object",
+  "required": [
+    "run_id",
+    "contract_id",
+    "timestamps",
+    "fdot",
+    "versions",
+    "artifacts",
+    "retrieval_flags",
+    "metrics",
+    "audit"
+  ],
+  "additionalProperties": false,
+
+  "properties": {
+    "run_id": { "type": "string" },
+    "contract_id": { "type": "string" },
+
+    "timestamps": {
+      "type": "object",
+      "required": ["submitted_at", "started_at", "completed_at"],
+      "additionalProperties": false,
+      "properties": {
+        "submitted_at": { "type": "string" },
+        "started_at": { "type": "string" },
+        "completed_at": { "type": "string" }
+      }
+    },
+
+    "fdot": {
+      "type": "object",
+      "required": ["fdot_contract", "fdot_year", "confidence", "rationale", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "fdot_contract": { "type": "boolean" },
+        "fdot_year": {
+          "type": ["string", "null"]
+        },
+        "confidence": { "type": "number" },
+        "rationale": { "type": "string" },
+        "evidence": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "versions": {
+      "type": "object",
+      "required": ["rulebook_version", "schema_version"],
+      "additionalProperties": false,
+      "properties": {
+        "rulebook_version": { "type": "string" }, // e.g., "1.0"
+        "schema_version": { "type": "string" }    // e.g., "1.0"
+      }
+    },
+
+    "artifacts": {
+      "type": "object",
+      "required": ["json_uri", "pdf_uri", "checksums"],
+      "additionalProperties": false,
+      "properties": {
+        "json_uri": { "type": "string" },
+        "pdf_uri": { "type": "string" },
+        "checksums": {
+          "type": "object",
+          "required": ["json_sha256", "pdf_sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "json_sha256": { "type": "string" },
+            "pdf_sha256": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "retrieval_flags": {
+      "type": "object",
+      "required": ["fdot_year_filter_locked", "embedding_model", "stores"],
+      "additionalProperties": false,
+      "properties": {
+        "fdot_year_filter_locked": { "type": "boolean" },
+        "embedding_model": { "type": "string" },
+        "stores": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+
+    "metrics": {
+      "type": "object",
+      "required": ["tokens", "latency_ms", "cost_usd"],
+      "additionalProperties": false,
+      "properties": {
+        "tokens": {
+          "type": "object",
+          "required": ["prompt", "completion", "total"],
+          "additionalProperties": false,
+          "properties": {
+            "prompt": { "type": "integer" },
+            "completion": { "type": "integer" },
+            "total": { "type": "integer" }
+          }
+        },
+        "latency_ms": { "type": "integer" },
+        "cost_usd": { "type": "number" }
+      }
+    },
+
+    "audit": {
+      "type": "object",
+      "required": ["source_checksums", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "source_checksums": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}
