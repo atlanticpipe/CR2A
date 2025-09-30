@@ -1,0 +1,49 @@
+{
+  // =====================================================================
+  // APS Contract Analysis — Control Flags v1
+  // File: contract-analysis-policy-bundle/policy/control_flags_v1.json
+  // Purpose: Central toggles and invariants the orchestrator loads at startup.
+  //          These are not "rules" (see policy_rules_v1.json) but operational flags.
+  // =====================================================================
+
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "APS Control Flags",
+  "version": "1.0",
+
+  "flags": {
+    // -----------------------------
+    // Execution switches
+    // -----------------------------
+    "fail_fast": true,                 // Abort immediately on any validation breach
+    "emit_provenance": true,           // Include source/page/span for each ClauseBlock
+    "strict_header_match": true,       // Enforce exact canonical headers (abort on mismatch)
+    "suppress_extra_text": true,       // Forbid intros/outros beyond template
+
+    // -----------------------------
+    // FDOT gating
+    // -----------------------------
+    "fdot_contract_default": null,     // Optional default if unknown at submission (true/false/null)
+    "require_fdot_year_lock": true,    // If fdot is true, abort unless fdot_year is locked first
+    "allowed_fdot_years": [ "2022", "2023", "2024", "2025" ], // Guardrail list
+    "fdot_substitution_policy": "contract_silent_or_weaker->insert_fdot_text", // Behavior on gaps
+
+    // -----------------------------
+    // Document handles (stable IDs)
+    // -----------------------------
+    "template_doc_id": "file-VGX1xeDCCyzzNhiWKtivrU",   // Clause Risk & Compliance Summary Template
+    "redline_guidelines_doc_id": "file-SuN86exJDKidXCm3D1xZuX", // Redlining Guidelines (Vol. 4)
+
+    // -----------------------------
+    // Output enforcement
+    // -----------------------------
+    "closing_line_exact": "All applicable clauses for [Item #/Title] have been identified and analyzed.", // Must match exactly
+    "section_I_fields_required": 8,   // Section I must include all eight fields
+    "bluf_enabled": true,             // Allow BLUF notes where policy permits
+
+    // -----------------------------
+    // Telemetry (optional)
+    // -----------------------------
+    "collect_metrics": true,          // Record tokens/latency/cost in manifest.metrics
+    "log_level": "INFO"               // INFO|DEBUG|WARN|ERROR — for orchestrator logs
+  }
+}
