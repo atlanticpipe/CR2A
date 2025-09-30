@@ -31,18 +31,34 @@ jobs:
           sudo apt-get install -y jq
         # jq is used to read/update JSON safely
 
-      - name: Define paths and sanity-check manifest file
-        id: setup
+      # Create/ensure checksums manifest exists (bootstrap if missing)
+      - name: Define paths and bootstrap manifest file (idempotent)
         run: |
           set -euo pipefail
 
-          # Path to the manifest we’re going to update
           MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          MAN_DIR="$(dirname "$MAN")"
 
-          # Basic presence check (fail early if missing)
-          test -f "$MAN" || { echo "ERROR: $MAN not found"; exit 1; }
+          mkdir -p "$MAN_DIR"
 
-          echo "MAN=$MAN" >> "$GITHUB_OUTPUT"
+          if [ ! -f "$MAN" ]; then
+            echo "⚙️  Bootstrapping new checksums manifest at $MAN"
+            cat >"$MAN" <<'JSON'
+            {
+              "manifest_version": "1.0",
+              "generated_at": "1970-01-01T00:00:00Z",
+              "manifest_sha256": "",
+              "artifacts": []
+            }
+JSON
+          else
+            echo "Found existing manifest at $MAN"
+          fi
+
+          # Sanity check: valid JSON
+          jq -e . "$MAN" >/dev/null
+          echo "Manifest is parseable JSON"
+
 
       - name: Compute per-artifact sizes and sha256 digests
         id: artifacts
