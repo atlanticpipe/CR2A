@@ -1,0 +1,79 @@
+{
+  // =====================================================================
+  // APS Contract Analysis — Version Lock (schemas@v1.0)
+  // File: contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
+  // Purpose: Single tag that pins the schema/policy set used together.
+  //          CI and the orchestrator can assert this tag to prevent drift.
+  // =====================================================================
+
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "tag": "schemas@v1.0",                 // <-- Canonical label used by CI/orchestrator
+
+  "meta": {
+    "owner": "Atlantic Pipe Services (APS)", // For audit
+    "created_utc": "2025-09-30T00:00:00Z",   // Update when you finalize; ISO 8601 UTC
+    "description": "Locks rulebook + schemas + rules into a single coherent release."
+  },
+
+  "components": [
+    // Each component is a file that forms part of this release.
+    // Paths are repo-relative to keep this portable across environments.
+
+    {
+      "name": "rulebook_v1",
+      "version": "1.0",
+      "path": "contract-analysis-policy-bundle/policy/rulebook_v1.yaml"
+      // Optional integrity field (fill in later if you want CI to enforce):
+      // "sha256": "<hex-digest>"
+    },
+    {
+      "name": "output_schemas",
+      "version": "1.0",
+      "path": "contract-analysis-policy-bundle/schemas/output_schemas_v1.json"
+      // "sha256": "<hex-digest>"
+    },
+    {
+      "name": "run_manifest_schema",
+      "version": "1.0",
+      "path": "contract-analysis-policy-bundle/schemas/run_manifest_schema_v1.json"
+      // "sha256": "<hex-digest>"
+    },
+    {
+      "name": "api_schemas",
+      "version": "1.0",
+      "path": "contract-analysis-policy-bundle/schemas/api_schemas_v1.json"
+      // "sha256": "<hex-digest>"
+    },
+    {
+      "name": "policy_rules",
+      "version": "1.0",
+      "path": "contract-analysis-policy-bundle/policy/policy_rules_v1.json"
+      // "sha256": "<hex-digest>"
+    },
+    {
+      "name": "control_flags",
+      "version": "1.0",
+      "path": "contract-analysis-policy-bundle/policy/control_flags_v1.json"
+      // "sha256": "<hex-digest>"
+    },
+    {
+      "name": "validation_rules",
+      "version": "1.0",
+      "path": "contract-analysis-policy-bundle/policy/validation_rules_v1.json"
+      // "sha256": "<hex-digest>"
+    }
+  ],
+
+  "enforcement": {
+    // How strictly the CI/orchestrator must treat this lock.
+
+    "require_exact_tag": true,    // Orchestrator must see this exact tag before running
+    "require_all_present": true,  // All listed components must exist at the given paths
+    "require_versions_match": true, // Each component's internal "version" must match here
+
+    // Integrity checks are optional at first to avoid bootstrap friction.
+    // Turn these on (true) only after you’ve stabilized file contents and
+    // recorded the sha256 digests above.
+    "enforce_sha256": false       // When true, CI compares file hashes to the listed values
+  }
+}
