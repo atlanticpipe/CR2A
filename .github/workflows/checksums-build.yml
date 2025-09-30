@@ -1,0 +1,137 @@
+# ======================================================================
+# APS Policy Registry — Checksums Builder
+# File: .github/workflows/checksums-build.yml
+# Purpose: Compute per-file sha256 + size and write the top-level
+#          manifest_sha256 for checksums_manifest_v1.json on each push.
+# Result:  If the manifest changes, this workflow commits the update.
+# ======================================================================
+
+name: Build Checksums Manifest
+
+on:
+  push:
+    branches: [ main ]     # Run on pushes to main; adjust if needed
+    paths:
+      - "contract-analysis-policy-bundle/**"   # Only when policy/schemas change
+      - ".github/workflows/checksums-build.yml"
+  workflow_dispatch: {}     # Allow manual runs from the Actions tab
+
+jobs:
+  build-checksums:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        # Pulls the repo so we can read/write files
+
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+        # jq is used to read/update JSON safely
+
+      - name: Define paths and sanity-check manifest file
+        id: setup
+        run: |
+          set -euo pipefail
+
+          # Path to the manifest we’re going to update
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+
+          # Basic presence check (fail early if missing)
+          test -f "$MAN" || { echo "ERROR: $MAN not found"; exit 1; }
+
+          echo "MAN=$MAN" >> "$GITHUB_OUTPUT"
+
+      - name: Compute per-artifact sizes and sha256 digests
+        id: artifacts
+        run: |
+          set -euo pipefail
+          MAN="${{ steps.setup.outputs.MAN }}"
+
+          # 1) Extract artifacts array as TSV: name \t path
+          mapfile -t LINES < <(jq -r '.artifacts[] | [.name, .path] | @tsv' "$MAN")
+
+          # 2) Prepare a temp file to hold new artifacts with computed fields
+          TMP_DIR="$(mktemp -d)"
+          ART_JSON="$TMP_DIR/artifacts.jsonl"
+
+          # 3) For each artifact, compute size_bytes + sha256 (if file exists)
+          for ROW in "${LINES[@]}"; do
+            NAME="$(echo "$ROW" | cut -f1)"
+            PATH_="$(echo "$ROW" | cut -f2)"
+
+            if [ ! -f "$PATH_" ]; then
+              echo "ERROR: Missing file for artifact '$NAME' at path '$PATH_'" >&2
+              exit 1
+            fi
+
+            SIZE_BYTES="$(wc -c < "$PATH_" | tr -d ' ')"
+            SHA256="$(sha256sum "$PATH_" | cut -d' ' -f1)"
+
+            # Build one JSON object per artifact with updated fields
+            jq -n \
+              --arg name "$NAME" \
+              --arg path "$PATH_" \
+              --arg sha "$SHA256" \
+              --argjson size "$SIZE_BYTES" \
+              '{name:$name, path:$path, size_bytes:$size, sha256:$sha}' >> "$ART_JSON"
+          done
+
+          # 4) Merge updated artifacts back into the manifest, blanking top hash for now
+          NEW_MAN="$TMP_DIR/new_manifest.json"
+          jq --slurpfile arts "$ART_JSON" \
+             '.artifacts = $arts | .manifest_sha256 = "<pending>"' \
+             "$MAN" > "$NEW_MAN"
+
+          echo "NEW_MAN=$NEW_MAN" >> "$GITHUB_OUTPUT"
+
+      - name: Write top-level manifest_sha256 (canonical key sort)
+        id: top_hash
+        run: |
+          set -euo pipefail
+          NEW_MAN="${{ steps.artifacts.outputs.NEW_MAN }}"
+
+          # Compute canonical hash over the manifest *without* manifest_sha256
+          CALC="$(jq -cS 'del(.manifest_sha256)' "$NEW_MAN" | sha256sum | cut -d' ' -f1)"
+          echo "Calculated top-level manifest_sha256: $CALC"
+
+          # Write final manifest (with manifest_sha256 set)
+          FINAL_MAN="$(mktemp)"
+          jq --arg hash "$CALC" '.manifest_sha256 = $hash' "$NEW_MAN" > "$FINAL_MAN"
+
+          echo "FINAL_MAN=$FINAL_MAN" >> "$GITHUB_OUTPUT"
+
+      - name: Show diff (for transparency)
+        run: |
+          set -euo pipefail
+          MAN="${{ steps.setup.outputs.MAN }}"
+          FINAL_MAN="${{ steps.top_hash.outputs.FINAL_MAN }}"
+
+          echo "::group::Proposed changes to $MAN"
+          diff -u "$MAN" "$FINAL_MAN" || true
+          echo "::endgroup::"
+
+      - name: Commit and push if changed
+        env:
+          MAN: ${{ steps.setup.outputs.MAN }}
+          FINAL_MAN: ${{ steps.top_hash.outputs.FINAL_MAN }}
+        run: |
+          set -euo pipefail
+
+          # Only replace the manifest if there is a difference
+          if ! diff -q "$MAN" "$FINAL_MAN" > /dev/null; then
+            echo "Changes detected — updating manifest on branch."
+            cp "$FINAL_MAN" "$MAN"
+
+            # Configure git identity for the automation commit
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            git add "$MAN"
+            git commit -m "ci: rebuild checksums manifest (auto)"
+            git push
+          else
+            echo "No changes to commit."
+          fi
