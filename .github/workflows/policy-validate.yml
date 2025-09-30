@@ -31,3 +31,22 @@ jobs:              # A workflow can have multiple jobs, we start with one
         run: echo "CI is live. We will tighten checks as files are added."
         # This step ensures the workflow always exits successfully.
         # Later we’ll replace this with real schema and checksum validation.
+# Validate that every component in version_lock has a matching entry in checksums manifest
+- name: Cross-check version_lock ↔ checksums_manifest
+  run: |
+    set -euo pipefail
+    LOCK="contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json"
+    MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+
+    # Build a set of paths from the manifest
+    mapfile -t MAN_PATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
+
+    # For each component path in the lock, assert it exists in the manifest
+    jq -r '.components[].path' "$LOCK" | while read -r P; do
+      if ! printf '%s\n' "${MAN_PATHS[@]}" | grep -Fx "$P" >/dev/null; then
+        echo "Missing in checksums_manifest: $P" >&2
+        exit 1
+      fi
+    done
+
+    echo "version_lock and checksums_manifest are consistent."
