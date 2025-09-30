@@ -42,7 +42,7 @@ jobs:
           mkdir -p "$MAN_DIR"
 
           if [ ! -f "$MAN" ]; then
-            echo "⚙️  Bootstrapping new checksums manifest at $MAN"
+            echo "Bootstrapping new checksums manifest at $MAN"
             cat >"$MAN" <<'JSON'
             {
               "manifest_version": "1.0",
@@ -105,6 +105,18 @@ JSON
 
           echo "manifest_sha256=$SHA"
 
+      - name: Verify no placeholders remain
+        run: |
+          set -euo pipefail
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          BAD=$(jq -r '.artifacts[] | select((.sha256 == null) or (.sha256|tostring|test("^\\s*$")) or (.sha256 == "<pending>")) | .path' "$MAN" || true)
+          if [ -n "$BAD" ]; then
+            echo "❌ Artifacts still missing sha256:"
+            echo "$BAD"
+            exit 1
+          fi
+          echo "All artifact digests populated."
+
       - name: Show diff (for transparency)
         run: |
           set -euo pipefail
@@ -124,6 +136,4 @@ JSON
             git push
           else
             echo "No changes to commit."
-          fi
-ges to commit."
           fi
