@@ -1,7 +1,7 @@
 {
   "manifest_version": "1.0",
   "generated_at": "2025-10-01T00:00:00Z",
-  "manifest_sha256": "a8c0c6a3d743844aad59930151adf6aeabc9931f716d387eb38059b7c107799c",
+  "manifest_sha256": "586c0e9ec5d3d67db1a7ee33a706626a1bd6bc377f9cd9e78c1e9e005071e46b",
   "artifacts": [
     {
       "name": "rulebook_v1",
@@ -30,8 +30,8 @@
     {
       "name": "policy_rules_v1",
       "path": "contract-analysis-policy-bundle/policy/policy_rules_v1.json",
-      "size_bytes": 2087,
-      "sha256": "c8e77c59b10f050db20106b91753c541ef0f2c028be5d74d51386891363759ac"
+      "size_bytes": 1819,
+      "sha256": "8feadcd957812b0f34f97fbba7f7a2ad40835469a117a2af88e1235380f65cdb"
     },
     {
       "name": "control_flags_v1",
