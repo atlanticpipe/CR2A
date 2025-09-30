@@ -59,120 +59,71 @@ JSON
           jq -e . "$MAN" >/dev/null
           echo "Manifest is parseable JSON"
 
-- name: Compute per-artifact sizes and sha256 digests
-  run: |
-    set -euo pipefail
-    MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
-    TMP="$(mktemp)"
+      - name: Compute per-artifact sizes and sha256 digests
+        run: |
+          set -euo pipefail
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          TMP="$(mktemp)"
 
-    # Sanity: manifest must parse
-    jq -e . "$MAN" >/dev/null
+          # Manifest must parse
+          jq -e . "$MAN" >/dev/null
 
-    # Update each artifact's size and sha (overwrite any placeholder like "<pending>")
-    jq -c '.artifacts[]' "$MAN" | while read -r ART; do
-      P=$(jq -r '.path'  <<<"$ART")
-      N=$(jq -r '.name'  <<<"$ART")
+          # Overwrite size_bytes and sha256 for each artifact (handles "<pending>" too)
+          jq -c '.artifacts[]' "$MAN" | while read -r ART; do
+            P=$(jq -r '.path'  <<<"$ART")
+            N=$(jq -r '.name'  <<<"$ART")
 
-      if [ ! -f "$P" ]; then
-        echo "❌ Missing artifact file: $P" >&2
-        exit 1
-      fi
-
-      SIZE=$(stat -c%s "$P")
-      SHA=$(sha256sum "$P" | cut -d' ' -f1)
-
-      # Write back size and sha for this path
-      jq --arg p "$P" --arg sz "$SIZE" --arg sha "$SHA" '
-        (.artifacts[] | select(.path == $p) | .size_bytes) = ($sz | tonumber)
-        | (.artifacts[] | select(.path == $p) | .sha256)    = $sha
-      ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
-
-      echo "✅ $N updated size=$SIZE sha256=$SHA"
-    done
-
-
-          # 1) Extract artifacts array as TSV: name \t path
-          mapfile -t LINES < <(jq -r '.artifacts[] | [.name, .path] | @tsv' "$MAN")
-
-          # 2) Prepare a temp file to hold new artifacts with computed fields
-          TMP_DIR="$(mktemp -d)"
-          ART_JSON="$TMP_DIR/artifacts.jsonl"
-
-          # 3) For each artifact, compute size_bytes + sha256 (if file exists)
-          for ROW in "${LINES[@]}"; do
-            NAME="$(echo "$ROW" | cut -f1)"
-            PATH_="$(echo "$ROW" | cut -f2)"
-
-            if [ ! -f "$PATH_" ]; then
-              echo "ERROR: Missing file for artifact '$NAME' at path '$PATH_'" >&2
+            if [ ! -f "$P" ]; then
+              echo "❌ Missing artifact file: $P" >&2
               exit 1
             fi
 
-            SIZE_BYTES="$(wc -c < "$PATH_" | tr -d ' ')"
-            SHA256="$(sha256sum "$PATH_" | cut -d' ' -f1)"
+            SIZE=$(stat -c%s "$P")
+            SHA=$(sha256sum "$P" | cut -d' ' -f1)
 
-            # Build one JSON object per artifact with updated fields
-            jq -n \
-              --arg name "$NAME" \
-              --arg path "$PATH_" \
-              --arg sha "$SHA256" \
-              --argjson size "$SIZE_BYTES" \
-              '{name:$name, path:$path, size_bytes:$size, sha256:$sha}' >> "$ART_JSON"
+            jq --arg p "$P" --arg sz "$SIZE" --arg sha "$SHA" '
+              (.artifacts[] | select(.path == $p) | .size_bytes) = ($sz | tonumber)
+              | (.artifacts[] | select(.path == $p) | .sha256)    = $sha
+            ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
+
+            echo "✅ $N updated size=$SIZE sha256=$SHA"
           done
 
-          # 4) Merge updated artifacts back into the manifest, blanking top hash for now
-          NEW_MAN="$TMP_DIR/new_manifest.json"
-          jq --slurpfile arts "$ART_JSON" \
-             '.artifacts = $arts | .manifest_sha256 = "<pending>"' \
-             "$MAN" > "$NEW_MAN"
-
-          echo "NEW_MAN=$NEW_MAN" >> "$GITHUB_OUTPUT"
-
       - name: Write top-level manifest_sha256 (canonical key sort)
-        id: top_hash
         run: |
           set -euo pipefail
-          NEW_MAN="${{ steps.artifacts.outputs.NEW_MAN }}"
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          TMP="$(mktemp)"
 
-          # Compute canonical hash over the manifest *without* manifest_sha256
-          CALC="$(jq -cS 'del(.manifest_sha256)' "$NEW_MAN" | sha256sum | cut -d' ' -f1)"
-          echo "Calculated top-level manifest_sha256: $CALC"
+          # Canonicalize keys when hashing to avoid drift
+          SHA=$(jq -S . "$MAN" | sha256sum | cut -d' ' -f1)
 
-          # Write final manifest (with manifest_sha256 set)
-          FINAL_MAN="$(mktemp)"
-          jq --arg hash "$CALC" '.manifest_sha256 = $hash' "$NEW_MAN" > "$FINAL_MAN"
+          jq --arg s "$SHA" '
+            .manifest_sha256 = $s
+            | .generated_at = (now | todateiso8601)
+          ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
 
-          echo "FINAL_MAN=$FINAL_MAN" >> "$GITHUB_OUTPUT"
+          echo "manifest_sha256=$SHA"
 
       - name: Show diff (for transparency)
         run: |
           set -euo pipefail
-          MAN="${{ steps.setup.outputs.MAN }}"
-          FINAL_MAN="${{ steps.top_hash.outputs.FINAL_MAN }}"
-
-          echo "::group::Proposed changes to $MAN"
-          diff -u "$MAN" "$FINAL_MAN" || true
+          echo "::group::Diff for checksums_manifest_v1.json"
+          git diff -- contract-analysis-policy-bundle/policy/checksums_manifest_v1.json || true
           echo "::endgroup::"
 
       - name: Commit and push if changed
-        env:
-          MAN: ${{ steps.setup.outputs.MAN }}
-          FINAL_MAN: ${{ steps.top_hash.outputs.FINAL_MAN }}
         run: |
           set -euo pipefail
-
-          # Only replace the manifest if there is a difference
-          if ! diff -q "$MAN" "$FINAL_MAN" > /dev/null; then
-            echo "Changes detected — updating manifest on branch."
-            cp "$FINAL_MAN" "$MAN"
-
-            # Configure git identity for the automation commit
-            git config user.name "github-actions[bot]"
+          if ! git diff --quiet -- contract-analysis-policy-bundle/policy/checksums_manifest_v1.json; then
+            echo "Changes detected — committing."
+            git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-
-            git add "$MAN"
+            git add contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
             git commit -m "ci: rebuild checksums manifest (auto)"
             git push
           else
             echo "No changes to commit."
+          fi
+ges to commit."
           fi
