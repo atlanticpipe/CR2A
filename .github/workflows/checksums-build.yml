@@ -6,7 +6,7 @@
 # Result:  If the manifest changes, this workflow commits the update.
 # ======================================================================
 
-name: Build Checksums Manifest
+name: Checksums Build
 
 on:
   push:
