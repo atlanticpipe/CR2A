@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "APS Control Flags",
+  "version": "1.0",
+
+  "flags": {
+    "fail_fast": true,
+    "emit_provenance": true,
+    "strict_header_match": true,
+    "suppress_extra_text": true,
+
+    "fdot_contract_default": null,
+    "require_fdot_year_lock": true,
+    "allowed_fdot_years": [ "2022", "2023", "2024", "2025" ], // Guardrail list
+    "fdot_substitution_policy": "contract_silent_or_weaker->insert_fdot_text",
+
+    "template_doc_id": "file-VGX1xeDCCyzzNhiWKtivrU",
+    "redline_guidelines_doc_id": "file-SuN86exJDKidXCm3D1xZuX",
+
+    "closing_line_exact": "All applicable clauses for [Item #/Title] have been identified and analyzed.",
+    "section_I_fields_required": 8,
+    "bluf_enabled": true,
+
+    "collect_metrics": true,
+    "log_level": "INFO"
+  }
+}
