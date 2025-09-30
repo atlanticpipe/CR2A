@@ -7,19 +7,19 @@
     "clause_discovery": {
       "fdot_substitution_rule": "if contract_silent_or_weaker → insert FDOT spec text",
       "non_fdot_missing_rule": "Not present in contract",
-      "search_modes": ["exact", "fuzzy", "contextual"], // enforced internally
-      "repeat_discovery_required": true // re-check scope after each clause
+      "search_modes": ["exact", "fuzzy", "contextual"],
+      "repeat_discovery_required": true
     },
 
     "classification": {
-      "route_misfits": true,   // misfit clauses are routed to correct section
-      "verify_headers": true,  // strict header match required
+      "route_misfits": true,
+      "verify_headers": true,
       "abort_on_mismatch": true
     },
 
     "redlining": {
-      "guidelines_doc_id": "file-SuN86exJDKidXCm3D1xZuX", // Redlining Guidelines Volume 4
-      "enforce_no_deviation": true, // cannot override guidance
+      "guidelines_doc_id": "file-SuN86exJDKidXCm3D1xZuX",
+      "enforce_no_deviation": true,
       "output_format": "inline textual recommendations"
     },
 
@@ -37,8 +37,8 @@
 
     "output_control": {
       "section_item_closing_line": "All applicable clauses for [Item #/Title] have been identified and analyzed.",
-      "require_strict_a_f_breakdown": true, // a–f breakdown enforced
-      "suppress_extra_text": true // no introductions/closings allowed
+      "require_strict_a_f_breakdown": true,
+      "suppress_extra_text": true
     },
 
     "supplemental": {
