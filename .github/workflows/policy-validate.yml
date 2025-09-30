@@ -1,52 +1,118 @@
-# This workflow is the starting point for our CI/CD pipeline.
-# It doesn’t enforce validation yet. For now it just proves that GitHub Actions is wired up.
+# ======================================================================
+# Policy Validate — repo smoke + integrity gates
+# - Proves CI is wired
+# - Cross-checks version lock ↔ checksums manifest
+# - (Optional) Enforces tag and sha256 if lock says to
+# ======================================================================
 
-name: Repo Smoke   # The display name you’ll see in the Actions tab
+name: Policy Validate
 
-on:                # When to trigger this workflow
-  push:            # 1. Trigger when code is pushed to the repo
-    branches: [ main ]  # Only on the "main" branch
-  pull_request:    # 2. Trigger when a pull request is opened/updated
-    branches: [ main ]  # Only PRs targeting "main"
+on:
+  push:
+    branches: [ main ]          # Run on pushes to main
+  pull_request:
+    branches: [ main ]          # And on PRs targeting main
 
-jobs:              # A workflow can have multiple jobs, we start with one
-  validate:        # Job name: "validate"
-    runs-on: ubuntu-latest   # Runs inside GitHub’s Ubuntu VM
+jobs:
+  validate:
+    runs-on: ubuntu-latest
 
-    steps:         # Steps inside the job
+    steps:
+      # 1) Checkout repo so we can read files
       - name: Checkout
         uses: actions/checkout@v4
-        # Pulls down the repository code into the runner so other steps can see the files
 
+      # 2) Install jq (we use it to parse JSON)
+      - name: Install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+
+      # 3) Quick tree for debug
       - name: Print repo tree (debug)
         run: |
-          echo "::group::TREE"   # Creates a collapsible log group called "TREE"
-          ls -la                 # List files in the root of the repo
+          echo "::group::TREE"
+          ls -la
           echo
-          echo "Recursive:"      
-          ls -R                  # Recursively list all files/folders
+          echo "Recursive:"
+          ls -R
           echo "::endgroup::"
 
+      # 4) Cross-check that every component path in version_lock exists in manifest
+      - name: Cross-check version_lock ↔ checksums_manifest (paths)
+        run: |
+          set -euo pipefail
+          LOCK="contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json"
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+
+          # Collect manifest paths to an array
+          mapfile -t MAN_PATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
+
+          # Verify each lock path is present in manifest paths
+          jq -r '.components[].path' "$LOCK" | while read -r P; do
+            if ! printf '%s\n' "${MAN_PATHS[@]}" | grep -Fx "$P" >/dev/null; then
+              echo "❌ Missing in checksums_manifest: $P" >&2
+              exit 1
+            fi
+          done
+
+          echo "✅ version_lock and checksums_manifest have matching paths."
+
+      # 5) If the lock says to enforce sha256, compare hashes component-by-component
+      - name: Enforce sha256 digests when enabled
+        run: |
+          set -euo pipefail
+          LOCK="contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json"
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+
+          ENFORCE=$(jq -r '.meta.enforce_sha256 // .enforcement.enforce_sha256 // false' "$LOCK")
+          if [ "$ENFORCE" != "true" ]; then
+            echo "ℹ️  meta.enforce_sha256=false — skipping digest enforcement."
+            exit 0
+          fi
+
+          # For each component in lock, find the same path in manifest and compare sha256
+          jq -c '.components[]' "$LOCK" | while read -r COMP; do
+            NAME=$(jq -r '.name'   <<<"$COMP")
+            PATHF=$(jq -r '.path'  <<<"$COMP")
+            LOCK_SHA=$(jq -r '.sha256 // ""' <<<"$COMP")
+
+            # Pull sha from manifest by path
+            MAN_SHA=$(jq -r --arg p "$PATHF" '.artifacts[] | select(.path == $p) | .sha256 // ""' "$MAN")
+
+            if [ -z "$LOCK_SHA" ] || [ -z "$MAN_SHA" ]; then
+              echo "❌ Missing sha256 for $NAME ($PATHF) — lock:'$LOCK_SHA' manifest:'$MAN_SHA'" >&2
+              exit 1
+            fi
+
+            if [ "$LOCK_SHA" != "$MAN_SHA" ]; then
+              echo "❌ sha256 mismatch for $NAME ($PATHF)" >&2
+              echo "   lock:     $LOCK_SHA" >&2
+              echo "   manifest: $MAN_SHA" >&2
+              exit 1
+            fi
+
+            echo "✅ $NAME digest OK"
+          done
+
+          echo "✅ All digests match (enforcement enabled)."
+
+      # 6) (Optional) Require bundle tag to be the expected value
+      - name: Verify bundle tag (optional)
+        env:
+          EXPECTED_TAG: "schemas@v1.0"      # <- update when you bump the bundle
+        run: |
+          set -euo pipefail
+          LOCK="contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json"
+          TAG=$(jq -r '.tag // ""' "$LOCK")
+          if [ -z "$TAG" ]; then
+            echo "❌ version_lock missing .tag" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "$EXPECTED_TAG" ]; then
+            echo "❌ version_lock tag '$TAG' != expected '$EXPECTED_TAG'" >&2
+            exit 1
+          fi
+          echo "✅ Bundle tag OK: $TAG"
+
+      # 7) Success marker so we get a clear green check when all gates pass
       - name: Success marker
-        run: echo "CI is live. We will tighten checks as files are added."
-        # This step ensures the workflow always exits successfully.
-        # Later we’ll replace this with real schema and checksum validation.
-# Validate that every component in version_lock has a matching entry in checksums manifest
-- name: Cross-check version_lock ↔ checksums_manifest
-  run: |
-    set -euo pipefail
-    LOCK="contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json"
-    MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
-
-    # Build a set of paths from the manifest
-    mapfile -t MAN_PATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
-
-    # For each component path in the lock, assert it exists in the manifest
-    jq -r '.components[].path' "$LOCK" | while read -r P; do
-      if ! printf '%s\n' "${MAN_PATHS[@]}" | grep -Fx "$P" >/dev/null; then
-        echo "Missing in checksums_manifest: $P" >&2
-        exit 1
-      fi
-    done
-
-    echo "version_lock and checksums_manifest are consistent."
+        run: echo "🎉 Policy validation passed."
