@@ -1,0 +1,66 @@
+{
+  // =====================================================================
+  // APS Contract Analysis — Checksums Manifest v1
+  // File: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
+  // Purpose: Records integrity metadata (hash + size) for every core file.
+  //          Used by CI and orchestrator to detect drift/tampering.
+  // =====================================================================
+
+  "manifest_version": "1.0",
+  "generated_at": "2025-09-30T00:00:00Z", // UTC ISO timestamp of generation
+
+  // Top-level digest of the entire manifest itself (excluding this field).
+  // Will be recomputed and inserted by CI or a helper script.
+  "manifest_sha256": "<to_be_filled_by_CI>",
+
+  "artifacts": [
+    {
+      "name": "rulebook_v1",
+      "path": "contract-analysis-policy-bundle/policy/rulebook_v1.yaml",
+      "size_bytes": 0,         // placeholder; CI will fill
+      "sha256": "<pending>"    // placeholder; CI will fill
+    },
+    {
+      "name": "output_schemas_v1",
+      "path": "contract-analysis-policy-bundle/schemas/output_schemas_v1.json",
+      "size_bytes": 0,
+      "sha256": "<pending>"
+    },
+    {
+      "name": "run_manifest_schema_v1",
+      "path": "contract-analysis-policy-bundle/schemas/run_manifest_schema_v1.json",
+      "size_bytes": 0,
+      "sha256": "<pending>"
+    },
+    {
+      "name": "api_schemas_v1",
+      "path": "contract-analysis-policy-bundle/schemas/api_schemas_v1.json",
+      "size_bytes": 0,
+      "sha256": "<pending>"
+    },
+    {
+      "name": "policy_rules_v1",
+      "path": "contract-analysis-policy-bundle/policy/policy_rules_v1.json",
+      "size_bytes": 0,
+      "sha256": "<pending>"
+    },
+    {
+      "name": "control_flags_v1",
+      "path": "contract-analysis-policy-bundle/policy/control_flags_v1.json",
+      "size_bytes": 0,
+      "sha256": "<pending>"
+    },
+    {
+      "name": "validation_rules_v1",
+      "path": "contract-analysis-policy-bundle/policy/validation_rules_v1.json",
+      "size_bytes": 0,
+      "sha256": "<pending>"
+    },
+    {
+      "name": "version_lock.schemas_v1",
+      "path": "contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json",
+      "size_bytes": 0,
+      "sha256": "<pending>"
+    }
+  ]
+}
