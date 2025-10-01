@@ -1,163 +1,143 @@
 # ======================================================================
-# Checksums Build v2 (clean slate)
-# Purpose: deterministically (re)generate the policy checksums manifest
-# - Discovers artifacts from the repo
-# - Computes per-file size_bytes + sha256
-# - Writes top-level manifest_sha256 (canonical, excluding the field)
-# - Commits changes only if manifest differs
+# APS Policy Registry — Checksums Builder
+# File: .github/workflows/checksums-build.yml
+#
+# Purpose:
+#   1) Ensure the checksums manifest file exists.
+#   2) For each artifact listed in that manifest, compute and write:
+#        - size_bytes
+#        - sha256 (of the artifact file)
+#   3) Compute the *top-level* manifest_sha256 over the manifest
+#      AFTER removing the manifest_sha256 field itself
+#      (canonical: jq -cS 'del(.manifest_sha256)' | sha256sum).
+#   4) Commit the updated manifest when changes are detected.
+#
+# Notes:
+#   - jq is used for safe JSON edits.
+#   - Keys are canonical-sorted (-S) where hashing to avoid drift.
+#   - This file is fully self-contained (no step outputs cross-wiring).
 # ======================================================================
 
 name: Checksums Build
 
-# Expose manual "Run workflow" and also run on relevant pushes
 on:
-  workflow_dispatch: {}                  # <-- ensures the green "Run workflow" button
-  push:
+  workflow_dispatch: {}         # Allow manual runs from Actions tab
+  push:                         # Also run automatically on changes to policy bundle
     branches: [ main ]
     paths:
       - "contract-analysis-policy-bundle/**"
       - ".github/workflows/checksums-build.yml"
 
-# Allow this workflow to commit the rebuilt manifest back to the repo
-permissions:
-  contents: write
-
-env:
-  # Single source of truth for the manifest path
-  MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
-
 jobs:
-  build:
+  build-checksums:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repository so we can read files and commit changes
-      - name: Checkout
+      # 1) Fetch repository contents
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Install jq for JSON processing
+      # 2) Install jq for JSON edits
       - name: Install jq
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y jq
 
-      # Rebuild manifest from scratch in a tmp file
-      - name: Build manifest (per-file size + sha256)
-        id: build
+      # 3) Ensure manifest file exists (bootstrap minimal structure if missing)
+      - name: Bootstrap checksums manifest if missing
         run: |
           set -euo pipefail
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          MAN_DIR="$(dirname "$MAN")"
+          mkdir -p "$MAN_DIR"
 
-          MAN="$MANIFEST_PATH"
-          TMP_DIR="$(mktemp -d)"
-          NEW="$TMP_DIR/checksums_manifest_v1.json"
-
-          # ------------------------------------------------------------------
-          # 1) Discover artifacts. Adjust the find predicates if your layout changes.
-          #    We include:
-          #      - policy/*.json and policy/*.yaml
-          #      - policy/schemas/*.json
-          # ------------------------------------------------------------------
-          mapfile -t FILES < <(
-            find contract-analysis-policy-bundle/policy -maxdepth 1 \
-                 \( -name '*.json' -o -name '*.yaml' -o -name '*.yml' \) -type f -print
-          )
-          mapfile -t SCHEMAS < <(
-            find contract-analysis-policy-bundle/policy/schemas -type f -name '*.json' -print 2>/dev/null || true
-          )
-          ALL=( "${FILES[@]}" "${SCHEMAS[@]}" )
-
-          # Fail fast if nothing was found (protect against mis-paths)
-          if [ "${#ALL[@]}" -eq 0 ]; then
-            echo "No artifacts discovered under contract-analysis-policy-bundle/policy/**" >&2
-            exit 1
+          if [ ! -f "$MAN" ]; then
+            echo "Bootstrapping new checksums manifest at $MAN"
+            cat >"$MAN" <<'JSON'
+            {
+              "manifest_version": "1.0",
+              "generated_at": "1970-01-01T00:00:00Z",
+              "manifest_sha256": "",
+              "artifacts": []
+            }
+JSON
+          else
+            echo "Found existing manifest at $MAN"
           fi
 
-          # ------------------------------------------------------------------
-          # 2) Compute per-file size + sha256 and emit line-delimited JSON
-          #    Each line: {"name": "...", "path": "...", "size_bytes": N, "sha256": "..."}
-          # ------------------------------------------------------------------
-          ART="${TMP_DIR}/artifacts.jsonl"
-          : > "$ART"
+          # Sanity check: valid JSON
+          jq -e . "$MAN" >/dev/null
 
-          for P in "${ALL[@]}"; do
-            # Normalize a display name: last path segment without extension
-            BN="$(basename "$P")"
-            NAME="${BN%.*}"
-
-            SIZE=$(stat -c%s "$P")
-            SHA=$(sha256sum "$P" | cut -d' ' -f1)
-
-            jq -n \
-              --arg name "$NAME" \
-              --arg path "$P" \
-              --argjson size "$SIZE" \
-              --arg sha "$SHA" \
-              '{name:$name, path:$path, size_bytes:$size, sha256:$sha}' >> "$ART"
-          done
-
-          # ------------------------------------------------------------------
-          # 3) Assemble the manifest (with empty manifest_sha256 for now)
-          # ------------------------------------------------------------------
-          jq -s \
-            --arg gen "$(date -u +%FT%TZ)" \
-            '{manifest_version:"1.0",
-              generated_at:$gen,
-              manifest_sha256:"",
-              artifacts: .}' \
-            "$ART" > "$NEW"
-
-          echo "NEW_MANIFEST=$NEW" >> "$GITHUB_OUTPUT"
-
-      # Compute canonical top-level manifest_sha256 and inject it
-      - name: Stamp top-level manifest_sha256 (canonical)
-        id: stamp
+      # 4) For each artifact listed, recompute size_bytes and sha256 of the file
+      - name: Update artifact size_bytes and sha256
         run: |
           set -euo pipefail
-          NEW="${{ steps.build.outputs.NEW_MANIFEST }}"
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
           TMP="$(mktemp)"
 
-          # Canonical hash = sha256( JSON sorted by keys, with manifest_sha256 removed )
-          TOP=$(jq -cS 'del(.manifest_sha256)' "$NEW" | sha256sum | cut -d' ' -f1)
+          # Validate JSON before edits
+          jq -e . "$MAN" >/dev/null
 
-          jq --arg h "$TOP" '.manifest_sha256 = $h' "$NEW" > "$TMP"
-          mv "$TMP" "$NEW"
+          # Iterate artifacts array and update fields for each listed path
+          jq -c '.artifacts[]' "$MAN" | while read -r ART; do
+            P=$(jq -r '.path'  <<<"$ART")   # absolute/relative path in repo
+            N=$(jq -r '.name'  <<<"$ART")   # human-friendly artifact name
 
-          echo "FINAL_MANIFEST=$NEW" >> "$GITHUB_OUTPUT"
-          echo "Computed manifest_sha256=$TOP"
+            if [ ! -f "$P" ]; then
+              echo "❌ Missing artifact file on disk: $P" >&2
+              exit 1
+            fi
 
-      # Show a diff for transparency
-      - name: Show proposed changes
+            SIZE=$(stat -c%s "$P")                  # byte size
+            SHA=$(sha256sum "$P" | cut -d' ' -f1)   # hex digest
+
+            # Write back to matching artifact entry by path
+            jq --arg p "$P" --arg sz "$SIZE" --arg sha "$SHA" '
+              (.artifacts[] | select(.path == $p) | .size_bytes) = ($sz | tonumber)
+              | (.artifacts[] | select(.path == $p) | .sha256)    = $sha
+            ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
+
+            echo "✅ $N  size_bytes=$SIZE  sha256=$SHA"
+          done
+
+      # 5) Compute canonical top-level manifest_sha256 (without the field itself)
+      - name: Write canonical top-level manifest_sha256
         run: |
           set -euo pipefail
-          NEW="${{ steps.stamp.outputs.FINAL_MANIFEST }}"
-          MAN="$MANIFEST_PATH"
-          echo "::group::Diff"
-          if [ -f "$MAN" ]; then
-            diff -u "$MAN" "$NEW" || true
-          else
-            echo "(No existing manifest; new file will be created.)"
-            cat "$NEW"
-          fi
+          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          TMP="$(mktemp)"
+
+          # Canonical calculation: remove manifest_sha256, sort keys, hash
+          CALC="$(jq -cS 'del(.manifest_sha256)' "$MAN" | sha256sum | cut -d' ' -f1)"
+          echo "Calculated manifest_sha256: $CALC"
+
+          # Update generated_at + set manifest_sha256
+          jq --arg hash "$CALC" '
+            .manifest_sha256 = $hash
+            | .generated_at = (now | todateiso8601)
+          ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
+
+      # 6) Show diff for transparency
+      - name: Show diff
+        run: |
+          set -euo pipefail
+          echo "::group::Diff for checksums_manifest_v1.json"
+          git diff -- contract-analysis-policy-bundle/policy/checksums_manifest_v1.json || true
           echo "::endgroup::"
 
-      # Commit only if the file is actually different
+      # 7) Commit and push if the manifest changed
       - name: Commit and push if changed
         run: |
           set -euo pipefail
-          NEW="${{ steps.stamp.outputs.FINAL_MANIFEST }}"
-          MAN="$MANIFEST_PATH"
+          FILE="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
 
-          # Replace working copy if different
-          if [ ! -f "$MAN" ] || ! diff -q "$MAN" "$NEW" >/dev/null; then
-            mkdir -p "$(dirname "$MAN")"
-            cp "$NEW" "$MAN"
-
+          if ! git diff --quiet -- "$FILE"; then
+            echo "Changes detected — committing updated manifest."
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-
-            git add "$MAN"
-            git commit -m "ci(checksums): rebuild checksums_manifest_v1.json"
+            git add "$FILE"
+            git commit -m "ci: rebuild checksums manifest (auto)"
             git push
           else
             echo "No changes to commit."
