@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
+    
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -28,7 +29,6 @@ jobs:
       - name: Bootstrap manifest if missing
         run: |
           set -euo pipefail
-          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
           MAN_DIR="$(dirname "$MAN")"
           mkdir -p "$MAN_DIR"
           if [ ! -f "$MAN" ]; then
@@ -46,7 +46,6 @@ jobs:
       - name: Update artifact size_bytes and sha256
         run: |
           set -euo pipefail
-          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
           TMP="$(mktemp)"
           jq -e . "$MAN" >/dev/null
 
@@ -68,43 +67,26 @@ jobs:
 
             echo "Updated $N size_bytes=$SIZE sha256=$SHA"
           done
-      - name: Write top-level manifest_sha256 (canonical key sort; field removed)
-        run: |
-          set -euo pipefail
-          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
-          TMP="$(mktemp)"
 
-      - name: Canonicalize manifest
+      - name: Canonicalize manifest & stamp top-level hash
         run: |
           set -euo pipefail
           TMP="$(mktemp)"
-          CANON=$(jq -S '
-            .artifacts |= (sort_by(.path))
-            | del(.manifest_sha256)
-          ' "$MAN")
-          CALC=$(echo "$CANON" | sha256sum | cut -d' ' -f1)
-          echo "canonical manifest_sha256 = $CALC"
+          CALC=$(printf '%s' "$CANON" | sha256sum | cut -d' ' -f1)
+          echo "canonical manifest_sha256 = $calc"
 
-          echo "$CANON" | jq --arg s "$CALC" '
+          printf '%s' "$CANON" | jq --arg s "$CALC" '
             .manifest_sha256 = $s
             | .generated_at = (now | todateiso8601)
-          ' > "$TMP"
-
+          ' > "STMP"
           mv "$TMP" "$MAN"
-          echo "manifest_sha256=$CALC"
-
-          # Stamp the manifest with the computed hash and fresh generated_at
-          jq --arg s "$CALC" '
-            .manifest_sha256 = $s
-            | .generated_at = (now | todateiso8601)
-          ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
 
       - name: Assert manifest exists
         shell: bash
         run: |
           set -euo pipefail
           if [[ -f "$MAN" ]]; then
-            echo "Manifest present at SMAN"
+            echo "Manifest present at $MAN"
           else
             echo "::error ::Manifest not found at $MAN"
             ls -la "$(dirname "$MAN")" || true
@@ -114,7 +96,7 @@ jobs:
       - name: Show diff
         run: |
           set -euo pipefail
-          git diff -- contract-analysis-policy-bundle/policy/checksums_manifest_v1.json || true
+          git diff -- "$MAN" || true
 
       - name: Commit and push if changed
         env:
@@ -123,9 +105,11 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com
+          
           # Rebase onto the remote branch to avoid non-fast-forward
           git fetch origin "${GITHUB_REF_NAME}"
           git pull --rebase origin "${GITHUB_REF_NAME}"
+          
           if ! git diff --quiet -- "$FILE"; then
             git add "$FILE"
             git commit -m "ci: rebuild checksums manifest auto)"
