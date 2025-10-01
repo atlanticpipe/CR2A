@@ -12,7 +12,7 @@ jobs:
   build-checksums:
     runs-on: ubuntu-latest
     env:
-      MAN: contract-analysis-policy-bundle/checksums_manifest_v1.json
+      MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
