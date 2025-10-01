@@ -52,8 +52,8 @@ jobs:
       - name: Check manifest presence & parseable
         run: |
           set -euo pipefail
-          test -f "$MANIFEST_PATH" || { echo "Missing $MANIFEST_PATH" >&2; exit 1; }
-          jq -e . "$MANIFEST_PATH" >/dev/null
+          test -f "$MAN" || { echo "Missing $MAN" >&2; exit 1; }
+          jq -e . "$MAN" >/dev/null
           echo "✅ Manifest is present and valid JSON"
 
       # --- Enforce canonical top-level manifest_sha256
@@ -65,11 +65,11 @@ jobs:
           CANON=$(jq -S '
             .artifacts |= (sort_by(.path))
             | del(.manifest_sha256)
-          ' "$MANIFEST_PATH")
+          ' "$MAN")
 
           # Compute hash exactly like the build workflow (no extra newline)
           CALC=$(printf '%s' "$CANON" | sha256sum | cut -d' ' -f1)
-          STORED=$(jq -r '.manifest_sha256' "$MANIFEST_PATH")
+          STORED=$(jq -r '.manifest_sha256' "$MAN")
 
           echo "Stored: $STORED"
           echo "Calc  : $CALC"
@@ -90,7 +90,7 @@ jobs:
           jq -e . "$LOCK_PATH" >/dev/null
 
           # Build a set of manifest paths (unique)
-          mapfile -t MANPATHS < <(jq -r '.artifacts[].path' "$MANIFEST_PATH" | sort -u)
+          mapfile -t MANPATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
 
           ERR=0
           while IFS= read -r P; do
@@ -131,7 +131,7 @@ jobs:
               echo "❌ sha256 mismatch for $NAME ($PATHF)  recorded=$HREC actual=$HACT" >&2
               ERR=1
             fi
-          done < <(jq -c '.artifacts[]' "$MANIFEST_PATH")
+          done < <(jq -c '.artifacts[]' "$MAN")
           test $ERR -eq 0 || exit 1
           echo "✅ All artifact sizes + hashes match"
 
@@ -140,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           # Build mapping path -> sha from manifest
-          MANMAP="$(jq -r '[.artifacts[] | {key:.path, val:.sha256}] | from_entries' "$MANIFEST_PATH")"
+          MANMAP="$(jq -r '[.artifacts[] | {key:.path, val:.sha256}] | from_entries' "$MAN")"
 
           ERR=0
           jq -c '.components[]' "$LOCK_PATH" | while read -r C; do
