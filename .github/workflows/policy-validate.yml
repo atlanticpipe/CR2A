@@ -14,31 +14,28 @@ name: Policy Validate
 on:
   workflow_dispatch: {}              # Manual "Run workflow" button
   push:
-    branches: [ main ]
-    paths:
-      - "contract-analysis-policy-bundle/**"
-      - ".github/workflows/policy-validate.yml"
-  pull_request:
-    branches: [ main ]
-    paths:
-      - "contract-analysis-policy-bundle/**"
-      - ".github/workflows/policy-validate.yml"
+    branches: [ main, Working ]
+  workflow_run:
+    workflows: ["Checksums Build"]
+    types: [completed]
 
 permissions:
   contents: read
 
-env:
-  MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
-  LOCK_PATH:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
-
 jobs:
   validate:
+    IF: >
+      github.event_name != 'workflow_run' ||
+      github.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
       # --- Checkout repo so we can read files
-      - name: Checkout
+      - name: Checkout repo (correct SHA)
         uses: actions/checkout@v4
+        with:
+          # For workflow_run, validate the exact commit that triggered Checksums Build
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       # --- Install jq for JSON processing
       - name: Install jq
@@ -49,30 +46,31 @@ jobs:
 
       # --- Sanity: manifest exists and parses
       - name: Check manifest presence & parseable
+        env:
+          MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
         run: |
           set -euo pipefail
-          test -f "$MANIFEST_PATH" || { echo "Missing $MANIFEST_PATH" >&2; exit 1; }
+          test -f "$MANIFEST_PATH"
           jq -e . "$MANIFEST_PATH" >/dev/null
-          echo "✅ Manifest is present and valid JSON"
 
       # --- Enforce canonical top-level manifest_sha256
       #     Recompute sha256 over the manifest with keys sorted and field removed.
       - name: Enforce top-level manifest_sha256 (canonical)
+        env:
+          MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
         run: |
           set -euo pipefail
-          # Produce the conocalized JSON (keys sorted; artifacts sorted; manifest_sha256 removed)
-          CANON=$(jq -cS '
+          # Canonicalize XACTLY like the build job (no -c; sort keys; sort artifacts; drop field)
+          CANON=$(jq -S '
             .artifacts |= (sort_by(.path))
             | del(.manifest_sha256)
-          ' "$MAN")
-
+          ' "$MANIFEST_PATH")
           # Compute hash exactly like the build workflow (no extra newline)
           CALC=$(printf '%s' "$CANON" | sha256sum | cut -d; ; -f1)
-
-          echo "Stored: $(jq -r '.manifest_sha256' "$MAN")"
+          STORED=$(jq -r 'manifest_sha256' "$MANIFEST_PATH")
+          echo "Stored: $STORED"
           echo "Calc  : $CALC"
-
-          test "$(jq -r '.manifest_sha256' "$MAN")" = "$CALC"
+          test "$STORED" = "$CALC"
 
           if [ -z "$STORED" ] || [ "$STORED" = "null" ]; then
             echo "❌ manifest_sha256 is empty" >&2
