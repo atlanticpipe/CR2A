@@ -3,10 +3,9 @@ name: Checksums Build
 on:
   workflow_dispatch: {}
   push:
+    branches: [ main, branch ]
+  pull requests:
     branches: [ main ]
-    paths:
-      - "contract-analysis-policy-bundle/**"
-      - ".github/workflows/checksums-build.yml"
 
 jobs:
   build-checksums:
