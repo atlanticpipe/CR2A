@@ -1,13 +1,20 @@
 # ======================================================================
 # Policy Validate (strict)
+# Validates the policy bundle on every push / PR and on-demand.
+# Gates enforced:
+# 1) checksums_manifest_v1.json is valid JSON and canonical top hash matches
+# 2) Every artifact path in version_lock.schemas_v1.json exists in manifest
+# 3) Each artifact's recorded sha256 and size_bytes match the actual file
+# 4) If version_lock carries sha256 for a path, it must equal manifest value
 # ======================================================================
 
 name: Policy Validate
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch: {}              # Manual "Run workflow" button
   push:
     branches: [ main, Working ]
+  # Auto-run after Checksums Build completes
   workflow_run:
     workflows: ["Checksums Build"]
     types: [completed]
@@ -21,31 +28,36 @@ env:
 
 jobs:
   validate:
-    # Only run after Checksums Build if it SUCCEEDED; always run for push/dispatch
     if: >
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
+      # --- Checkout repo so we can read files
       - name: Checkout repo (correct SHA)
         uses: actions/checkout@v4
         with:
+          # For workflow_run, validate the exact commit that triggered Checksums Build
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
+      # --- Install jq for JSON processing
       - name: Install jq
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y jq
 
+      # --- Sanity: manifest exists and parses
       - name: Check manifest presence & parseable
         run: |
           set -euo pipefail
-          test -f "$MANIFEST_PATH"
+          test -f "$MANIFEST_PATH" || { echo "Missing $MANIFEST_PATH" >&2; exit 1; }
           jq -e . "$MANIFEST_PATH" >/dev/null
           echo "✅ Manifest is present and valid JSON"
 
+      # --- Enforce canonical top-level manifest_sha256
+      #     Recompute sha256 over the manifest with keys sorted and field removed.
       - name: Enforce top-level manifest_sha256 (canonical)
         run: |
           set -euo pipefail
@@ -55,7 +67,7 @@ jobs:
             | del(.manifest_sha256)
           ' "$MANIFEST_PATH")
 
-          # Compute hash with no extra newline
+          # Compute hash exactly like the build workflow (no extra newline)
           CALC=$(printf '%s' "$CANON" | sha256sum | cut -d' ' -f1)
           STORED=$(jq -r '.manifest_sha256' "$MANIFEST_PATH")
 
@@ -63,3 +75,89 @@ jobs:
           echo "Calc  : $CALC"
 
           if [ -z "$STORED" ] || [ "$STORED" = "null" ]; then
+            echo "❌ manifest_sha256 is empty" >&2
+            exit 1
+          fi
+
+          test "$STORED" = "$CALC" || { echo "❌ Top-level manifest_sha256 mismatch" >&2; exit 1; }
+          echo "✅ Top-level manifest_sha256 ok"
+
+      # --- Cross-check that every locked path is represented in the manifest
+      - name: Cross-check version_lock ↔ checksums_manifest (paths)
+        run: |
+          set -euo pipefail
+          test -f "$LOCK_PATH" || { echo "Missing $LOCK_PATH" >&2; exit 1; }
+          jq -e . "$LOCK_PATH" >/dev/null
+
+          # Build a set of manifest paths (unique)
+          mapfile -t MANPATHS < <(jq -r '.artifacts[].path' "$MANIFEST_PATH" | sort -u)
+
+          ERR=0
+          while IFS= read -r P; do
+            if ! printf '%s\n' "${MANPATHS[@]}" | grep -Fx -- "$P" >/dev/null; then
+              echo "❌ Locked component missing in manifest: $P" >&2
+              ERR=1
+            fi
+          done < <(jq -r '.components[].path' "$LOCK_PATH")
+
+          test $ERR -eq 0 || exit 1
+          echo "✅ All locked paths are present in manifest"
+
+      # --- Verify each artifact’s recorded sha256 and size_bytes match the file on disk
+      - name: Enforce per-artifact sha256 and size_bytes
+        run: |
+          set -euo pipefail
+          ERR=0
+          while read -r ART; do
+            NAME=$(jq -r '.name'       <<<"$ART")
+            PATHF=$(jq -r '.path'       <<<"$ART")
+            SREC=$(jq -r '.size_bytes'  <<<"$ART")
+            HREC=$(jq -r '.sha256'      <<<"$ART")
+
+            if [ ! -f "$PATHF" ]; then
+              echo "❌ Missing file: $PATHF (artifact=$NAME)" >&2
+              ERR=1
+              continue
+            fi
+
+            SACT=$(stat -c%s "$PATHF")
+            HACT=$(sha256sum "$PATHF" | cut -d' ' -f1)
+
+            if [ "$SREC" != "$SACT" ]; then
+              echo "❌ size_bytes mismatch for $NAME ($PATHF)  recorded=$SREC actual=$SACT" >&2
+              ERR=1
+            fi
+            if [ "$HREC" != "$HACT" ]; then
+              echo "❌ sha256 mismatch for $NAME ($PATHF)  recorded=$HREC actual=$HACT" >&2
+              ERR=1
+            fi
+          done < <(jq -c '.artifacts[]' "$MANIFEST_PATH")
+          test $ERR -eq 0 || exit 1
+          echo "✅ All artifact sizes + hashes match"
+
+      # --- If version_lock specifies sha256 for any path, it must equal the manifest value
+      - name: Enforce version_lock sha256 ⇆ manifest sha256 (when provided)
+        run: |
+          set -euo pipefail
+          # Build mapping path -> sha from manifest
+          MANMAP="$(jq -r '[.artifacts[] | {key:.path, val:.sha256}] | from_entries' "$MANIFEST_PATH")"
+
+          ERR=0
+          jq -c '.components[]' "$LOCK_PATH" | while read -r C; do
+            P=$(jq -r '.path' <<<"$C")
+            HSPEC=$(jq -r '.sha256 // empty' <<<"$C")  # empty if not provided
+            test -z "$HSPEC" && continue               # skip when lock didn’t specify a hash
+
+            HMAN=$(jq -r --arg p "$P" '.[$p] // empty' <<<"$MANMAP")
+            if [ -z "$HMAN" ]; then
+              echo "❌ path not found in manifest when comparing hash: $P" >&2
+              ERR=1
+              continue
+            fi
+            if [ "$HSPEC" != "$HMAN" ]; then
+              echo "❌ version_lock sha256 != manifest sha256 for $P  lock=$HSPEC manifest=$HMAN" >&2
+              ERR=1
+            fi
+          done
+          test $ERR -eq 0 || exit 1
+          echo "✅ version_lock sha256 values (when provided) match manifest"
