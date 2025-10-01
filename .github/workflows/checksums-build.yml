@@ -76,8 +76,8 @@ jobs:
             .artifacts |= (sort_by(.path))
             | del(.manifest_sha256)
           ' "$MAN")
-    CALC=$(echo "$CANON" | sha256sum | cut -d' ' -f1)
-    echo "canonical manifest_sha256 = $CALC"
+      CALC=$(echo "$CANON" | sha256sum | cut -d' ' -f1)
+      echo "canonical manifest_sha256 = $CALC"
 
     # Write back manifest with updated hash + generated_at
     echo "$CANON" | jq --arg s "$CALC" '
