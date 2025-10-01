@@ -1,7 +1,7 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2025-10-01T11:21:08Z",
-  "manifest_sha256": "27e3b5e3eaf5b81b5d050aab1b4f92c7c1eb2c85e5dc89bfc773d769ecc572fe",
+  "generated_at": "2025-10-01T11:32:59Z",
+  "manifest_sha256": "7a2e31211266e6ea5b04e2635d7d3bff9096ae014b96ba4de5021ffd3acde41d",
   "artifacts": [
     {
       "name": "validation_rules_v1",
@@ -30,32 +30,14 @@
     {
       "name": "checksums_manifest_v1",
       "path": "contract-analysis-policy-bundle/policy/checksums_manifest_v1.json",
-      "size_bytes": 1449,
-      "sha256": "36b26c3007b36a56752aae1c830f9d6f4516f9dc80e6b08330db38c535424b9a"
+      "size_bytes": 2248,
+      "sha256": "ff6661a8aa0d044e78f061ddf6a460235bb74a47bc20752c5d62eb0a8562aa56"
     },
     {
       "name": "rulebook_v1",
       "path": "contract-analysis-policy-bundle/policy/rulebook_v1.yaml",
       "size_bytes": 2277,
       "sha256": "34cfcfd64d1c384a043336fb105e7ae6aa5d3d07920f08e0254346a5f0e3f196"
-    },
-    {
-    "name": "output_schemas_v1",     // human-friendly key
-    "path": "contract-analysis-policy-bundle/schemas/output_schemas_v1.json", // exact path
-    "size_bytes": 0,                 // placeholder, will be filled by build workflow
-    "sha256": ""                     // placeholder, will be filled by build workflow
-  },
-  {
-    "name": "run_manifest_schema_v1",
-    "path": "contract-analysis-policy-bundle/schemas/run_manifest_schema_v1.json",
-    "size_bytes": 0,
-    "sha256": ""
-  },
-  {
-  "name": "api_schemas_v1",
-  "path": "contract-analysis-policy-bundle/schemas/api_schemas_v1.json",
-  "size_bytes": 0,
-  "sha256": ""
-}
+    }
   ]
 }
