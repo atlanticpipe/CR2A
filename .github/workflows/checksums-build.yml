@@ -69,15 +69,23 @@ jobs:
             echo "Updated $N size_bytes=$SIZE sha256=$SHA"
           done
 
-      - name: Write top-level manifest_sha256 (canonical key sort)
+      - name: Write top-level manifest_sha256 (canonical)
         run: |
           set -euo pipefail
           MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
           TMP="$(mktemp)"
 
-          # Compute canonical hash over the manifest *excluding* .manifest_sha256
+          # Recompute the canonical hash **excluding** the manifest_sha256 field
           CALC="$(jq -cS 'del(.manifest_sha256)' "$MAN" | sha256sum | cut -d' ' -f1)"
-          echo "Calculated top-level manifest_sha256: $CALC"
+
+          # Write it back (and refresh generated_at)
+          jq --arg s "$CALC" '
+            .manifest_sha256 = $s
+            | .generated_at = (now | todateiso8601)
+          ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
+
+          echo "manifest_sha256=$CALC"
+
 
           # Stamp the manifest with the computed hash and fresh generated_at
           jq --arg s "$CALC" '
