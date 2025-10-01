@@ -106,7 +106,9 @@ jobs:
         run: |
           set -euo pipefail
           ERR=0
-          jq -c '.artifacts[]' "$MANIFEST_PATH" | while read -r ART; do
+
+          # NOTE: process substitution (< <(...)) keeps the loop in the current shell
+          while read -r ART; do
             NAME=$(jq -r '.name'       <<<"$ART")
             PATHF=$(jq -r '.path'       <<<"$ART")
             SREC=$(jq -r '.size_bytes'  <<<"$ART")
@@ -130,7 +132,9 @@ jobs:
               echo "❌ sha256 mismatch for $NAME ($PATHF)  recorded=$HREC actual=$HACT" >&2
               ERR=1
             fi
-          done
+          done < <(jq -c '.artifacts[]' "$MANIFEST_PATH")
+
+          test $ERR -eq 0 && echo "✅ All artifact sizes + hashes match" || exit 1
 
           # propagate failures
           test ${ERR:-0} -eq 0 && echo "✅ All artifact sizes + hashes match"
