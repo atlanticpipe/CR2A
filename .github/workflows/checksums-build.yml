@@ -99,7 +99,7 @@ jobs:
 
       - name: Assert manifest exists
         run: |
-          test -f :$MAN" || { echo "::error ::Manifest not found at $MAN"; exit 1; }
+          test -f $MAN" || { echo "::error ::Manifest not found at $MAN"; exit 1; }
           
       - name: Show diff
         run: |
