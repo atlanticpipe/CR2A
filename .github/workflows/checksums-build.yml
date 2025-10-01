@@ -1,28 +1,12 @@
-# ======================================================================
-# APS Policy Registry — Checksums Builder
-# File: .github/workflows/checksums-build.yml
-#
-# Purpose:
-#   1) Ensure the checksums manifest file exists.
-#   2) For each artifact listed in that manifest, compute and write:
-#        - size_bytes
-#        - sha256 (of the artifact file)
-#   3) Compute the *top-level* manifest_sha256 over the manifest
-#      AFTER removing the manifest_sha256 field itself
-#      (canonical: jq -cS 'del(.manifest_sha256)' | sha256sum).
-#   4) Commit the updated manifest when changes are detected.
-#
-# Notes:
-#   - jq is used for safe JSON edits.
-#   - Keys are canonical-sorted (-S) where hashing to avoid drift.
-#   - This file is fully self-contained (no step outputs cross-wiring).
-# ======================================================================
+# APS Policy Registry — Checksums Builder (safe YAML)
+# Computes per-artifact sha256 + size, then writes canonical manifest_sha256.
+# Commits the manifest only if changed.
 
 name: Checksums Build
 
 on:
-  workflow_dispatch: {}         # Allow manual runs from Actions tab
-  push:                         # Also run automatically on changes to policy bundle
+  workflow_dispatch: {}
+  push:
     branches: [ main ]
     paths:
       - "contract-analysis-policy-bundle/**"
@@ -31,109 +15,83 @@ on:
 jobs:
   build-checksums:
     runs-on: ubuntu-latest
-
     steps:
-      # 1) Fetch repository contents
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 2) Install jq for JSON edits
       - name: Install jq
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y jq
 
-      # 3) Ensure manifest file exists (bootstrap minimal structure if missing)
-      - name: Bootstrap checksums manifest if missing
+      - name: Bootstrap manifest if missing
         run: |
           set -euo pipefail
           MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
           MAN_DIR="$(dirname "$MAN")"
           mkdir -p "$MAN_DIR"
-
           if [ ! -f "$MAN" ]; then
-            echo "Bootstrapping new checksums manifest at $MAN"
-            cat >"$MAN" <<'JSON'
-            {
-              "manifest_version": "1.0",
-              "generated_at": "1970-01-01T00:00:00Z",
-              "manifest_sha256": "",
-              "artifacts": []
-            }
-JSON
-          else
-            echo "Found existing manifest at $MAN"
+            # Use printf instead of heredoc to avoid YAML/heredoc edge cases
+            printf '%s\n' \
+              '{' \
+              '  "manifest_version": "1.0",' \
+              '  "generated_at": "1970-01-01T00:00:00Z",' \
+              '  "manifest_sha256": "",' \
+              '  "artifacts": []' \
+              '}' >"$MAN"
           fi
-
-          # Sanity check: valid JSON
           jq -e . "$MAN" >/dev/null
 
-      # 4) For each artifact listed, recompute size_bytes and sha256 of the file
       - name: Update artifact size_bytes and sha256
         run: |
           set -euo pipefail
           MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
           TMP="$(mktemp)"
-
-          # Validate JSON before edits
           jq -e . "$MAN" >/dev/null
 
-          # Iterate artifacts array and update fields for each listed path
+          # Iterate listed artifacts and refresh their size/sha256
           jq -c '.artifacts[]' "$MAN" | while read -r ART; do
-            P=$(jq -r '.path'  <<<"$ART")   # absolute/relative path in repo
-            N=$(jq -r '.name'  <<<"$ART")   # human-friendly artifact name
-
+            P="$(jq -r '.path'  <<<"$ART")"
+            N="$(jq -r '.name'  <<<"$ART")"
             if [ ! -f "$P" ]; then
-              echo "❌ Missing artifact file on disk: $P" >&2
+              echo "Missing artifact file: $P" >&2
               exit 1
             fi
+            SIZE="$(stat -c%s "$P")"
+            SHA="$(sha256sum "$P" | cut -d' ' -f1)"
 
-            SIZE=$(stat -c%s "$P")                  # byte size
-            SHA=$(sha256sum "$P" | cut -d' ' -f1)   # hex digest
-
-            # Write back to matching artifact entry by path
             jq --arg p "$P" --arg sz "$SIZE" --arg sha "$SHA" '
               (.artifacts[] | select(.path == $p) | .size_bytes) = ($sz | tonumber)
               | (.artifacts[] | select(.path == $p) | .sha256)    = $sha
             ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
 
-            echo "✅ $N  size_bytes=$SIZE  sha256=$SHA"
+            echo "Updated $N size_bytes=$SIZE sha256=$SHA"
           done
 
-      # 5) Compute canonical top-level manifest_sha256 (without the field itself)
       - name: Write canonical top-level manifest_sha256
         run: |
           set -euo pipefail
           MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
           TMP="$(mktemp)"
-
-          # Canonical calculation: remove manifest_sha256, sort keys, hash
+          # Canonical hash over manifest with the field removed
           CALC="$(jq -cS 'del(.manifest_sha256)' "$MAN" | sha256sum | cut -d' ' -f1)"
-          echo "Calculated manifest_sha256: $CALC"
-
-          # Update generated_at + set manifest_sha256
           jq --arg hash "$CALC" '
             .manifest_sha256 = $hash
             | .generated_at = (now | todateiso8601)
           ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
+          echo "manifest_sha256=$CALC"
 
-      # 6) Show diff for transparency
       - name: Show diff
         run: |
           set -euo pipefail
-          echo "::group::Diff for checksums_manifest_v1.json"
           git diff -- contract-analysis-policy-bundle/policy/checksums_manifest_v1.json || true
-          echo "::endgroup::"
 
-      # 7) Commit and push if the manifest changed
       - name: Commit and push if changed
         run: |
           set -euo pipefail
           FILE="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
-
           if ! git diff --quiet -- "$FILE"; then
-            echo "Changes detected — committing updated manifest."
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add "$FILE"
