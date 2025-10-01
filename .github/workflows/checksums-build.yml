@@ -74,6 +74,8 @@ jobs:
 
       - name: Canonicalize manifest
         run: |
+          set -euo pipefail
+          TMP="$(mktemp)"
           CANON=$(jq -S '
             .artifacts |= (sort_by(.path))
             | del(.manifest_sha256)
