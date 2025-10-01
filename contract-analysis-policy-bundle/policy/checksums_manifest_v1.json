@@ -1,7 +1,7 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2025-10-01T12:11:10Z",
-  "manifest_sha256": "42ee86bc9521de823d924e5c155119d8050862085a2bffb3f7a07f451445435a",
+  "generated_at": "2025-10-01T12:19:37Z",
+  "manifest_sha256": "ada8588aabc830c451d568f063efc52c053edc547314627a77be6666da31cbee",
   "artifacts": [
     {
       "name": "validation_rules_v1",
@@ -31,7 +31,7 @@
       "name": "checksums_manifest_v1",
       "path": "contract-analysis-policy-bundle/policy/checksums_manifest_v1.json",
       "size_bytes": 1604,
-      "sha256": "191646e6872116ba00717864bdbbea48068516ed0a129c793895a55e11f73b4b"
+      "sha256": "1d1a456fc43850ac8c085cce357623dbfdd68b96317ed605893197795aa6709c"
     },
     {
       "name": "rulebook_v1",
