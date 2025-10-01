@@ -76,3 +76,5 @@ def _first_text(output: Any) -> str | None:
     return output[0]["content"][0]["text"]
   except Exception:
     return None
+
+add OpenAI client with structured-outputs + fallback
