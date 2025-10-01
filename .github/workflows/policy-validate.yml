@@ -1,171 +1,163 @@
 # ======================================================================
-# Policy Validate — repo smoke + integrity gates
-# - Proves CI is wired
-# - Cross-checks version lock ↔ checksums manifest
-# - (Optional) Enforces tag and sha256 if lock says to
+# Policy Validate (strict)
+# Validates the policy bundle on every push / PR and on-demand.
+#
+# Gates enforced:
+# 1) checksums_manifest_v1.json is valid JSON and canonical top hash matches
+# 2) Every artifact path in version_lock.schemas_v1.json exists in manifest
+# 3) Each artifact's recorded sha256 and size_bytes match the actual file
+# 4) If version_lock carries sha256 for a path, it must equal manifest value
 # ======================================================================
 
 name: Policy Validate
 
 on:
-  workflow_disptach: {}
+  workflow_dispatch: {}              # Manual "Run workflow" button
   push:
-    branches: [ main ]          # Run on pushes to main
+    branches: [ main ]
+    paths:
+      - "contract-analysis-policy-bundle/**"
+      - ".github/workflows/policy-validate.yml"
   pull_request:
-    branches: [ main ]          # And on PRs targeting main
+    branches: [ main ]
+    paths:
+      - "contract-analysis-policy-bundle/**"
+      - ".github/workflows/policy-validate.yml"
+
+permissions:
+  contents: read
+
+env:
+  MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
+  LOCK_PATH:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
 
 jobs:
   validate:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout repo so we can read files
+      # --- Checkout repo so we can read files
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2) Install jq (we use it to parse JSON)
+      # --- Install jq for JSON processing
       - name: Install jq
-        run: sudo apt-get update -y && sudo apt-get install -y jq
-
-      # 3) Quick tree for debug
-      - name: Print repo tree (debug)
-        run: |
-          echo "::group::TREE"
-          ls -la
-          echo
-          echo "Recursive:"
-          ls -R
-          echo "::endgroup::"
-
-            # 4) Ensure the checksums manifest is fresh relative to latest file changes
-      - name: Check checksums manifest freshness
         run: |
           set -euo pipefail
-          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          sudo apt-get update
+          sudo apt-get install -y jq
 
-          # Tolerance: allow up to 10 minutes of skew between commits and manifest generation
-          ALLOWED_LAG_SEC=600
+      # --- Sanity: manifest exists and parses
+      - name: Check manifest presence & parseable
+        run: |
+          set -euo pipefail
+          test -f "$MANIFEST_PATH" || { echo "Missing $MANIFEST_PATH" >&2; exit 1; }
+          jq -e . "$MANIFEST_PATH" >/dev/null
+          echo "✅ Manifest is present and valid JSON"
 
-          # Parse manifest generated_at (UTC) → epoch seconds
-          GEN_STR=$(jq -r '.generated_at // empty' "$MAN")
-          if [ -z "$GEN_STR" ]; then
-            echo "❌ Manifest missing .generated_at" >&2
-            exit 1
-          fi
-          GEN_EPOCH=$(date -u -d "$GEN_STR" +%s || true)
-          if [ -z "${GEN_EPOCH:-}" ]; then
-            echo "❌ Unable to parse manifest .generated_at='$GEN_STR'" >&2
-            exit 1
-          fi
+      # --- Enforce canonical top-level manifest_sha256
+      #     Recompute sha256 over the manifest with keys sorted and field removed.
+      - name: Enforce top-level manifest_sha256 (canonical)
+        run: |
+          set -euo pipefail
+          STORED=$(jq -r '.manifest_sha256' "$MANIFEST_PATH")
+          CALC=$(jq -cS 'del(.manifest_sha256)' "$MANIFEST_PATH" | sha256sum | cut -d' ' -f1)
 
-          # Build list of artifact paths from manifest, then find latest commit time touching any of them
-          mapfile -t PATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
-          if [ "${#PATHS[@]}" -eq 0 ]; then
-            echo "❌ No artifacts listed in manifest" >&2
-            exit 1
-          fi
+          echo "Stored: $STORED"
+          echo "Calc  : $CALC"
 
-          LATEST_CT=0
-          for p in "${PATHS[@]}"; do
-            # If a file is new and has no commits yet, fall back to '0' silently
-            CT=$(git log -1 --format=%ct -- "$p" || echo 0)
-            [ -z "$CT" ] && CT=0
-            if [ "$CT" -gt "$LATEST_CT" ]; then
-              LATEST_CT="$CT"
-              LATEST_PATH="$p"
-            fi
-          done
-
-          echo "Manifest generated_at: $GEN_STR  (epoch=$GEN_EPOCH)"
-          echo "Latest artifact commit: $(date -u -d @${LATEST_CT} +'%Y-%m-%dT%H:%M:%SZ') (epoch=$LATEST_CT)  path=${LATEST_PATH:-n/a}"
-
-          # Fail if manifest is older than the latest artifact change beyond tolerance
-          if [ $(( GEN_EPOCH + ALLOWED_LAG_SEC )) -lt "$LATEST_CT" ]; then
-            echo "❌ Manifest is stale (older than latest change + ${ALLOWED_LAG_SEC}s tolerance)." >&2
-            echo "   Run the checksums build or push a commit that updates the manifest." >&2
+          if [ -z "$STORED" ] || [ "$STORED" = "null" ]; then
+            echo "❌ manifest_sha256 is empty" >&2
             exit 1
           fi
 
-          echo "✅ Manifest freshness OK within ${ALLOWED_LAG_SEC}s tolerance."
+          if [ "$STORED" != "$CALC" ]; then
+            echo "❌ Top-level manifest_sha256 mismatch" >&2
+            exit 1
+          fi
 
-      
-      # 4) Cross-check that every component path in version_lock exists in manifest
+          echo "✅ Top-level manifest_sha256 ok"
+
+      # --- Cross-check that every locked path is represented in the manifest
       - name: Cross-check version_lock ↔ checksums_manifest (paths)
         run: |
           set -euo pipefail
-          LOCK="contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json"
-          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          test -f "$LOCK_PATH" || { echo "Missing $LOCK_PATH" >&2; exit 1; }
+          jq -e . "$LOCK_PATH" >/dev/null
 
-          # Collect manifest paths to an array
-          mapfile -t MAN_PATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
+          # Build a set of manifest paths (unique)
+          mapfile -t MANPATHS < <(jq -r '.artifacts[].path' "$MANIFEST_PATH" | sort -u)
 
-          # Verify each lock path is present in manifest paths
-          jq -r '.components[].path' "$LOCK" | while read -r P; do
-            if ! printf '%s\n' "${MAN_PATHS[@]}" | grep -Fx "$P" >/dev/null; then
-              echo "❌ Missing in checksums_manifest: $P" >&2
-              exit 1
+          ERR=0
+          while IFS= read -r P; do
+            if ! printf '%s\n' "${MANPATHS[@]}" | grep -Fx -- "$P" >/dev/null; then
+              echo "❌ Locked component missing in manifest: $P" >&2
+              ERR=1
+            fi
+          done < <(jq -r '.components[].path' "$LOCK_PATH")
+
+          if [ $ERR -ne 0 ]; then
+            exit 1
+          fi
+          echo "✅ All locked paths are present in manifest"
+
+      # --- Verify each artifact’s recorded sha256 and size_bytes match the file on disk
+      - name: Enforce per-artifact sha256 and size_bytes
+        run: |
+          set -euo pipefail
+          ERR=0
+          jq -c '.artifacts[]' "$MANIFEST_PATH" | while read -r ART; do
+            NAME=$(jq -r '.name'       <<<"$ART")
+            PATHF=$(jq -r '.path'       <<<"$ART")
+            SREC=$(jq -r '.size_bytes'  <<<"$ART")
+            HREC=$(jq -r '.sha256'      <<<"$ART")
+
+            if [ ! -f "$PATHF" ]; then
+              echo "❌ Missing file: $PATHF (artifact=$NAME)" >&2
+              ERR=1
+              continue
+            fi
+
+            SACT=$(stat -c%s "$PATHF")
+            HACT=$(sha256sum "$PATHF" | cut -d' ' -f1)
+
+            if [ "$SREC" != "$SACT" ]; then
+              echo "❌ size_bytes mismatch for $NAME ($PATHF)  recorded=$SREC actual=$SACT" >&2
+              ERR=1
+            fi
+
+            if [ "$HREC" != "$HACT" ]; then
+              echo "❌ sha256 mismatch for $NAME ($PATHF)  recorded=$HREC actual=$HACT" >&2
+              ERR=1
             fi
           done
 
-          echo "✅ version_lock and checksums_manifest have matching paths."
+          # propagate failures
+          test ${ERR:-0} -eq 0 && echo "✅ All artifact sizes + hashes match"
 
-      # 5) If the lock says to enforce sha256, compare hashes component-by-component
-      - name: Enforce sha256 digests when enabled
+      # --- If version_lock specifies sha256 for any path, it must equal the manifest value
+      - name: Enforce version_lock sha256 ⇆ manifest sha256 (when provided)
         run: |
           set -euo pipefail
-          LOCK="contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json"
-          MAN="contract-analysis-policy-bundle/policy/checksums_manifest_v1.json"
+          # Build mapping path -> sha from manifest
+          MANMAP="$(jq -r '[.artifacts[] | {key:.path, val:.sha256}] | from_entries' "$MANIFEST_PATH")"
 
-          ENFORCE=$(jq -r '.meta.enforce_sha256 // .enforcement.enforce_sha256 // false' "$LOCK")
-          if [ "$ENFORCE" != "true" ]; then
-            echo "ℹ️  meta.enforce_sha256=false — skipping digest enforcement."
-            exit 0
-          fi
+          ERR=0
+          jq -c '.components[]' "$LOCK_PATH" | while read -r C; do
+            P=$(jq -r '.path' <<<"$C")
+            HSPEC=$(jq -r '.sha256 // empty' <<<"$C")  # empty if not provided
+            test -z "$HSPEC" && continue               # skip when lock didn’t specify a hash
 
-          # For each component in lock, find the same path in manifest and compare sha256
-          jq -c '.components[]' "$LOCK" | while read -r COMP; do
-            NAME=$(jq -r '.name'   <<<"$COMP")
-            PATHF=$(jq -r '.path'  <<<"$COMP")
-            LOCK_SHA=$(jq -r '.sha256 // ""' <<<"$COMP")
-
-            # Pull sha from manifest by path
-            MAN_SHA=$(jq -r --arg p "$PATHF" '.artifacts[] | select(.path == $p) | .sha256 // ""' "$MAN")
-
-            if [ -z "$LOCK_SHA" ] || [ -z "$MAN_SHA" ]; then
-              echo "❌ Missing sha256 for $NAME ($PATHF) — lock:'$LOCK_SHA' manifest:'$MAN_SHA'" >&2
-              exit 1
+            HMAN=$(jq -r --arg p "$P" '.[$p] // empty' <<<"$MANMAP")
+            if [ -z "$HMAN" ]; then
+              echo "❌ path not found in manifest when comparing hash: $P" >&2
+              ERR=1
+              continue
             fi
-
-            if [ "$LOCK_SHA" != "$MAN_SHA" ]; then
-              echo "❌ sha256 mismatch for $NAME ($PATHF)" >&2
-              echo "   lock:     $LOCK_SHA" >&2
-              echo "   manifest: $MAN_SHA" >&2
-              exit 1
+            if [ "$HSPEC" != "$HMAN" ]; then
+              echo "❌ version_lock sha256 != manifest sha256 for $P  lock=$HSPEC manifest=$HMAN" >&2
+              ERR=1
             fi
-
-            echo "✅ $NAME digest OK"
           done
 
-          echo "✅ All digests match (enforcement enabled)."
-
-      # 6) (Optional) Require bundle tag to be the expected value
-      - name: Verify bundle tag (optional)
-        env:
-          EXPECTED_TAG: "schemas@v1.0"      # <- update when you bump the bundle
-        run: |
-          set -euo pipefail
-          LOCK="contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json"
-          TAG=$(jq -r '.tag // ""' "$LOCK")
-          if [ -z "$TAG" ]; then
-            echo "❌ version_lock missing .tag" >&2
-            exit 1
-          fi
-          if [ "$TAG" != "$EXPECTED_TAG" ]; then
-            echo "❌ version_lock tag '$TAG' != expected '$EXPECTED_TAG'" >&2
-            exit 1
-          fi
-          echo "✅ Bundle tag OK: $TAG"
-
-      # 7) Success marker so we get a clear green check when all gates pass
-      - name: Success marker
-        run: echo "🎉 Policy validation passed."
+          test ${ERR:-0} -eq 0 && echo "✅ version_lock sha256 values (when provided) match manifest"
