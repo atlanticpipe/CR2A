@@ -3,7 +3,7 @@
     {
       "name": "checksums_manifest_v1",
       "path": "contract-analysis-policy-bundle/policy/checksums_manifest_v1.json",
-      "sha256": "bdfe4294d18aed9b6f7e7531aa3d853ca7d31cc165cac054e601168d61948b82",
+      "sha256": "e20174e0453a166ceb05824e8aeaf044e7fa3782f9992ada1d00d63bbf979edb",
       "size_bytes": 1604
     },
     {
@@ -37,7 +37,7 @@
       "size_bytes": 1788
     }
   ],
-  "generated_at": "2025-10-01T17:30:29Z",
+  "generated_at": "2025-10-01T17:51:30Z",
   "manifest_version": "1.0",
-  "manifest_sha256": "474c2586b759700b527f30494adcf2205394cbd118fbe3f22c4fb9eb45e4adff"
+  "manifest_sha256": "e7ccaa4260ff761a45af1c5574bff0ed572a14c152e1e664f715c575673be40a"
 }
