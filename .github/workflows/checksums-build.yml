@@ -64,7 +64,6 @@ jobs:
 
             echo "Updated $N size_bytes=$SIZE sha256=$SHA"
           done
-
 - name: Write top-level manifest_sha256 (canonical key sort; field removed)
   run: |
     set -euo pipefail
