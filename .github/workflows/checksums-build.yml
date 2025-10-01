@@ -69,12 +69,26 @@ jobs:
           done
 
       - name: Canonicalize manifest & stamp top-level hash
+        shell: bash
         run: |
           set -euo pipefail
+          # Ensure MAN is provided and file exists
+          : "${MAN:?MAN env var is required}"
+          test -f "$MAN" || { echo "::error::Manifest not found at $MAN"; exit 1; }
+          
           TMP="$(mktemp)"
-          CALC=$(printf '%s' "$CANON" | sha256sum | cut -d' ' -f1)
-          echo "canonical manifest_sha256 = $calc"
 
+          # Canonicalize (keys sorted; artifacts sorted by path; drop manifes_sha256)
+          CANON="$(jq -S '
+            .artifacts |= (sort_by(.path))
+            | del(.manifest_sha256)
+          ' "$MAN")" || { echo "::error::jq failed to process $MAN"; exit 1;}
+
+          # Compute hash without newline
+          CALC="$(printf '%s' "$CANON" | sha256sum)"; CALC="${CALC%% *}"
+          echo "canonical manifest_sha256 = $CALC"
+          
+          # Write back with stamped hash and fresh timestamp
           printf '%s' "$CANON" | jq --arg s "$CALC" '
             .manifest_sha256 = $s
             | .generated_at = (now | todateiso8601)
