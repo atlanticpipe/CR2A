@@ -79,14 +79,13 @@ jobs:
           CALC=$(echo "$CANON" | sha256sum | cut -d' ' -f1)
           echo "canonical manifest_sha256 = $CALC"
 
-    # Write back manifest with updated hash + generated_at
-    echo "$CANON" | jq --arg s "$CALC" '
-      .manifest_sha256 = $s
-      | .generated_at = (now | todateiso8601)
-    ' > "$TMP"
+          echo "$CANON" | jq --arg s "$CALC" '
+            .manifest_sha256 = $s
+            | .generated_at = (now | todateiso8601)
+          ' > "$TMP"
 
-    mv "$TMP" "$MAN"
-    echo "manifest_sha256=$CALC"
+          mv "$TMP" "$MAN"
+          echo "manifest_sha256=$CALC"
 
           # Stamp the manifest with the computed hash and fresh generated_at
           jq --arg s "$CALC" '
