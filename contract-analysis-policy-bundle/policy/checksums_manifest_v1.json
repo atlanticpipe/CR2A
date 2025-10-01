@@ -1,16 +1,43 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2025-10-01T00:00:00Z",
-  "manifest_sha256": "<pending>",
-
+  "generated_at": "2025-10-01T11:21:08Z",
+  "manifest_sha256": "27e3b5e3eaf5b81b5d050aab1b4f92c7c1eb2c85e5dc89bfc773d769ecc572fe",
   "artifacts": [
-    { "name": "rulebook_v1",            "path": "contract-analysis-policy-bundle/policy/rulebook_v1.yaml",                 "size_bytes": 0, "sha256": "<pending>" },
-    { "name": "output_schemas_v1",      "path": "contract-analysis-policy-bundle/schemas/output_schemas_v1.json",         "size_bytes": 0, "sha256": "<pending>" },
-    { "name": "run_manifest_schema_v1", "path": "contract-analysis-policy-bundle/schemas/run_manifest_schema_v1.json",     "size_bytes": 0, "sha256": "<pending>" },
-    { "name": "api_schemas_v1",         "path": "contract-analysis-policy-bundle/schemas/api_schemas_v1.json",             "size_bytes": 0, "sha256": "<pending>" },
-    { "name": "policy_rules_v1",        "path": "contract-analysis-policy-bundle/policy/policy_rules_v1.json",             "size_bytes": 0, "sha256": "<pending>" },
-    { "name": "control_flags_v1",       "path": "contract-analysis-policy-bundle/policy/control_flags_v1.json",            "size_bytes": 0, "sha256": "<pending>" },
-    { "name": "validation_rules_v1",    "path": "contract-analysis-policy-bundle/policy/validation_rules_v1.json",         "size_bytes": 0, "sha256": "<pending>" },
-    { "name": "version_lock.schemas_v1","path": "contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json",     "size_bytes": 0, "sha256": "<pending>" }
+    {
+      "name": "validation_rules_v1",
+      "path": "contract-analysis-policy-bundle/policy/validation_rules_v1.json",
+      "size_bytes": 750,
+      "sha256": "2f5f2bc525a2f962d1e596d9d1a42786dcf3548f746d1f9e03aeac1a7efea6e2"
+    },
+    {
+      "name": "policy_rules_v1",
+      "path": "contract-analysis-policy-bundle/policy/policy_rules_v1.json",
+      "size_bytes": 1819,
+      "sha256": "8feadcd957812b0f34f97fbba7f7a2ad40835469a117a2af88e1235380f65cdb"
+    },
+    {
+      "name": "version_lock.schemas_v1",
+      "path": "contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json",
+      "size_bytes": 1788,
+      "sha256": "4430f7d60d4c9b6ec67d73b3124f63101090f940e399718bd18c58595e9da126"
+    },
+    {
+      "name": "control_flags_v1",
+      "path": "contract-analysis-policy-bundle/policy/control_flags_v1.json",
+      "size_bytes": 821,
+      "sha256": "ca6cfb64e0fc2917e18f1f1cc97e4233595eed77d18c98436e1f5219b82948d0"
+    },
+    {
+      "name": "checksums_manifest_v1",
+      "path": "contract-analysis-policy-bundle/policy/checksums_manifest_v1.json",
+      "size_bytes": 1449,
+      "sha256": "36b26c3007b36a56752aae1c830f9d6f4516f9dc80e6b08330db38c535424b9a"
+    },
+    {
+      "name": "rulebook_v1",
+      "path": "contract-analysis-policy-bundle/policy/rulebook_v1.yaml",
+      "size_bytes": 2277,
+      "sha256": "34cfcfd64d1c384a043336fb105e7ae6aa5d3d07920f08e0254346a5f0e3f196"
+    }
   ]
 }
