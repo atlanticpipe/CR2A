@@ -113,19 +113,21 @@ jobs:
           git diff -- "$MAN" || true
 
       - name: Commit and push if changed
+        shell: bash
         env:
           FILE: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
         run: |
           set -euo pipefail
+          
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com
           
-          # Rebase onto the remote branch to avoid non-fast-forward
+          # Ensure based on the remote branch to aboid non fast-forward errors
           git fetch origin "${GITHUB_REF_NAME}"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           
           if ! git diff --quiet -- "$FILE"; then
-            git add "$FILE"
+            git add -- "$FILE"
             git commit -m "ci: rebuild checksums manifest auto)"
             git push origin HEAD: "${GITHUB_REF_NAME}"
             echo "Pushed updated manifest."
