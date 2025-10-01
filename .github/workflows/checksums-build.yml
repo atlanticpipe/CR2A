@@ -9,12 +9,12 @@
 name: Checksums Build
 
 on:
+  workflow_dispatch: {}
   push:
     branches: [ main ]     # Run on pushes to main; adjust if needed
     paths:
       - "contract-analysis-policy-bundle/**"   # Only when policy/schemas change
       - ".github/workflows/checksums-build.yml"
-  workflow_dispatch: {}     # Allow manual runs from the Actions tab
 
 jobs:
   build-checksums:
