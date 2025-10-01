@@ -11,6 +11,8 @@ on:
 jobs:
   build-checksums:
     runs-on: ubuntu-latest
+    env:
+      MAN: contract-analysis-policy-bundle/checksums_manifest_v1.json
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -93,6 +95,10 @@ jobs:
             | .generated_at = (now | todateiso8601)
           ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
 
+      - name: Assert manifest exists
+        run: |
+          test -f :$MAN" || { echo "::error ::Manifest not found at $MAN"; exit 1; }
+          
       - name: Show diff
         run: |
           set -euo pipefail
