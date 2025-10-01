@@ -60,11 +60,19 @@ jobs:
       - name: Enforce top-level manifest_sha256 (canonical)
         run: |
           set -euo pipefail
-          STORED=$(jq -r '.manifest_sha256' "$MANIFEST_PATH")
-          CALC=$(jq -cS 'del(.manifest_sha256)' "$MANIFEST_PATH" | sha256sum | cut -d' ' -f1)
+          # Produce the conocalized JSON (keys sorted; artifacts sorted; manifest_sha256 removed)
+          CANON=$(jq -cS '
+            .artifacts |= (sort_by(.path))
+            | del(.manifest_sha256)
+          ' "$MAN")
 
-          echo "Stored: $STORED"
+          # Compute hash exactly like the build workflow (no extra newline)
+          CALC=$(printf '%s' "$CANON" | sha256sum | cut -d; ; -f1)
+
+          echo "Stored: $(jq -r '.manifest_sha256' "$MAN")"
           echo "Calc  : $CALC"
+
+          test "$(jq -r '.manifest_sha256' "$MAN")" = "$CALC"
 
           if [ -z "$STORED" ] || [ "$STORED" = "null" ]; then
             echo "❌ manifest_sha256 is empty" >&2
