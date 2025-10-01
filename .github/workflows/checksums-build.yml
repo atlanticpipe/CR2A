@@ -1,6 +1,3 @@
-# APS Policy Registry — Checksums Builder (safe YAML)
-# Computes per-artifact sha256 + size, then writes canonical manifest_sha256.
-# Commits the manifest only if changed.
 name: Checksums Build
 
 on:
