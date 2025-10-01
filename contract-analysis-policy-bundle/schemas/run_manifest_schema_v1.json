@@ -55,8 +55,8 @@
       "required": ["rulebook_version", "schema_version"],
       "additionalProperties": false,
       "properties": {
-        "rulebook_version": { "type": "string" }, // e.g., "1.0"
-        "schema_version": { "type": "string" }    // e.g., "1.0"
+        "rulebook_version": { "type": "string" },
+        "schema_version": { "type": "string" }
       }
     },
 
