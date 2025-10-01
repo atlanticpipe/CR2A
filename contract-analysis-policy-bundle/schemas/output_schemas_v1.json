@@ -64,7 +64,7 @@
         },
         "sequence": {
           "type": "string",
-          "pattern": "^[0-9]+ of [0-9]+$" // e.g., "1 of 3"
+          "pattern": "^[0-9]+ of [0-9]+$"
         }
       },
       "additionalProperties": false
@@ -89,7 +89,7 @@
           "type": "array",
           "items": { "$ref": "#/definitions/RiskSummaryRow" }
         },
-        "general_risk_level": { "type": "string" } // e.g., "Low", "Moderate", "High"
+        "general_risk_level": { "type": "string" }
       },
       "additionalProperties": false
     },
