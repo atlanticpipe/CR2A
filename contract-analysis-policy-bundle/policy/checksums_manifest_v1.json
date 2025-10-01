@@ -38,6 +38,24 @@
       "path": "contract-analysis-policy-bundle/policy/rulebook_v1.yaml",
       "size_bytes": 2277,
       "sha256": "34cfcfd64d1c384a043336fb105e7ae6aa5d3d07920f08e0254346a5f0e3f196"
-    }
+    },
+    {
+    "name": "output_schemas_v1",     // human-friendly key
+    "path": "contract-analysis-policy-bundle/schemas/output_schemas_v1.json", // exact path
+    "size_bytes": 0,                 // placeholder, will be filled by build workflow
+    "sha256": ""                     // placeholder, will be filled by build workflow
+  },
+  {
+    "name": "run_manifest_schema_v1",
+    "path": "contract-analysis-policy-bundle/schemas/run_manifest_schema_v1.json",
+    "size_bytes": 0,
+    "sha256": ""
+  },
+  {
+  "name": "api_schemas_v1",
+  "path": "contract-analysis-policy-bundle/schemas/api_schemas_v1.json",
+  "size_bytes": 0,
+  "sha256": ""
+}
   ]
 }
