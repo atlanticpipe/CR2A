@@ -60,8 +60,6 @@ jobs:
           
       # --- Sanity: manifest exists and parses
       - name: Check manifest presence & parseable
-        env:
-          MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
         run: |
           set -Eeuo pipefail
           set -x
