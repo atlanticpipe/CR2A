@@ -64,10 +64,13 @@ jobs:
           MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
         run: |
           set -euo pipefail
-          : "${MAN: ?MAN env var must be set}"
+          if [ -z "${MAN:-}" ]; then
+            echo "Man env var must be set" >&2
+            exit 1
+          fi
           test -f "$MAN" || { echo "Missing $MAN" >&2; exit 1; }
           jq -e . "$MAN" >/dev/null
-          echo "✅ Manifest is present and valid JSON"
+          echo "Manifest is present and valid JSON"
 
       - name : Debug env
         run: |
@@ -92,9 +95,9 @@ jobs:
           echo "Stored: $STORED"
           echo "Calc  : $CALC"
 
-          test -n "$STORED" && [ "$STORED" != "null" ] || { echo "❌ manifest_sha256 is empty" >&2; exit 1; }
-          test "$STORED" = "$CALC" || { echo "❌ Top-level manifest_sha256 mismatch" >&2; exit 1; }
-          echo "✅ Top-level manifest_sha256 ok"
+          test -n "$STORED" && [ "$STORED" != "null" ] || { echo "manifest_sha256 is empty" >&2; exit 1; }
+          test "$STORED" = "$CALC" || { echo "Top-level manifest_sha256 mismatch" >&2; exit 1; }
+          echo "Top-level manifest_sha256 ok"
 
       # --- Cross-check that every locked path is represented in the manifest
       - name: Cross-check version_lock ↔ checksums_manifest (paths)
@@ -107,12 +110,12 @@ jobs:
           ERR=0
           while IFS= read -r P; do
             if ! printf '%s\n' "${MAN[@]}" | grep -Fx -- "$P" >/dev/null; then
-              echo "❌ Locked component missing in manifest: $P" >&2
+              echo "Locked component missing in manifest: $P" >&2
               ERR=1
             fi
           done < <(jq -r '.components[].path' "$LOCK")
           test $ERR -eq 0 || exit 1
-          echo "✅ All locked paths are present in manifest"
+          echo "All locked paths are present in manifest"
 
       # --- Verify each artifact’s recorded sha256 and size_bytes match the file on disk
       - name: Enforce per-artifact sha256 and size_bytes
@@ -126,16 +129,16 @@ jobs:
             HREC=$(jq -r '.sha256'      <<<"$ART")
 
             if [ ! -f "$PATHF" ]; then
-              echo "❌ Missing file: $PATHF (artifact=$NAME)" >&2; ERR=1; continue
+              echo "Missing file: $PATHF (artifact=$NAME)" >&2; ERR=1; continue
             fi
 
             SACT=$(stat -c%s "$PATHF")
             HACT=$(sha256sum "$PATHF"); HACT="${HACT%%*}"
-            [ "$SREC" = "$SACT" ] || { echo "❌ size_bytes mismatch for $NAME ($PATHF) recorded=$SREC actual=$SACT" >&2; ERR=1; }
-            [ "$HREC" = "$HACT" ] || { echo "❌ sha256 mismatch for $NAME ($PATHF) recorded=$HREC actual=$HACT" >&2; ERR=1; }
+            [ "$SREC" = "$SACT" ] || { echo "size_bytes mismatch for $NAME ($PATHF) recorded=$SREC actual=$SACT" >&2; ERR=1; }
+            [ "$HREC" = "$HACT" ] || { echo "sha256 mismatch for $NAME ($PATHF) recorded=$HREC actual=$HACT" >&2; ERR=1; }
           done < <(jq -c '.artifacts[]' "$MANIFEST_PATH")
           test $ERR -eq 0 || exit 1
-          echo "✅ All artifact sizes + hashes match"
+          echo "All artifact sizes + hashes match"
 
       # --- If version_lock specifies sha256 for any path, it must equal the manifest value
       - name: Enforce version_lock sha256 ⇆ manifest sha256 (when provided)
@@ -151,14 +154,14 @@ jobs:
 
             HMAN=$(jq -r --arg p "$P" '.[$p] // empty' <<<"$MANMAP")
             if [ -z "$HMAN" ]; then
-              echo "❌ path not found in manifest when comparing hash: $P" >&2
+              echo "path not found in manifest when comparing hash: $P" >&2
               ERR=1
               continue
             fi
             if [ "$HSPEC" != "$HMAN" ]; then
-              echo "❌ version_lock sha256 != manifest sha256 for $P  lock=$HSPEC manifest=$HMAN" >&2
+              echo "version_lock sha256 != manifest sha256 for $P  lock=$HSPEC manifest=$HMAN" >&2
               ERR=1
             fi
           done
           test $ERR -eq 0 || exit 1
-          echo "✅ version_lock sha256 values (when provided) match manifest"
+          echo "version_lock sha256 values (when provided) match manifest"
