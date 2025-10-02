@@ -66,7 +66,7 @@ jobs:
           set -Eeuo pipefail
           set -x
 
-          echo"MAN=$MAN"
+          echo "MAN=$MAN"
           echo "PWD=$(pwd)"
           echo "Repo tree (policy dir):"
           ls -l contract-analysis-policy-bundle/policy || true
@@ -91,7 +91,7 @@ jobs:
         run: |
           set +u
           echo "MAN=${MAN:-<unset<}"
-          eccho "LOCK=${LOCK: -<unset>}"
+          echo "LOCK=${LOCK: -<unset>}"
           set -u
           
       # --- Enforce canonical top-level manifest_sha256
