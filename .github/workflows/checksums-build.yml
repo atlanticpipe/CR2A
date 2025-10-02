@@ -7,6 +7,8 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write # required to push with GitHub_Token
 jobs:
   build-checksums:
     runs-on: ubuntu-latest
@@ -122,15 +124,28 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Rebase to avoid non-fast-forward failures
-          git fetch origin "${GITHUB_REF_NAME}"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          
-          if ! git diff --quiet -- "$FILE"; then
-            git add -- "$FILE"
-            git commit -m "ci: rebuild checksums manifest auto)"
-            git push origin HEAD: "${GITHUB_REF_NAME}"
-            echo "Pushed updated manifest."
-          else
+          # Did we actually change the manifest?
+          if git diff --quiet -- "$FILE"; then
             echo "No changes to commit."
+            # Keep the branch up to date anyway (non-fatal if nothing to pull)
+            git fetch origin "${GITHUB_REF_NAME}" || true
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            exit 0
           fi
+
+          echo "Local manifes updated; preparing to rebase..."
+          # Save the local change so we can rebase cleanly
+          git stash push -u -m "ci-stash" >/dev/null 2>&1 || true
+
+          git fetch origin "${GITHUB_REF_NAME}"
+          git checkout "${GITHUB_REF_NAME}"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+
+          # Restore our change on top of the rebased branch
+          git stash pop >/dev/null 2>&1 || true
+
+          # Stage, commit, and push
+          git add -- "$FILE"
+          git commit -m "ci: rebuild checksums manifest auto"
+          git push origin HEAD:"${GITHUB_REF_NAME}"
+          echo "Pushed updated manifest."
