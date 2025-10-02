@@ -96,12 +96,10 @@ jobs:
       - name: Cross-check version_lock ↔ checksums_manifest (paths)
         run: |
           set -euo pipefail
-          test -f "$LOCK_PATH" || { echo "Missing $LOCK_PATH" >&2; exit 1; }
-          jq -e . "$LOCK_PATH" >/dev/null
-
+          test -f "$LOCK" || { echo "Missing $LOCK" >&2; exit 1; }
+          jq -e . "$LOCK" >/dev/null
           # Build a set of manifest paths (unique)
           mapfile -t MANPATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
-
           ERR=0
           while IFS= read -r P; do
             if ! printf '%s\n' "${MANPATHS[@]}" | grep -Fx -- "$P" >/dev/null; then
@@ -109,7 +107,6 @@ jobs:
               ERR=1
             fi
           done < <(jq -r '.components[].path' "$LOCK_PATH")
-
           test $ERR -eq 0 || exit 1
           echo "✅ All locked paths are present in manifest"
 
@@ -125,22 +122,13 @@ jobs:
             HREC=$(jq -r '.sha256'      <<<"$ART")
 
             if [ ! -f "$PATHF" ]; then
-              echo "❌ Missing file: $PATHF (artifact=$NAME)" >&2
-              ERR=1
-              continue
+              echo "❌ Missing file: $PATHF (artifact=$NAME)" >&2; ERR=1; continue
             fi
 
             SACT=$(stat -c%s "$PATHF")
-            HACT=$(sha256sum "$PATHF" | cut -d' ' -f1)
-
-            if [ "$SREC" != "$SACT" ]; then
-              echo "❌ size_bytes mismatch for $NAME ($PATHF)  recorded=$SREC actual=$SACT" >&2
-              ERR=1
-            fi
-            if [ "$HREC" != "$HACT" ]; then
-              echo "❌ sha256 mismatch for $NAME ($PATHF)  recorded=$HREC actual=$HACT" >&2
-              ERR=1
-            fi
+            HACT=$(sha256sum "$PATHF"); HACT="${HACT%%*}"
+            [ "$SREC" = "$SACT" ] || { echo "❌ size_bytes mismatch for $NAME ($PATHF) recorded=$SREC actual=$SACT" >&2; ERR=1; }
+            [ "$HREC" = "$HACT" ] || { echo "❌ sha256 mismatch for $NAME ($PATHF) recorded=$HREC actual=$HACT" >&2; ERR=1; }
           done < <(jq -c '.artifacts[]' "$MAN")
           test $ERR -eq 0 || exit 1
           echo "✅ All artifact sizes + hashes match"
@@ -151,9 +139,8 @@ jobs:
           set -euo pipefail
           # Build mapping path -> sha from manifest
           MANMAP="$(jq -r '[.artifacts[] | {key:.path, val:.sha256}] | from_entries' "$MAN")"
-
           ERR=0
-          jq -c '.components[]' "$LOCK_PATH" | while read -r C; do
+          jq -c '.components[]' "$LOCK" | while read -r C; do
             P=$(jq -r '.path' <<<"$C")
             HSPEC=$(jq -r '.sha256 // empty' <<<"$C")  # empty if not provided
             test -z "$HSPEC" && continue               # skip when lock didn’t specify a hash
