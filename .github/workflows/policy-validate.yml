@@ -31,8 +31,8 @@ jobs:
     
     # Define at job scope so every step inherits
     env:
-      MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
-      LOCK_PATH:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
+      MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
+      LOCK:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
 
     steps:
       # --- Checkout repo so we can read files
@@ -60,6 +60,8 @@ jobs:
           
       # --- Sanity: manifest exists and parses
       - name: Check manifest presence & parseable
+        env:
+          MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
         run: |
           set -euo pipefail
           : "${MAN: ?MAN env var must be set}"
@@ -67,6 +69,13 @@ jobs:
           jq -e . "$MAN" >/dev/null
           echo "✅ Manifest is present and valid JSON"
 
+      - name : Debug env
+        run: |
+          set +u
+          echo "MAN=${MAN:-<unset<}"
+          eccho "LOCK=${LOCK: -<unset>}"
+          set -u
+          
       # --- Enforce canonical top-level manifest_sha256
       #     Recompute sha256 over the manifest with keys sorted and field removed.
       - name: Enforce top-level manifest_sha256 (canonical)
