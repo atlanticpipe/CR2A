@@ -51,15 +51,25 @@ jobs:
           MAN_DIR="$(dirname "$MAN")"
           mkdir -p "$MAN_DIR"
           # If file doesn't exist OR jq parse fails, bootstrap a fresh manifest
-          if [ ! -f "$MAN" ] || ! jq -e "$MAN" >/dev/null 2>&1; then
+          if [ ! -s "$MAN" ] || ! jq -e . "$MAN" >/dev/null 2>&1; then
             # Use printf instead of heredoc to avoid YAML/heredoc edge cases
             printf '%s\n' \
               '{' \
               '  "manifest_version": "1.0",' \
               '  "generated_at": "1970-01-01T00:00:00Z",' \
               '  "manifest_sha256": "",' \
-              '  "artifacts": []' \
+              '  "artifacts": [' \
+              '    {"name":"checksums_manifest_v1","path":"contract-analysis-policy-bundle/policy/checksums_manifest_v1.json","sha256":"","size_bytes":0},' \
+              '    {"name":"control_flags_v1","path":"contract-analysis-policy-bundle/policy/control_flags_v1.json","sha256":"","size_bytes":0},' \
+              '    {"name":"policy_rules_v1","path":"contract-analysis-policy-bundle/policy/policy_rules_v1.json","sha256":"","size_bytes":0},' \
+              '    {"name":"rulebook_v1","path":"contract-analysis-policy-bundle/policy/rulebook_v1.yaml","sha256":"","size_bytes":0},' \
+              '    {"name":"validation_rules_v1","path":"contract-analysis-policy-bundle/policy/validation_rules_v1.json","sha256":"","size_bytes":0},' \
+              '    {"name":"version_lock.schemas_v1","path":"contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json","sha256":"","size_bytes":0}' \
+              '  ]' \
               '}' >"$MAN"
+            echo "Bootstrapped fresh manifest."
+          else
+            echo "Manifest already present and non-empty."
           fi
           # Final sanity check
           jq -e . "$MAN" >/dev/null
