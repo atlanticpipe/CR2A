@@ -88,11 +88,7 @@ jobs:
           echo "Stored: $STORED"
           echo "Calc  : $CALC"
 
-          if [ -z "$STORED" ] || [ "$STORED" = "null" ]; then
-            echo "❌ manifest_sha256 is empty" >&2
-            exit 1
-          fi
-
+          test -n "$STORED" && [ "$STORED" != "null" ] || { echo "❌ manifest_sha256 is empty" >&2; exit 1; }
           test "$STORED" = "$CALC" || { echo "❌ Top-level manifest_sha256 mismatch" >&2; exit 1; }
           echo "✅ Top-level manifest_sha256 ok"
 
