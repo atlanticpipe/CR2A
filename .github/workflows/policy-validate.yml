@@ -63,14 +63,29 @@ jobs:
         env:
           MAN: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          set -x
+
+          echo"MAN=$MAN"
+          echo "PWD=$(pwd)"
+          echo "Repo tree (policy dir):"
+          ls -l contract-analysis-policy-bundle/policy || true
+          
           if [ -z "${MAN:-}" ]; then
             echo "Man env var must be set" >&2
             exit 1
           fi
-          test -f "$MAN" || { echo "Missing $MAN" >&2; exit 1; }
-          jq -e . "$MAN" >/dev/null
-          echo "Manifest is present and valid JSON"
+
+          echo "File size (bytes): $(stat -c%s "$MAN")"
+          echo "First 200 bytes:"
+          head -c 200 "$MAN" || true
+          echo
+          echo "---- jq parse ----"
+          jq --version
+          jq -e . "$MAN"
+          rc=$?
+          echo "jq exit code = $rc"
+          exit $rc
 
       - name : Debug env
         run: |
