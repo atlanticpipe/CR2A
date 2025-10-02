@@ -35,8 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     # Define at job scope so every step inherits
     env:
-      MAN: ${{ env.MANIFEST_PATH }}
-      LOCK: ${{ env.LOCK_PATH }}
+      MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
+      LOCK_PATH:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
 
     steps:
       # --- Checkout repo so we can read files
@@ -58,8 +58,8 @@ jobs:
       - name: Debug env
         run: |
           set +u
-          echo "MAN+${MAN:-<unset.}"
-          echo "LOCK=${LOCK:-<unset>}"
+          echo "MANIFEST_PATH+${MANIFEST_PATH:-<unset.}"
+          echo "LOCK_PATH=${LOCK_PATH:-<unset>}"
           set -u
           
       # --- Sanity: manifest exists and parses
@@ -67,8 +67,8 @@ jobs:
         run: |
           set -euo pipefail
           : "${MAN: ?MAN env var must be set}"
-          test -f "$MAN" || { echo "Missing $MAN" >&2; exit 1; }
-          jq -e . "$MAN" >/dev/null
+          test -f "$MANIFEST_PATH" || { echo "Missing $MANIFEST_PATH" >&2; exit 1; }
+          jq -e . "$MANIFEST_PATH" >/dev/null
           echo "✅ Manifest is present and valid JSON"
 
       # --- Enforce canonical top-level manifest_sha256
@@ -80,10 +80,10 @@ jobs:
           CANON=$(jq -S '
             .artifacts |= (sort_by(.path))
             | del(.manifest_sha256)
-          ' "$MAN")
+          ' "$MANIFEST_PATH")
           # Compute hash exactly like the build workflow (no extra newline)
           CALC=$(printf '%s' "$CANON" | sha256sum | cut -d' ' -f1)
-          STORED=$(jq -r '.manifest_sha256' "$MAN")
+          STORED=$(jq -r '.manifest_sha256' "$MANIFEST_PATH")
           echo "Stored: $STORED"
           echo "Calc  : $CALC"
 
@@ -95,13 +95,13 @@ jobs:
       - name: Cross-check version_lock ↔ checksums_manifest (paths)
         run: |
           set -euo pipefail
-          test -f "$LOCK" || { echo "Missing $LOCK" >&2; exit 1; }
-          jq -e . "$LOCK" >/dev/null
+          test -f "$LOCK_PATH" || { echo "Missing $LOCK_PATH" >&2; exit 1; }
+          jq -e . "$LOCK_PATH" >/dev/null
           # Build a set of manifest paths (unique)
-          mapfile -t MANPATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
+          mapfile -t MANIFEST_PATH < <(jq -r '.artifacts[].path' "$MANIFEST_PATH" | sort -u)
           ERR=0
           while IFS= read -r P; do
-            if ! printf '%s\n' "${MANPATHS[@]}" | grep -Fx -- "$P" >/dev/null; then
+            if ! printf '%s\n' "${MANIFEST_PATH[@]}" | grep -Fx -- "$P" >/dev/null; then
               echo "❌ Locked component missing in manifest: $P" >&2
               ERR=1
             fi
@@ -128,7 +128,7 @@ jobs:
             HACT=$(sha256sum "$PATHF"); HACT="${HACT%%*}"
             [ "$SREC" = "$SACT" ] || { echo "❌ size_bytes mismatch for $NAME ($PATHF) recorded=$SREC actual=$SACT" >&2; ERR=1; }
             [ "$HREC" = "$HACT" ] || { echo "❌ sha256 mismatch for $NAME ($PATHF) recorded=$HREC actual=$HACT" >&2; ERR=1; }
-          done < <(jq -c '.artifacts[]' "$MAN")
+          done < <(jq -c '.artifacts[]' "$MANIFEST_PATH")
           test $ERR -eq 0 || exit 1
           echo "✅ All artifact sizes + hashes match"
 
@@ -137,9 +137,9 @@ jobs:
         run: |
           set -euo pipefail
           # Build mapping path -> sha from manifest
-          MANMAP="$(jq -r '[.artifacts[] | {key:.path, val:.sha256}] | from_entries' "$MAN")"
+          MANMAP="$(jq -r '[.artifacts[] | {key:.path, val:.sha256}] | from_entries' "$MANIFEST_PATH")"
           ERR=0
-          jq -c '.components[]' "$LOCK" | while read -r C; do
+          jq -c '.components[]' "$LOCK_PATH" | while read -r C; do
             P=$(jq -r '.path' <<<"$C")
             HSPEC=$(jq -r '.sha256 // empty' <<<"$C")  # empty if not provided
             test -z "$HSPEC" && continue               # skip when lock didn’t specify a hash
