@@ -29,11 +29,14 @@ jobs:
           sudo apt-get install -y jq
 
       - name: Bootstrap manifest if missing
+        shell: bash
         run: |
           set -euo pipefail
+          : "${MAN:?MAN env var must be set}"
           MAN_DIR="$(dirname "$MAN")"
           mkdir -p "$MAN_DIR"
-          if [ ! -f "$MAN" ]; then
+          # If file doesn't exist OR jq parse fails, bootstrap a fresh manifest
+          if [ ! -f "$MAN" ] || ! jq -e "$MAN" >/dev/null 2>1; then
             # Use printf instead of heredoc to avoid YAML/heredoc edge cases
             printf '%s\n' \
               '{' \
@@ -43,6 +46,7 @@ jobs:
               '  "artifacts": []' \
               '}' >"$MAN"
           fi
+          # Final sanity check
           jq -e . "$MAN" >/dev/null
 
       - name: Update artifact size_bytes and sha256
