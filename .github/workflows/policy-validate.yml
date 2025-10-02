@@ -19,16 +19,15 @@ on:
 permissions:
   contents: read
 
-env:
-  MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
-  LOCK_PATH:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
-
 jobs:
   validate:
     if: >
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    env:
+      MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
+      LOCK_PATH:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
 
     steps:
       # --- Checkout repo so we can read files
@@ -49,6 +48,7 @@ jobs:
       - name: Check manifest presence & parseable
         run: |
           set -euo pipefail
+          : "${MAN: ?MAN env var must be set}"
           test -f "$MAN" || { echo "Missing $MAN" >&2; exit 1; }
           jq -e . "$MAN" >/dev/null
           echo "✅ Manifest is present and valid JSON"
