@@ -14,10 +14,7 @@ on:
   workflow_dispatch: {}              # Manual "Run workflow" button
   push:
     branches: [ main, Working ]
-  # Auto-run after Checksums Build completes
-  workflow_run:
-    workflows: ["Checksums Build"]
-    types: [completed]
+
 
 permissions:
   contents: read
