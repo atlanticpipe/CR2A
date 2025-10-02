@@ -51,7 +51,7 @@ jobs:
           MAN_DIR="$(dirname "$MAN")"
           mkdir -p "$MAN_DIR"
           # If file doesn't exist OR jq parse fails, bootstrap a fresh manifest
-          if [ ! -f "$MAN" ] || ! jq -e "$MAN" >/dev/null 2>1; then
+          if [ ! -f "$MAN" ] || ! jq -e "$MAN" >/dev/null 2>&1; then
             # Use printf instead of heredoc to avoid YAML/heredoc edge cases
             printf '%s\n' \
               '{' \
