@@ -33,11 +33,10 @@ jobs:
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-
     # Define at job scope so every step inherits
     env:
-      MAN: ${{ env.MAN }}
-      LOCK: ${{ env.LOCK }}
+      MAN: ${{ env.MANIFEST_PATH }}
+      LOCK: ${{ env.LOCK_PATH }}
 
     steps:
       # --- Checkout repo so we can read files
