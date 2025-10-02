@@ -13,11 +13,19 @@ name: Policy Validate
 on:
   workflow_dispatch: {}              # Manual "Run workflow" button
   push:
-    branches: [ main, Working ]
-
+    branches: [ main, Test ]
+    # Auto-run after Checksums Build completes
+    workflow_run:
+      workflows: ["Checksums Build"]
+      types: [completed]
 
 permissions:
   contents: read
+
+# Define once at workflow level
+env:
+  MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
+  LOCK_PATH:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
 
 jobs:
   validate:
@@ -25,9 +33,11 @@ jobs:
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+
+    # Define at job scope so every step inherits
     env:
-      MANIFEST_PATH: contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
-      LOCK_PATH:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
+      MAN: ${{ env.MAN }}
+      LOCK: ${{ env.LOCK }}
 
     steps:
       # --- Checkout repo so we can read files
@@ -36,6 +46,7 @@ jobs:
         with:
           # For workflow_run, validate the exact commit that triggered Checksums Build
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
 
       # --- Install jq for JSON processing
       - name: Install jq
@@ -44,6 +55,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq
 
+      # Shows the envs without tripping -u
+      - name: Debug env
+        run: |
+          set +u
+          echo "MAN+${MAN:-<unset.}"
+          echo "LOCK=${LOCK:-<unset>}"
+          set -u
+          
       # --- Sanity: manifest exists and parses
       - name: Check manifest presence & parseable
         run: |
@@ -63,11 +82,9 @@ jobs:
             .artifacts |= (sort_by(.path))
             | del(.manifest_sha256)
           ' "$MAN")
-
           # Compute hash exactly like the build workflow (no extra newline)
           CALC=$(printf '%s' "$CANON" | sha256sum | cut -d' ' -f1)
           STORED=$(jq -r '.manifest_sha256' "$MAN")
-
           echo "Stored: $STORED"
           echo "Calc  : $CALC"
 
