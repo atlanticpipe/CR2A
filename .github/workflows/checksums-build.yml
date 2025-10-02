@@ -8,7 +8,8 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: write # required to push with GitHub_Token
+  contents: write # required to push with GITHUB_TOKEN
+  
 jobs:
   build-checksums:
     runs-on: ubuntu-latest
