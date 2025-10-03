@@ -42,58 +42,27 @@ jobs:
           else
             echo "No manifest file found."
           fi
-          
-      - name: Bootstrap manifest if missing
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${MAN:?MAN env var must be set}"
-          MAN_DIR="$(dirname "$MAN")"
-          mkdir -p "$MAN_DIR"
-          # If file doesn't exist OR jq parse fails, bootstrap a fresh manifest
-          if [ ! -s "$MAN" ] || ! jq -e . "$MAN" >/dev/null 2>&1; then
-            # Use printf instead of heredoc to avoid YAML/heredoc edge cases
-            printf '%s\n' \
-              '{' \
-              '  "manifest_version": "1.0",' \
-              '  "generated_at": "1970-01-01T00:00:00Z",' \
-              '  "manifest_sha256": "",' \
-              '  "artifacts": [' \
-              '    {"name":"checksums_manifest_v1","path":"contract-analysis-policy-bundle/policy/checksums_manifest_v1.json","sha256":"","size_bytes":0},' \
-              '    {"name":"control_flags_v1","path":"contract-analysis-policy-bundle/policy/control_flags_v1.json","sha256":"","size_bytes":0},' \
-              '    {"name":"policy_rules_v1","path":"contract-analysis-policy-bundle/policy/policy_rules_v1.json","sha256":"","size_bytes":0},' \
-              '    {"name":"rulebook_v1","path":"contract-analysis-policy-bundle/policy/rulebook_v1.yaml","sha256":"","size_bytes":0},' \
-              '    {"name":"validation_rules_v1","path":"contract-analysis-policy-bundle/policy/validation_rules_v1.json","sha256":"","size_bytes":0},' \
-              '    {"name":"version_lock.schemas_v1","path":"contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json","sha256":"","size_bytes":0}' \
-              '  ]' \
-              '}' >"$MAN"
-            echo "Bootstrapped fresh manifest."
-          else
-            echo "Manifest already present and non-empty."
-          fi
-          # Final sanity check
-          jq -e . "$MAN" >/dev/null
 
-      - name: Update artifact size_bytes and sha256
+      - name: Update canonical size_bytes and sha256
         run: |
           set -euo pipefail
           TMP="$(mktemp)"
           jq -e . "$MAN" >/dev/null
 
-          # Iterate listed artifacts and refresh their size/sha256
-          jq -c '.artifacts[]' "$MAN" | while read -r ART; do
+          # Iterate listed canonical and refresh their size/sha256
+          jq -c '.canonical[]' "$MAN" | while read -r ART; do
             P="$(jq -r '.path'  <<<"$ART")"
             N="$(jq -r '.name'  <<<"$ART")"
             if [ ! -f "$P" ]; then
-              echo "Missing artifact file: $P" >&2
+              echo "Missing canonical file: $P" >&2
               exit 1
             fi
             SIZE="$(stat -c%s "$P")"
             SHA="$(sha256sum "$P" | cut -d' ' -f1)"
 
             jq --arg p "$P" --arg sz "$SIZE" --arg sha "$SHA" '
-              (.artifacts[] | select(.path == $p) | .size_bytes) = ($sz | tonumber)
-              | (.artifacts[] | select(.path == $p) | .sha256)    = $sha
+              (.canonical[] | select(.path == $p) | .size_bytes) = ($sz | tonumber)
+              | (.canonical[] | select(.path == $p) | .sha256)    = $sha
             ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
 
             echo "Updated $N size_bytes=$SIZE sha256=$SHA"
@@ -109,9 +78,9 @@ jobs:
           
           TMP="$(mktemp)"
 
-          # Canonicalize (keys sorted; artifacts sorted by path; drop manifes_sha256)
+          # Canonicalize (keys sorted; canonical sorted by path; drop manifes_sha256)
           CANON="$(jq -S '
-            .artifacts |= (sort_by(.path))
+            .canonical |= (sort_by(.path))
             | del(.manifest_sha256)
           ' "$MAN")" || { echo "::error::jq failed to process $MAN"; exit 1;}
 
