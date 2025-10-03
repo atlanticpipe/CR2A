@@ -40,7 +40,7 @@
     {
       "name": "validation_rules_v1",
       "path": "contract-analysis-policy-bundle/policy/validation_rules_v1.json",
-      "sha256": ""
+      "sha256": "e989043ae145a8fb415863b77854132e5a4f260bb8a8c09c9ca98e8d4e6f459b"
     }
   ],
   "enforcement": {
