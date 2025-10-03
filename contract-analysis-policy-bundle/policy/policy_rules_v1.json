@@ -1,61 +1,209 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "APS Policy Rules",
-  "version": "1.0",
-
-  "rules": {
-    "clause_discovery": {
-      "fdot_substitution_rule": "if contract_silent_or_weaker → insert FDOT spec text",
-      "non_fdot_missing_rule": "Not present in contract",
-      "search_modes": ["exact", "fuzzy", "contextual"],
-      "repeat_discovery_required": true
-    },
-
-    "classification": {
-      "route_misfits": true,
-      "verify_headers": true,
-      "abort_on_mismatch": true
-    },
-
-    "redlining": {
-      "guidelines_doc_id": "file-SuN86exJDKidXCm3D1xZuX",
-      "enforce_no_deviation": true,
-      "output_format": "inline textual recommendations"
-    },
-
-    "bluf": {
-      "enabled": true,
-      "when_to_use": [
-        "No clause present in contract/spec",
-        "Clause belongs under a different section/item"
-      ],
-      "examples": [
-        "BLUF: No clause present in contract/spec. Verified across full text and cross-references.",
-        "BLUF: Clause identified but belongs under Section III, Item 3 (Delays). Not included here."
-      ]
-    },
-
-    "output_control": {
-      "section_item_closing_line": "All applicable clauses for [Item #/Title] have been identified and analyzed.",
-      "require_strict_a_f_breakdown": true,
-      "suppress_extra_text": true
-    },
-
-    "supplemental": {
-      "only_if_not_classifiable": true,
-      "grouping_rule": "Group similar scope/risks into one item",
-      "require_sequential_numbering": true
-    },
-
-    "summary": {
-      "require_all_risks": true,
-      "table_columns": ["Risk Area", "Risk Summary", "Redline Recommendation Summary"],
-      "include_general_risk_level": true
-    },
-
-    "disassociation": {
-      "purge_after_run": true,
-      "require_explicit_reference_for_reuse": true
-    }
+  "version": "v1",
+  "section_fit": {
+    "Definitions": [
+      "definition",
+      "means",
+      "shall mean",
+      "as used herein",
+      "defined term"
+    ],
+    "Scope of Work": [
+      "scope",
+      "services",
+      "work",
+      "deliverable",
+      "statement of work",
+      "sow",
+      "perform",
+      "performance",
+      "tasks",
+      "milestone"
+    ],
+    "Payment": [
+      "payment",
+      "fee",
+      "compensation",
+      "invoice",
+      "billing",
+      "payable",
+      "due",
+      "net",
+      "rates",
+      "pricing",
+      "expenses",
+      "reimbursement"
+    ],
+    "Insurance": [
+      "insurance",
+      "insured",
+      "coverage",
+      "policy",
+      "certificate",
+      "coi",
+      "limits",
+      "liability insurance",
+      "workers' compensation",
+      "auto liability",
+      "professional liability",
+      "umbrella",
+      "additional insured"
+    ],
+    "Indemnification": [
+      "indemnify",
+      "indemnification",
+      "hold harmless",
+      "defend",
+      "liabilities",
+      "claims",
+      "losses",
+      "damages",
+      "third party",
+      "defence costs",
+      "defense costs"
+    ],
+    "Termination": [
+      "terminate",
+      "termination",
+      "for cause",
+      "for convenience",
+      "notice",
+      "cure period",
+      "suspension",
+      "effect of termination",
+      "survive",
+      "survival"
+    ],
+    "Confidentiality": [
+      "confidential",
+      "non-disclosure",
+      "nda",
+      "proprietary",
+      "trade secret",
+      "confidential information"
+    ],
+    "Intellectual Property": [
+      "intellectual property",
+      "ip",
+      "ownership",
+      "license",
+      "licence",
+      "assign",
+      "assignment",
+      "inventions",
+      "work product",
+      "deliverables",
+      "background ip",
+      "foreground ip",
+      "patent",
+      "copyright",
+      "trademark"
+    ],
+    "Governing Law": [
+      "governing law",
+      "jurisdiction",
+      "venue",
+      "choice of law",
+      "forum",
+      "state"
+    ],
+    "Dispute Resolution": [
+      "dispute",
+      "arbitration",
+      "mediate",
+      "mediation",
+      "litigation",
+      "aaa",
+      "jams",
+      "binding",
+      "resolution"
+    ],
+    "Force Majeure": [
+      "force majeure",
+      "act of god",
+      "beyond reasonable control",
+      "epidemic",
+      "pandemic",
+      "war",
+      "strike",
+      "fire",
+      "flood",
+      "government order",
+      "supply chain"
+    ],
+    "Warranties": [
+      "warranty",
+      "warranties",
+      "representations",
+      "represent",
+      "guarantee",
+      "conform",
+      "merchantability",
+      "fitness",
+      "noninfringement",
+      "remedy",
+      "repair",
+      "replace"
+    ],
+    "Limitation of Liability": [
+      "limitation of liability",
+      "liability cap",
+      "consequential",
+      "indirect",
+      "special",
+      "punitive",
+      "lost profits",
+      "aggregate liability",
+      "cap"
+    ],
+    "Assignment": [
+      "assign",
+      "assignment",
+      "transfer",
+      "subcontract",
+      "successors",
+      "assigns",
+      "consent"
+    ],
+    "Change Orders": [
+      "change order",
+      "amend",
+      "amendment",
+      "modification",
+      "variation",
+      "scope change"
+    ],
+    "Compliance": [
+      "comply",
+      "compliance",
+      "laws",
+      "regulations",
+      "anti-corruption",
+      "fcpa",
+      "ofac",
+      "sanction",
+      "export control",
+      "privacy",
+      "hipaa",
+      "gdpr",
+      "data protection"
+    ],
+    "Audit": [
+      "audit",
+      "inspection",
+      "records",
+      "books",
+      "access",
+      "right to examine"
+    ],
+    "Schedule": [
+      "schedule",
+      "timeline",
+      "delivery",
+      "due date",
+      "completion",
+      "deadline"
+    ]
   }
+  "strict_best_fit": true
 }

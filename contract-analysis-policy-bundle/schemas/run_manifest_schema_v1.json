@@ -1,129 +1,109 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "APS Run Manifest",
-  "version": "1.0",
-
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Contract Analysis Run Manifest (v1)",
+  "version": "v1",
   "type": "object",
-  "required": [
-    "run_id",
-    "contract_id",
-    "timestamps",
-    "fdot",
-    "versions",
-    "artifacts",
-    "retrieval_flags",
-    "metrics",
-    "audit"
-  ],
   "additionalProperties": false,
-
   "properties": {
-    "run_id": { "type": "string" },
-    "contract_id": { "type": "string" },
+    "policy_tag": { "type": "string" },
+    "schema_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "output_schemas": { "type": "string" },
+        "api_schemas": { "type": "string" },
+        "run_manifest_schema": { "type": "string" }
+      },
+      "required": ["output_schemas", "api_schemas", "run_manifest_schema"]
+    },
 
     "timestamps": {
       "type": "object",
-      "required": ["submitted_at", "started_at", "completed_at"],
       "additionalProperties": false,
       "properties": {
-        "submitted_at": { "type": "string" },
-        "started_at": { "type": "string" },
-        "completed_at": { "type": "string" }
+        "queued_at": { "type": "string", "format": "date-time" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" }
       }
     },
 
-    "fdot": {
+    "input": {
       "type": "object",
-      "required": ["fdot_contract", "fdot_year", "confidence", "rationale", "evidence"],
       "additionalProperties": false,
       "properties": {
-        "fdot_contract": { "type": "boolean" },
-        "fdot_year": {
-          "type": ["string", "null"]
-        },
-        "confidence": { "type": "number" },
-        "rationale": { "type": "string" },
-        "evidence": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
+        "source_file": { "type": "string" },
+        "source_uri": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "mime": { "type": "string" },
+        "pages": { "type": "integer", "minimum": 0 }
       }
     },
 
-    "versions": {
+    "parameters": {
       "type": "object",
-      "required": ["rulebook_version", "schema_version"],
       "additionalProperties": false,
       "properties": {
-        "rulebook_version": { "type": "string" },
-        "schema_version": { "type": "string" }
+        "model": { "type": "string" },
+        "temperature": { "type": "number" },
+        "max_output_tokens": { "type": "integer", "minimum": 1 },
+        "timeout_seconds": { "type": "integer", "minimum": 1 },
+        "runtime_config_sha256": { "type": "string" }
       }
     },
 
     "artifacts": {
       "type": "object",
-      "required": ["json_uri", "pdf_uri", "checksums"],
       "additionalProperties": false,
       "properties": {
-        "json_uri": { "type": "string" },
-        "pdf_uri": { "type": "string" },
-        "checksums": {
-          "type": "object",
-          "required": ["json_sha256", "pdf_sha256"],
-          "additionalProperties": false,
-          "properties": {
-            "json_sha256": { "type": "string" },
-            "pdf_sha256": { "type": "string" }
-          }
-        }
-      }
-    },
-
-    "retrieval_flags": {
-      "type": "object",
-      "required": ["fdot_year_filter_locked", "embedding_model", "stores"],
-      "additionalProperties": false,
-      "properties": {
-        "fdot_year_filter_locked": { "type": "boolean" },
-        "embedding_model": { "type": "string" },
-        "stores": {
-          "type": "object",
-          "additionalProperties": { "type": "string" }
-        }
+        "json": { "type": "string" },
+        "html": { "type": "string" },
+        "pdf": { "type": "string" }
       }
     },
 
     "metrics": {
       "type": "object",
-      "required": ["tokens", "latency_ms", "cost_usd"],
-      "additionalProperties": false,
+      "additionalProperties": true,
       "properties": {
-        "tokens": {
-          "type": "object",
-          "required": ["prompt", "completion", "total"],
-          "additionalProperties": false,
-          "properties": {
-            "prompt": { "type": "integer" },
-            "completion": { "type": "integer" },
-            "total": { "type": "integer" }
-          }
-        },
-        "latency_ms": { "type": "integer" },
-        "cost_usd": { "type": "number" }
+        "duration_seconds": { "type": "number", "minimum": 0 },
+        "tokens_input": { "type": "integer", "minimum": 0 },
+        "tokens_output": { "type": "integer", "minimum": 0 },
+        "sections": { "type": "integer", "minimum": 0 },
+        "items": { "type": "integer", "minimum": 0 },
+        "unique_items": { "type": "integer", "minimum": 0 }
       }
     },
 
-    "audit": {
-      "type": "object",
-      "required": ["source_checksums", "notes"],
-      "additionalProperties": false,
-      "properties": {
-        "source_checksums": {
-          "type": "array",
-          "items": { "type": "string" }
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "level": { "type": "string", "enum": ["error", "warning", "info"] },
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "path": { "type": "array", "items": { "type": "string" } }
         },
-        "notes": { "type": "string" }
+        "required": ["level", "code", "message", "path"]
       }
-    }
+    },
+
+    "files": {
+      "type": "array",
+      "description": "File inventory and digests used for this run (policy + inputs).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string" }
+        },
+        "required": ["path", "sha256"]
+      }
+    },
+
+    "success": { "type": "boolean" },
+    "error": { "type": "object", "additionalProperties": true }
   }
 }

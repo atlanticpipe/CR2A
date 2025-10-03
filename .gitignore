@@ -1,0 +1,5 @@
+
+# ignore big/local files
+contracts/*.pdf
+
+contracts/*.pdf

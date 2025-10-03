@@ -1,84 +1,21 @@
 {
-  // =====================================================================
-  // APS Contract Analysis — Orchestrator Runtime Config v1
-  // File: orchestrator/config/runtime_v1.jsonc
-  // Purpose: Central, environment-agnostic knobs the agent reads at startup.
-  // Notes:
-  // - No secrets here. Secrets go in GitHub → Settings → Secrets and variables → Actions.
-  // - policy_bundle_tag must match policy/version_lock.schemas_v1.json → "tag".
-  // - enforce_sha256 must mirror your version lock so CI + runtime agree.
-  // =====================================================================
+  // Centralized model/runtime defaults used by the orchestrator.
+  // NOTE: Environment variables override these (see .env.example).
 
-  "meta": {
-    "version": "1.0",                 // runtime config version
-    "owner": "Atlantic Pipe Services", // audit label
-    "updated_utc": "2025-10-01T00:00:00Z"
-  },
+  // ---------------------------
+  // Model + generation controls
+  // ---------------------------
+  "model": "gpt-4o-mini",           // default model (can override via OPENAI_MODEL)
+  "temperature": 0,                  // deterministic extraction
+  "max_output_tokens": 2000,         // keep outputs bounded
 
-  // ---------------------------------------------------------------------
-  // Policy bundle pinning
-  // ---------------------------------------------------------------------
-  "policy_bundle": {
-    "tag": "schemas@v1.0",            // MUST equal version_lock.schemas_v1.json: .tag
-    "enforce_sha256": true            // MUST align with version_lock meta.enforce_sha256
-  },
+  // ---------------------------
+  // Networking / timeouts
+  // ---------------------------
+  "timeout_seconds": 120,            // per-request network timeout
 
-  // ---------------------------------------------------------------------
-  // OpenAI model/runtime defaults (no secrets)
-  // ---------------------------------------------------------------------
-  "openai": {
-    "model": "gpt-4.1",               // swap if you’ve standardized on another model
-    "temperature": 0.1,               // low variance for deterministic legal outputs
-    "max_output_tokens": 4000,        // guardrail; orchestrator may paginate sections
-    "json_mode": true                 // instructs the agent to emit strict JSON bodies
-  },
-
-  // ---------------------------------------------------------------------
-  // Vector stores (logical names → IDs injected via env at runtime)
-  // Orchestrator should resolve these by reading env vars:
-  //   VECTOR_STORE_INTERNAL_POLICY_ID, VECTOR_STORE_FDOT_2023_ID, VECTOR_STORE_FDOT_2024_ID
-  // ---------------------------------------------------------------------
-  "vector_stores": {
-    "internal_policy_store_id": "${VECTOR_STORE_INTERNAL_POLICY_ID}",
-    "fdot_specs_2023_store_id": "${VECTOR_STORE_FDOT_2023_ID}",
-    "fdot_specs_2024_store_id": "${VECTOR_STORE_FDOT_2024_ID}"
-  },
-
-  // ---------------------------------------------------------------------
-  // Canonical document IDs (from your earlier files)
-  // ---------------------------------------------------------------------
-  "doc_ids": {
-    "template_doc_id": "file-VGX1xeDCCyzzNhiWKtivrU",
-    "redline_guidelines_doc_id": "file-SuN86exJDKidXCm3D1xZuX"
-  },
-
-  // ---------------------------------------------------------------------
-  // FDOT detection policy (front-door gate before analysis)
-  // ---------------------------------------------------------------------
-  "fdot_detection": {
-    "enable": true,          // run detector prior to analysis
-    "default_year": null,    // null unless you want a fallback
-    "allowed_years": ["2022", "2023", "2024", "2025"],
-    "abort_if_unresolved": true // fail-fast if fdot_contract=true but year not locked
-  },
-
-  // ---------------------------------------------------------------------
-  // Execution constraints
-  // ---------------------------------------------------------------------
-  "execution": {
-    "fail_fast": true,                 // align with policy/control flags
-    "emit_provenance": true,           // require source/page/span on every ClauseBlock
-    "suppress_extra_text": true,       // template-only outputs; no filler prose
-    "max_sections_per_run": 999,       // safety; set lower if you want chunking
-    "closing_line_exact": "All applicable clauses for [Item #/Title] have been identified and analyzed."
-  },
-
-  // ---------------------------------------------------------------------
-  // Telemetry & logging (no PII)
-  // ---------------------------------------------------------------------
-  "telemetry": {
-    "collect_metrics": true,           // token/latency/cost → manifest.metrics
-    "log_level": "INFO",               // INFO|DEBUG|WARN|ERROR
-    "redact_paths": true               // scrub filesystem details from logs
-  }
+  // ---------------------------
+  // Notes
+  // ---------------------------
+  "notes": "Values here are informational; the OpenAI client reads env overrides first. Keep this in repo; never commit real secrets."
 }

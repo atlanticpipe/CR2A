@@ -1,80 +1,123 @@
-from __future__ import annotations
-import os, httpx, orjson
-from typing import Dict, Any, List
+# -*- coding: utf-8 -*-
+# Thin OpenAI client used by the orchestrator with Structured Outputs + fallback.
 
-OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-API_KEY = os.getenv("OPENAI_API_KEY")
+from __future__ import annotations  # allow forward refs in type hints
+import os                           # read environment variables
+import httpx                        # async HTTP client
+import orjson as json               # fast JSON (used for final parse)
+from typing import Dict, Any, List  # typing annotations
 
-if not API_KEY:
-  # Don’t crash the import; fail at call-time with a clear message
-  pass
 
+# ---- Environment + defaults ---------------------------------------------------
+OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")   # API base URL
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")                   # default model
+API_KEY = os.getenv("OPENAI_API_KEY")                                     # bearer token
+
+# Build common headers once; empty token is OK at import (checked at call time)
 HEADERS = {
-  "Authorization": f"Bearer {API_KEY or ''}",
-  "Content-Type": "application/json",
+    "Authorization": f"Bearer {API_KEY or ''}",   # auth header (may be empty now)
+    "Content-Type": "application/json",           # send JSON body
 }
+
 
 class OpenAIError(RuntimeError):
-  pass
+    """Raised for transport/format errors coming from the API or bad responses."""
+    pass
+
 
 async def llm_structured(messages: List[Dict[str, Any]], json_schema: Dict[str, Any]) -> Dict[str, Any]:
-  """
-  Try the Responses API with JSON Schema (strict). If unavailable or rejected,
-  fall back to JSON-object mode and validate locally later.
-  """
-  if not API_KEY:
-    raise OpenAIError("OPENAI_API_KEY is not set")
+    """
+    Call the OpenAI Responses API and ask for a JSON payload constrained by `json_schema`.
+    If the server rejects structured outputs, fall back to `json_object` and validate locally.
+    Returns a parsed Python dict. Raises OpenAIError on transport/format issues.
+    """
+    # --- basic sanity checks before doing IO ---
+    if not API_KEY:  # enforce presence of the API key at *call* time
+        raise OpenAIError("OPENAI_API_KEY is not set")
 
-url = f"{OPENAI_BASE}/responses"
-# Primary attempt: Structured Outputs (schema-constrained)
-payload = {
-  "model": OPENAI_MODEL,
-  "input": messages,
-  "response_format": {
-  "type": "json_schema",
-  "json_schema": {"name": "aps_contract_output", "strict": True, "schema": json_schema},
-  },
-  "temperature": 0.1,
-}
+    url = f"{OPENAI_BASE}/responses"  # final endpoint for Responses API
 
-async with httpx.AsyncClient(timeout=120) as client:
-  r = await client.post(url, headers=HEADERS, json=payload)
-
-  # If 4xx/5xx, try fallback to json_object mode
-  if r.status_code >= 400:
-    fb = {
-      "model": OPENAI_MODEL,
-      "input": messages,
-      "response_format": {"type": "json_object"},
-      "temperature": 0.1,
+    # Primary attempt: Structured Outputs (strict JSON Schema on the server)
+    payload = {
+        "model": OPENAI_MODEL,                      # which model to use
+        "input": messages,                          # chat-style list of messages
+        "response_format": {                        # strict JSON Schema enforcement
+            "type": "json_schema",
+            "json_schema": {
+                "name": "aps_contract_output",      # schema name (arbitrary but stable)
+                "strict": True,                     # require strict server-side validation
+                "schema": json_schema               # the actual Draft-07 schema
+            },
+        },
+        "temperature": 0.1,                         # keep outputs deterministic-ish
     }
-    r2 = await client.post(url, headers=HEADERS, json=fb)
-    if r2.status_code >= 400:
-      raise OpenAIError(f"OpenAI error {r2.status_code}: {r2.text}")
-    data = r2.json()
-  else:
-    data = r.json()
 
-# Extract JSON text robustly (Responses API shape)
-text = (
-  data.get("output_text")
-  or _first_text(data.get("output"))
-  or data.get("content")
-  or "{}"
-)
-try:
-  return orjson.loads(text)
-except Exception as e:
-  raise OpenAIError(f"Model returned non-JSON payload: {e}\n{text[:400]}")
+    async with httpx.AsyncClient(timeout=120) as client:              # create client w/ timeout
+        r = await client.post(url, headers=HEADERS, json=payload)     # send primary request
+
+        # Fallback path: if server rejects structured outputs, request a plain JSON object
+        if r.status_code >= 400:
+            fb = {
+                "model": OPENAI_MODEL,                                # same model
+                "input": messages,                                    # same messages
+                "response_format": {"type": "json_object"},           # relaxed format
+                "temperature": 0.1,
+            }
+            r2 = await client.post(url, headers=HEADERS, json=fb)     # send fallback request
+            if r2.status_code >= 400:                                 # both attempts failed
+                raise OpenAIError(f"OpenAI error {r2.status_code}: {r2.text}")
+            data = r2.json()                                          # parse HTTP JSON frame
+        else:
+            data = r.json()                                           # parse HTTP JSON frame
+
+    # Extract the assistant JSON text from the Responses API shape
+    text = (
+        data.get("output_text")                # simple path (some SDKs flatten)
+        or _first_text(data.get("output"))     # canonical Responses API structure
+        or data.get("content")                 # defensive fallback
+        or "{}"                                # ensure we pass something to the parser
+    )
+
+    # Parse the model’s JSON string robustly
+    try:
+        return json.loads(text)                # fast JSON → Python dict
+    except Exception as e:
+        # Include a small snippet of the bad payload for debugging
+        snippet = text[:400].replace("\n", "\\n")
+        raise OpenAIError(f"Model returned non-JSON payload: {e}\n{snippet}")
+
 
 def _first_text(output: Any) -> str | None:
-  """
-  Responses API returns: {"output":[{"content":[{"type":"output_text","text":"..."}]}]}
-  """
-  try:
-    return output[0]["content"][0]["text"]
-  except Exception:
-    return None
+    """
+    Pull the first text chunk from the Responses API shape:
+      {"output":[{"content":[{"type":"output_text","text":"..."}]}]}
+    Returns None if the expected shape isn’t present.
+    """
+    try:
+        return output[0]["content"][0]["text"]  # walk the nested arrays/maps
+    except Exception:
+        return None
 
-add OpenAI client with structured-outputs + fallback
+# add near the bottom of openai_client.py
+
+class _Client:
+    """Tiny wrapper so cli.py can call client.extract_json(...)."""
+    def __init__(self, model: str | None = None):
+        self.model = model or os.getenv("OPENAI_MODEL", OPENAI_MODEL)
+
+    async def extract_json_async(self, text: str, schema: dict, system_prompt: str, name: str = "contract_template_v1") -> dict:
+        # build messages in the format llm_structured expects
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ]
+        return await llm_structured(messages, schema)
+
+    def extract_json(self, text: str, schema: dict, system_prompt: str, name: str = "contract_template_v1") -> dict:
+        # convenience sync wrapper for CLI (runs the coroutine)
+        import asyncio
+        return asyncio.run(self.extract_json_async(text, schema, system_prompt, name))
+
+def build_client_from_env() -> _Client:
+    """Factory used by cli.py; honors OPENAI_MODEL if set."""
+    return _Client()

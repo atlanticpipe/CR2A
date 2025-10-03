@@ -1,22 +1,53 @@
+# ---- Build backend (Setuptools is fine for this repo) -----------------------
+[build-system]
+requires = ["setuptools>=68", "wheel", "pydantic>=2.8.2"]
+build-backend = "setuptools.build_meta"
+
+# ---- Project metadata --------------------------------------------------------
 [project]
-name = "aps-orchestrator"
-version = "0.1.0"
-description = "Single-prompt contract analysis orchestrator with strict schemas"
-authors = [{ name = "APS" }]
+name = "aps-contract-orchestrator"          # package name on install
+version = "0.1.0"                           # bump with changes
+description = "Automates contract analysis and fills a policy-compliant template."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"                  # match your Codespaces image
+authors = [{ name = "APS", email = "ops@example.com" }]
+
+# ---- Runtime dependencies (pin with lower bounds; upper bounds via CI) -------
 dependencies = [
-  "fastapi>=0.112",
-  "uvicorn>=0.30",
-  "pydantic>=2.7",
-  "httpx>=0.27",
-  "jsonschema>=4.22",
-  "python-dotenv>=1.0",
-  "typer>=0.12",
-  "orjson>=3.10"
+  "openai>=1.40.0",         # new SDK w/ Responses API + json_schema support
+  "python-dotenv>=1.0.1",   # loads .env with OPENAI_API_KEY
+  "jsonschema>=4.21.0",     # double-checks model output against schema
+  "json5>=0.9.25",          # parse runtime_v1.jsonc (JSON with comments)
+  "pypdf>=4.2.0",           # PDF text extraction
+  "docx2txt>=0.8",          # DOCX text extraction
+  "Jinja2>=3.1.4",          # render HTML from the filled template
+  "pdfkit>=1.0.0",          # HTML -> PDF bridge (wkhtmltopdf binary optional)
+  "orjson>=3.10",           # Used for final parse
 ]
 
+# ---- Optional dev tooling ----------------------------------------------------
 [project.optional-dependencies]
-pdf = ["reportlab>=4.2", "pypdf>=5.0"]
+dev = [
+  "ruff>=0.5.6", "black>=24.8.0", "pytest>=8.2.0", "mypy>=1.10.0",
+  "types-PyYAML", "types-requests"
+]
 
-Add pyproject.toml for orchestrator
+# ---- Console entrypoint (lets you run `aps-analyze`) -------------------------
+[project.scripts]
+aps-analyze = "orchestrator.cli:main"
+
+# ---- Tell Setuptools our code lives in ./src --------------------------------
+[tool.setuptools]
+package-dir = { "" = "src" }                # root package directory
+
+[tool.setuptools.packages.find]
+where = ["src"]                              # discover packages under ./src
+
+# ---- Code style (optional but helpful) --------------------------------------
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E","F","I","UP"]
