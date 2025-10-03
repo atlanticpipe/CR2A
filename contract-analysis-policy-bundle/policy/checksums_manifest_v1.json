@@ -3,43 +3,53 @@
   "files": [
     {
       "path": "policy/checksums_manifest_v1.json",
-      "sha256": "3ce7a909d443bb9a8e02ed220ed7afedeb30ff950cbe1dbbcbda6e13c1557817"
+      "sha256": "558b11b009e1c6215a755973e21cd452adfad4abe3fb75b8209f89fffb223854",
+      "size_bytes": 1479
     },
     {
       "path": "policy/control_flags_v1.json",
-      "sha256": "1d3f4e726cf049a1ce92f12d517813def238dc7a974da16036ba76375fad413f"
+      "sha256": "1d3f4e726cf049a1ce92f12d517813def238dc7a974da16036ba76375fad413f",
+      "size_bytes": 110
     },
     {
       "path": "policy/policy_rules_v1.json",
-      "sha256": "2f8c91bf0dc8c098265fda0c61bf294f270992b22f691b470c5bacb8c727545b"
+      "sha256": "2f8c91bf0dc8c098265fda0c61bf294f270992b22f691b470c5bacb8c727545b",
+      "size_bytes": 3832
     },
     {
       "path": "policy/rulebook_v1.yaml",
-      "sha256": "1a283e8af29e8f7a5d3b984c5bc5405bac8b0512adec49369d2221f6c66b5c66"
+      "sha256": "1a283e8af29e8f7a5d3b984c5bc5405bac8b0512adec49369d2221f6c66b5c66",
+      "size_bytes": 5435
     },
     {
       "path": "policy/section_map_v1.json",
-      "sha256": "b4c47006681a13d358428967809489f8a8aec8a23f9bb97031683239c59d62c2"
+      "sha256": "b4c47006681a13d358428967809489f8a8aec8a23f9bb97031683239c59d62c2",
+      "size_bytes": 4682
     },
     {
       "path": "policy/validation_rules_v1.json",
-      "sha256": "e989043ae145a8fb415863b77854132e5a4f260bb8a8c09c9ca98e8d4e6f459b"
+      "sha256": "e989043ae145a8fb415863b77854132e5a4f260bb8a8c09c9ca98e8d4e6f459b",
+      "size_bytes": 749
     },
     {
       "path": "policy/version_lock.schemas_v1.json",
-      "sha256": "d9fd6686128037a02feac9995efb98042c0cf347334214831ee99466e61a4728"
+      "sha256": "de3ba416e74c7e8788f78ee050f13cf6f936d2043e327d99770d349121a15ddb",
+      "size_bytes": 1851
     },
     {
       "path": "schemas/api_schemas_v1.json",
-      "sha256": "b5c80159332351f2dfedfe044d2e260bd8527dbd62c23860123893353be77bb2"
+      "sha256": "b5c80159332351f2dfedfe044d2e260bd8527dbd62c23860123893353be77bb2",
+      "size_bytes": 1778
     },
     {
       "path": "schemas/output_schemas_v1.json",
-      "sha256": "42532ad3393f5864569a868df3d927a87ffd05e6883cff375a8c320b659513bb"
+      "sha256": "42532ad3393f5864569a868df3d927a87ffd05e6883cff375a8c320b659513bb",
+      "size_bytes": 5087
     },
     {
       "path": "schemas/run_manifest_schema_v1.json",
-      "sha256": "79a7ad8cf3f336a7d6e128313356c9a0299ce927467d38fc09f7f0349c88fce1"
+      "sha256": "79a7ad8cf3f336a7d6e128313356c9a0299ce927467d38fc09f7f0349c88fce1",
+      "size_bytes": 3295
     }
   ]
 }
