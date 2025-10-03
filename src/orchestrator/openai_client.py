@@ -1,123 +1,194 @@
-# -*- coding: utf-8 -*-
-# Thin OpenAI client used by the orchestrator with Structured Outputs + fallback.
+# openai_client.py
+# A tiny OpenAI client with Structured Outputs (JSON Schema) + fallback.
+# Provides build_client_from_env(...) → client.extract_json(...)
 
-from __future__ import annotations  # allow forward refs in type hints
-import os                           # read environment variables
-import httpx                        # async HTTP client
-import orjson as json               # fast JSON (used for final parse)
-from typing import Dict, Any, List  # typing annotations
+from __future__ import annotations
 
+# --- stdlib imports
+import os                                   # read env vars
+from typing import Any, Dict, List, Optional # typing helpers
 
-# ---- Environment + defaults ---------------------------------------------------
-OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")   # API base URL
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")                   # default model
-API_KEY = os.getenv("OPENAI_API_KEY")                                     # bearer token
-
-# Build common headers once; empty token is OK at import (checked at call time)
-HEADERS = {
-    "Authorization": f"Bearer {API_KEY or ''}",   # auth header (may be empty now)
-    "Content-Type": "application/json",           # send JSON body
-}
+# --- third-party imports
+import httpx                                # HTTP client
+import orjson                               # fast JSON encode/decode
 
 
+# =============================
+# Environment & defaults
+# =============================
+OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")  # API base URL
+DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")                 # default model
+DEFAULT_TEMP = float(os.getenv("OPENAI_TEMPERATURE", "0") or 0)               # default temperature (0=deterministic)
+
+
+# =============================
+# Errors
+# =============================
 class OpenAIError(RuntimeError):
-    """Raised for transport/format errors coming from the API or bad responses."""
+    """Raised for any OpenAI client errors."""
     pass
 
 
-async def llm_structured(messages: List[Dict[str, Any]], json_schema: Dict[str, Any]) -> Dict[str, Any]:
+# =============================
+# Small helpers
+# =============================
+def _first_text(output: Any) -> Optional[str]:
     """
-    Call the OpenAI Responses API and ask for a JSON payload constrained by `json_schema`.
-    If the server rejects structured outputs, fall back to `json_object` and validate locally.
-    Returns a parsed Python dict. Raises OpenAIError on transport/format issues.
-    """
-    # --- basic sanity checks before doing IO ---
-    if not API_KEY:  # enforce presence of the API key at *call* time
-        raise OpenAIError("OPENAI_API_KEY is not set")
-
-    url = f"{OPENAI_BASE}/responses"  # final endpoint for Responses API
-
-    # Primary attempt: Structured Outputs (strict JSON Schema on the server)
-    payload = {
-        "model": OPENAI_MODEL,                      # which model to use
-        "input": messages,                          # chat-style list of messages
-        "response_format": {                        # strict JSON Schema enforcement
-            "type": "json_schema",
-            "json_schema": {
-                "name": "aps_contract_output",      # schema name (arbitrary but stable)
-                "strict": True,                     # require strict server-side validation
-                "schema": json_schema               # the actual Draft-07 schema
-            },
-        },
-        "temperature": 0.1,                         # keep outputs deterministic-ish
-    }
-
-    async with httpx.AsyncClient(timeout=120) as client:              # create client w/ timeout
-        r = await client.post(url, headers=HEADERS, json=payload)     # send primary request
-
-        # Fallback path: if server rejects structured outputs, request a plain JSON object
-        if r.status_code >= 400:
-            fb = {
-                "model": OPENAI_MODEL,                                # same model
-                "input": messages,                                    # same messages
-                "response_format": {"type": "json_object"},           # relaxed format
-                "temperature": 0.1,
-            }
-            r2 = await client.post(url, headers=HEADERS, json=fb)     # send fallback request
-            if r2.status_code >= 400:                                 # both attempts failed
-                raise OpenAIError(f"OpenAI error {r2.status_code}: {r2.text}")
-            data = r2.json()                                          # parse HTTP JSON frame
-        else:
-            data = r.json()                                           # parse HTTP JSON frame
-
-    # Extract the assistant JSON text from the Responses API shape
-    text = (
-        data.get("output_text")                # simple path (some SDKs flatten)
-        or _first_text(data.get("output"))     # canonical Responses API structure
-        or data.get("content")                 # defensive fallback
-        or "{}"                                # ensure we pass something to the parser
-    )
-
-    # Parse the model’s JSON string robustly
-    try:
-        return json.loads(text)                # fast JSON → Python dict
-    except Exception as e:
-        # Include a small snippet of the bad payload for debugging
-        snippet = text[:400].replace("\n", "\\n")
-        raise OpenAIError(f"Model returned non-JSON payload: {e}\n{snippet}")
-
-
-def _first_text(output: Any) -> str | None:
-    """
-    Pull the first text chunk from the Responses API shape:
+    Responses API shape helper:
       {"output":[{"content":[{"type":"output_text","text":"..."}]}]}
-    Returns None if the expected shape isn’t present.
+    We try to pull the first text leaf out of that structure.
     """
     try:
-        return output[0]["content"][0]["text"]  # walk the nested arrays/maps
+        return output[0]["content"][0]["text"]
     except Exception:
         return None
 
-# add near the bottom of openai_client.py
 
-class _Client:
-    """Tiny wrapper so cli.py can call client.extract_json(...)."""
-    def __init__(self, model: str | None = None):
-        self.model = model or os.getenv("OPENAI_MODEL", OPENAI_MODEL)
+def _mask(s: str, n: int = 8) -> str:
+    """Mask a secret for logs (keep first n chars)."""
+    return f"{s[:n]}..." if s else ""
 
-    async def extract_json_async(self, text: str, schema: dict, system_prompt: str, name: str = "contract_template_v1") -> dict:
-        # build messages in the format llm_structured expects
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": text},
+
+# =============================
+# Client
+# =============================
+class OpenAIClient:
+    """Tiny client that performs a schema-constrained call with fallback."""
+
+    def __init__(
+        self,
+        api_key: str,                          # required API key
+        base_url: str = OPENAI_BASE,           # base API URL
+        model: str = DEFAULT_MODEL,            # model name
+        temperature: float = DEFAULT_TEMP,     # sampling temp
+        timeout: int = 120,                    # request timeout (seconds)
+    ) -> None:
+        if not api_key:
+            raise OpenAIError(
+                "OPENAI_API_KEY is not set. Please set it in your environment variables. See the README or OpenAI docs for setup instructions."
+            )
+        self.api_key = api_key                      # store key for headers
+        self.base_url = base_url.rstrip("/")        # normalize base url
+        self.model = model                          # store model name
+        self.temperature = float(temperature or 0)  # cast to float
+        self.timeout = timeout                      # seconds
+
+        # prebuild headers to avoid redoing work on every call
+        self._headers = {
+            "Authorization": f"Bearer {self.api_key}",  # auth header
+            "Content-Type": "application/json",         # JSON content type
+        }
+
+    # -------------------------
+    # public: schema-constrained extraction
+    # -------------------------
+    def extract_json(
+        self,
+        *,
+        text: str,                                   # raw contract text
+        schema: Dict[str, Any],                      # JSON Schema to enforce
+        system_prompt: str,                          # system message
+        name: str = "aps_contract_output",           # schema label
+        policy_root: Optional[str] = None,           # optional for trace/debug
+    ) -> Dict[str, Any]:
+        """
+        Use the Responses API with JSON Schema (strict). If that fails (e.g. 4xx/5xx),
+        we fall back to `json_object` and then parse/return the JSON.
+        """
+        # API key validation is now performed during client initialization.
+
+        url = f"{self.base_url}/responses"              # endpoint URL
+
+        # Build messages for the Responses API:
+        # Keep the format simple: system + user(text)
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},   # role instruction
+            {"role": "user", "content": text},              # contract content
         ]
-        return await llm_structured(messages, schema)
 
-    def extract_json(self, text: str, schema: dict, system_prompt: str, name: str = "contract_template_v1") -> dict:
-        # convenience sync wrapper for CLI (runs the coroutine)
-        import asyncio
-        return asyncio.run(self.extract_json_async(text, schema, system_prompt, name))
+        # Primary attempt: strict JSON Schema
+        primary_payload = {
+            "model": self.model,            # model
+            "input": messages,              # messages array
+            "response_format": {            # tell the API to use schema
+                "type": "json_schema",
+                "json_schema": {
+                    "name": name,           # schema name/label
+                    "strict": True,         # hard enforcement
+                    "schema": schema,       # the actual JSON Schema
+                },
+            },
+            "temperature": self.temperature # deterministic by default
+        }
 
-def build_client_from_env() -> _Client:
-    """Factory used by cli.py; honors OPENAI_MODEL if set."""
-    return _Client()
+        # Perform HTTP request synchronously
+        with httpx.Client(timeout=self.timeout) as client:
+            r = client.post(url, headers=self._headers, json=primary_payload)  # send primary
+            if r.status_code >= 400:
+                # Fallback to json_object mode if the server rejected schema
+                fb_payload = {
+                    "model": self.model,            # model
+                    "input": messages,              # messages
+                    "response_format": {"type": "json_object"},  # ask for a JSON object
+                    "temperature": self.temperature
+                }
+                r2 = client.post(url, headers=self._headers, json=fb_payload)  # fallback call
+                if r2.status_code >= 400:
+                    raise OpenAIError(f"OpenAI error {r2.status_code}: {r2.text}")  # fail if both fail
+                data = r2.json()   # fallback JSON
+            else:
+                data = r.json()    # primary JSON
+
+        # Extract text from the Responses API shape in a robust way
+        text_out = (
+            data.get("output_text")            # direct text field
+            or _first_text(data.get("output")) # nested array form
+            or data.get("content")             # older compatibility
+            or "{}"                            # make sure we parse something
+        )
+
+        try:
+            return orjson.loads(text_out)      # return parsed JSON
+        except Exception as e:
+            # Keep a short preview of what we got to aid debugging
+            preview = text_out if len(text_out) < 400 else text_out[:400]
+            raise OpenAIError(f"Model returned non-JSON payload: {e}\n{preview}")
+
+
+# =============================
+# Factory
+# =============================
+def build_client_from_env(
+    *,
+    model: Optional[str] = None,            # override model if desired
+    temperature: Optional[float] = None,    # override temperature
+    timeout: int = 120,                     # request timeout
+) -> OpenAIClient:
+    """
+    Construct an OpenAIClient using environment variables, with optional overrides.
+    The CLI calls this after load_dotenv() so .env values are available.
+    """
+    api_key = os.getenv("OPENAI_API_KEY")                     # get API key
+    base = os.getenv("OPENAI_BASE_URL", OPENAI_BASE)          # base URL
+    mdl = model or os.getenv("OPENAI_MODEL", DEFAULT_MODEL)   # model selection
+
+    if temperature is not None:
+        tmp = temperature
+    else:
+        temp_env = os.getenv("OPENAI_TEMPERATURE")
+        if temp_env is not None:
+            tmp = float(temp_env)
+        else:
+            tmp = DEFAULT_TEMP
+
+    # For minimal visibility (useful when troubleshooting), you may log the API key prefix.
+    # However, logging API keys (even masked) is discouraged for security reasons.
+    # If needed, use a proper logging framework with configurable levels.
+
+    return OpenAIClient(                                      # return configured client
+        api_key=api_key,                                      # required
+        base_url=base,                                        # API base
+        model=mdl,                                            # model
+        temperature=tmp,                                      # temperature
+        timeout=timeout,                                      # timeout seconds
+    )

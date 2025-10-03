@@ -1,17 +1,29 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "version": "v1",
-  "description": "Validator policy for APS Clause Risk & Compliance Summary (Sections I–VIII).",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "APS Validation Rules",
+  "version": "1.0",
+
   "validation": {
+    "json_schema_enforcement": true,
+    "abort_on_failure": true,
+
     "mandatory_fields": {
-      "section_I": 8,  // Section I must have exactly 8 fields (per template)
+      "section_I": 8,
       "section_II_to_VI_closing_line": "All applicable clauses for [Item #/Title] have been identified and analyzed."
     },
-    "strict_string_match_headers": false, // schema already enforces required sections
+    "strict_string_match_headers": true,
+
+    "fail_fast": true,
+    "retry_on_failure": false,
+
     "audit_logging": {
-      "record_provenance": true // every clause block must include provenance {source,page,span}
+      "record_validation_steps": true,
+      "record_provenance": true,
+      "include_checksums": true
     },
+
     "omission_check": {
+      "require_final_check": true,
       "allowed_string": "No omissions or uncategorized risks identified."
     }
   }
