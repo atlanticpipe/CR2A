@@ -1,20 +1,16 @@
 # -*- coding: utf-8 -*-
 # Validation helpers: JSON Schema + policy-rule enforcement.
 # Every function is import-safe (no code runs at import time).
-
 from __future__ import annotations
-
 from jsonschema import Draft7Validator  # validates against Draft-07 schemas
 from typing import Dict, Any, Iterable, List
 import asyncio                                  # stdlib: event loop
 from utils.error_handler import handle_exception  # our handler function
 
-# ---------- JSON Schema validation (strict) ----------
+# JSON Schema validation (strict)
 def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> None:
-    """
-    Validate 'data' against the provided JSON Schema (Draft-07).
-    Raises ValueError with a compact message on any violation.
-    """
+    # Validate 'data' against the provided JSON Schema (Draft-07).
+    # Raises ValueError with a compact message on any violation.
     v = Draft7Validator(schema)  # build validator
     # iter_errors() (fixed typo) yields all errors; sort for stable messages
     errors = sorted(v.iter_errors(data), key=lambda e: list(e.path))
@@ -22,14 +18,11 @@ def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> Non
         msgs = [f"{'/'.join(map(str, e.path))}: {e.message}" for e in errors]
         raise ValueError("Schema validation failed: " + "; ".join(msgs))
 
-
-# ---------- Policy Rule Enforcement (bundle-driven) ----------
+# Policy Rule Enforcement (bundle-driven)
 def enforce_validation_rules(output_json: Dict[str, Any], rules: Dict[str, Any]) -> None:
-    """
-    Applies repo-defined validation rules on top of JSON Schema.
-    Expects the structure from policy/validation_rules_v1.json.
-    Raises ValueError on first violation (fail-fast).
-    """
+    # Applies repo-defined validation rules on top of JSON Schema.
+    # Expects the structure from policy/validation_rules_v1.json.
+    # Raises ValueError on first violation (fail-fast).
     val = rules.get("validation", {})  # pull "validation" sub-object
 
     # --- Mandatory SECTION I field count (exact) ---
@@ -43,13 +36,13 @@ def enforce_validation_rules(output_json: Dict[str, Any], rules: Dict[str, Any])
                 f"SECTION_I must contain {expected_fields} fields (found {len(section_I.keys())})."
             )
 
-    # --- Canonical closing line required for each item in II–VI ---
+    # Canonical closing line required for each item in II–VI
     pattern = _get_in(val, "mandatory_fields", "section_II_to_VI_closing_line")
     if pattern:  # fixed 'if closing' missing colon
         for key in ("SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"):  # fixed key typos
             _assert_closing_line(output_json.get(key), key, pattern)
 
-    # --- Strict header names (if enabled) ---
+    # Strict header names (if enabled)
     # Note: your JSON uses "strict_string_match_headers"; support that.
     if _get_in(val, "strict_string_match_headers"):
         required_headers = set(
@@ -64,15 +57,15 @@ def enforce_validation_rules(output_json: Dict[str, Any], rules: Dict[str, Any])
                     f"Header set mismatch. Missing={sorted(missing)} Extra={sorted(extra)}"
                 )
 
-    # --- Provenance checks (optional, conservative) ---
+    # Provenance checks (optional, conservative)
     prov_required = _get_in(val, "audit_logging", "record_provenance")
     if prov_required:  # fixed stray label 'prov_required:' to proper if
         _assert_provenance(output_json)
 
 
-# ---------- Helpers ----------
+# Helpers
 def _get_in(d: Dict[str, Any], *path) -> Any:
-    """Safely walk nested dict by keys; return None if any key missing."""
+    #Safely walk nested dict by keys; return None if any key missing.
     cur = d
     for k in path:
         if not isinstance(cur, dict) or k not in cur:
@@ -82,7 +75,7 @@ def _get_in(d: Dict[str, Any], *path) -> Any:
 
 
 def _assert_closing_line(items: Any, section_key: str, closing: str) -> None:
-    """Ensure each Section II–VI item carries the canonical closing line string."""
+    #Ensure each Section II–VI item carries the canonical closing line string.
     if items is None:
         raise ValueError(f"{section_key} is required and must be a non-empty array.")
     if not isinstance(items, list):
@@ -95,10 +88,8 @@ def _assert_closing_line(items: Any, section_key: str, closing: str) -> None:
 
 
 def _assert_provenance(output: Dict[str, Any]) -> None:
-    """
-    Walk Sections II–VI and VII items to ensure each clause item carries some evidence/provenance.
-    This is a conservative check; exact fields are defined in output_schemas.
-    """
+    # Walk Sections II–VI and VII items to ensure each clause item carries some evidence/provenance.
+    # This is a conservative check; exact fields are defined in output_schemas.
     def _has_prov(obj: Dict[str, Any]) -> bool:
         # Accept either 'provenance', 'evidence', or 'source' arrays/objects.
         for k in ("provenance", "evidence", "source"):
@@ -128,8 +119,7 @@ if __name__ == "__main__":
     # Optional: put ad-hoc tests here if you want to run this file directly.
     pass
 
-# ---------- High-level wrapper used by the CLI ----------
-
+# High-level wrapper used by the CLI
 from dataclasses import dataclass              # lightweight report container
 from pathlib import Path
 import json                                   # read policy JSON files
@@ -147,7 +137,7 @@ class ValidationReport:
     findings: List[ValidationFinding]
 
 def _load_policy_json(path: Path) -> dict:
-    """Read a JSON file with UTF-8, raising a clean error if missing/bad."""
+    #Read a JSON file with UTF-8, raising a clean error if missing/bad.
     if not path.exists():
         raise FileNotFoundError(f"Missing policy file: {path}")
     return json.loads(path.read_text(encoding="utf-8"))
@@ -156,29 +146,22 @@ def validate_filled_template(
     output_json: Dict[str, Any],
     policy_root: Path,                       # points to ./contract-analysis-policy-bundle
 ) -> ValidationReport:
-    """
-    Validates a filled template JSON against:
-      1) the output schema (Draft-07)
-      2) additional policy rules (closing lines, counts, provenance)
-    Returns a ValidationReport (ok/findings).
-    """
+    # Validates a filled template JSON against:
+    # 1) the output schema (Draft-07)
+    # 2) additional policy rules (closing lines, counts, provenance)
+    # Returns a ValidationReport (ok/findings).
     findings: List[ValidationFinding] = []
-
     try:
         # 1) Load schema + rules directly from the bundle folder
         schema_path = policy_root / "schemas" / "output_schemas_v1.json"
         rules_path  = policy_root / "policy"  / "validation_rules_v1.json"
-
         schema = _load_policy_json(schema_path)     # JSON Schema dict
         rules  = _load_policy_json(rules_path)      # Policy rules dict
-
         # If the schema file wraps definitions, allow a direct schema too.
         # (Your bundle currently exposes the schema as a single object.)
         schema_obj = schema
-
         # 2) JSON Schema validation
         validate_against_schema(output_json, schema_obj)
-
         # 3) Policy-level validation
         enforce_validation_rules(output_json, rules)
 

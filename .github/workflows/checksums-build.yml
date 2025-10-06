@@ -26,7 +26,7 @@ jobs:
       - name: Install jq
         run: |
           set -euo pipefail
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y jq
 
       - name: Debug current manifest (if present)
@@ -43,7 +43,7 @@ jobs:
             echo "No manifest file found."
           fi
 
-      - name: Update canonical size_bytes and sha256
+      - name: Update component sha256 (and optional size_bytes)
         run: |
           set -euo pipefail
           TMP="$(mktemp)"
@@ -53,10 +53,12 @@ jobs:
           jq -c '.canonical[]' "$MAN" | while read -r ART; do
             P="$(jq -r '.path'  <<<"$ART")"
             N="$(jq -r '.name'  <<<"$ART")"
+
             if [ ! -f "$P" ]; then
               echo "Missing canonical file: $P" >&2
               exit 1
             fi
+
             SIZE="$(stat -c%s "$P")"
             SHA="$(sha256sum "$P" | cut -d' ' -f1)"
 
@@ -72,6 +74,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          
           # Ensure MAN is provided and file exists
           : "${MAN:?MAN env var is required}"
           test -f "$MAN" || { echo "::error::Manifest not found at $MAN"; exit 1; }
@@ -80,26 +83,26 @@ jobs:
 
           # Canonicalize (keys sorted; canonical sorted by path; drop manifes_sha256)
           CANON="$(jq -S '
-            .canonical |= (sort_by(.path))
-            | del(.manifest_sha256)
-          ' "$MAN")" || { echo "::error::jq failed to process $MAN"; exit 1;}
+            .components |= (sort_by(.path)) |
+            del(.manifest_sha256)
+          ' "$MAN")" || { echo "::error::jq failed to process $MAN"; exit 1; }
 
-          # Compute hash without newline
-          CALC="$(printf '%s' "$CANON" | sha256sum)"; CALC="${CALC%% *}"
+          # Compute SHA-256 over canonical JSON (no trailing newline in input)
+          CALC="$(printf '%s' "$CANON" | sha256sum | cut -d' ' -f1)"
           echo "canonical manifest_sha256 = $CALC"
           
-          # Write back with stamped hash and fresh timestamp
-          printf '%s' "$CANON" | jq --arg s "$CALC" '
+          # Write hash + fresh timestamp back to the file (preserving everything else)
+          printf '%s' "$CANON" \
+          | jq --arg s "$CALC" '
             .manifest_sha256 = $s
-            | .generated_at = (now | todateiso8601)
-          ' > "STMP"
-          mv "$TMP" "$MAN"
+            | .generated_at  = (now | todateiso8601)
+          ' > "$TMP"
 
       - name: Assert manifest exists
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f "$MAN" ]]; then
+          if [ -f "$MAN" ]; then
             echo "Manifest present at $MAN"
           else
             echo "::error ::Manifest not found at $MAN"
@@ -119,10 +122,12 @@ jobs:
         run: |
           set -euo pipefail
           
+          # Configure git (safe + identity)
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # Did we actually change the manifest?
+          # Is there anything to commit?
           if git diff --quiet -- "$FILE"; then
             echo "No changes to commit."
             # Keep the branch up to date anyway (non-fatal if nothing to pull)
@@ -130,3 +135,10 @@ jobs:
             git pull --rebase origin "${GITHUB_REF_NAME}" || true
             exit 0
           fi
+
+          # Stage, commit, and push the manifest update
+          git add "$FILE"
+          git commit -m "ci: refresh policy component checksums and manifest hash"
+          git fetch origin "${GITHUB_REF_NAME}" || true
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push origin "HEAD:${GITHUB_REF_NAME}"

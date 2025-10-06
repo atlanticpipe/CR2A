@@ -1,10 +1,10 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Contract Analysis API Schemas (v1)",
-  "version": "v1",
+  "version": "1.0",
   "type": "object",
   "additionalProperties": false,
-  "properties": {
+  "definitions": {
     "AnalysisRequest": {
       "type": "object",
       "additionalProperties": false,
@@ -24,27 +24,29 @@
       "additionalProperties": false,
       "properties": {
         "run_id": { "type": "string" },
-        "status": { "$ref": "#/$defs/SubmissionStatus" },
+        "status": { "$ref": "#/$definitions/SubmissionStatus" },
         "queued_at": { "type": "string", "format": "date-time" }
       },
       "required": ["run_id", "status", "queued_at"]
     },
 
-    "AnalysisResult": {
+    "definitions": {
+      "AnalysisResult": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "run_id": { "type": "string" },
-        "status": { "$ref": "#/$defs/CompletionStatus" },
+        "status": { "$ref": "#/$definitions/CompletionStatus" },
         "completed_at": { "type": "string", "format": "date-time" },
         "manifest": { "type": "object", "additionalProperties": true },
         "error": { "type": "object", "additionalProperties": true }
       },
       "required": ["run_id", "status", "completed_at", "manifest"]
     }
+    }
   },
-  "required": ["AnalysisRequest", "SubmissionResponse", "AnalysisResult"],
-  "$defs": {
+  
+  "$definitions": {
     "SubmissionStatus": { "type": "string", "enum": ["queued", "started", "error"] },
     "CompletionStatus": { "type": "string", "enum": ["completed", "failed"] }
   }

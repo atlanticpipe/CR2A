@@ -1,4 +1,3 @@
-# ======================================================================
 # Policy Validate (strict)
 # Validates the policy bundle on every push / PR and on-demand.
 # Gates enforced:
@@ -6,10 +5,7 @@
 # 2) Every artifact path in version_lock.schemas_v1.json exists in manifest
 # 3) Each artifact's recorded sha256 and size_bytes match the actual file
 # 4) If version_lock carries sha256 for a path, it must equal manifest value
-# ======================================================================
-
 name: Policy Validate
-
 on:
   workflow_dispatch: {}              # Manual "Run workflow" button
   push:
@@ -35,7 +31,7 @@ jobs:
       LOCK:     contract-analysis-policy-bundle/policy/version_lock.schemas_v1.json
 
     steps:
-      # --- Checkout repo so we can read files
+      # Checkout repo so we can read files
       - name: Checkout repo (correct SHA)
         uses: actions/checkout@v4
         with:
@@ -43,7 +39,7 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
-      # --- Install jq for JSON processing
+      # Install jq for JSON processing
       - name: Install jq
         run: |
           set -euo pipefail
@@ -54,127 +50,175 @@ jobs:
       - name: Debug env
         run: |
           set +u
-          echo "MAN+${MAN:-<unset.}"
+          echo "MAN+${MAN:-<unset>}"
           echo "LOCK=${LOCK:-<unset>}"
           set -u
           
-      # --- Sanity: manifest exists and parses
+      # Sanity: manifest exists and parses
       - name: Check manifest presence & parseable
         run: |
-          set -Eeuo pipefail
-          set -x
+          set -Euo pipefail                               # -E: inherit ERR traps; -u: error on unset; -o 
+          # set -x                                        # (optional) uncomment for command tracing duri
 
-          echo "MAN=$MAN"
-          echo "PWD=$(pwd)"
+          echo "MAN=${MAN:-<unset>}"                      # show the env path (safe even if unset)
+          echo "PWD=$(pwd)"                               # current working dir
           echo "Repo tree (policy dir):"
-          ls -l contract-analysis-policy-bundle/policy || true
+          ls -l contract-analysis-policy-bundle/policy || true  # list expected folder (non-fatal)
           
-          if [ -z "${MAN:-}" ]; then
+          if [ -z "${MAN:-}" ]; then                      # hard fail if MAN is not provided
             echo "Man env var must be set" >&2
             exit 1
           fi
 
-          echo "File size (bytes): $(stat -c%s "$MAN")"
+          if [ ! -f "$MAN" ]; then                        # extra guard: file must exist
+            echo "Manifest file not found at $MAN" >&2
+            exit 1
+          fi
+
+          echo "File size (bytes): $(stat -c%s "$MAN")"   # quick visibility into artifact size
           echo "First 200 bytes:"
-          head -c 200 "$MAN" || true
+          head -c 200 "$MAN" || true                      # preview bytes (non-fatal)
+
           echo
           echo "---- jq parse ----"
-          jq --version
-          jq -e . "$MAN"
+          jq --version                                    # print jq version for logs
+          jq -e . "$MAN"                                  # ✅ parse & validate JSON; -e makes jq exit non-zero on failure
           rc=$?
           echo "jq exit code = $rc"
           exit $rc
 
+      # (Optional) keep this debug step; just fix parameter expansion
       - name : Debug env
         run: |
-          set +u
-          echo "MAN=${MAN:-<unset<}"
-          echo "LOCK=${LOCK: -<unset>}"
+          set +u                                          # allow echo of possibly-unset vars without failing
+          echo "MAN=${MAN:-<unset>}"                      # ✅ correct default expansion
+          echo "LOCK=${LOCK:-<unset>}"                    # ✅ remove stray space; use proper ':-' default
           set -u
           
-      # --- Enforce canonical top-level manifest_sha256
-      #     Recompute sha256 over the manifest with keys sorted and field removed.
+      # Enforce canonical top-level manifest_sha256
+      # Recompute sha256 over the manifest with keys sorted and field removed.
       - name: Enforce top-level manifest_sha256 (canonical)
         run: |
           set -euo pipefail
+
           # Canonicalize EXACTLY like the build job (no -c; sort keys; sort artifacts; drop field)
           CANON=$(jq -S '
-            .artifacts |= (sort_by(.path))
-            | del(.manifest_sha256)
+            .artifacts |= (sort_by(.path))     # ensure deterministic artifact order
+            | del(.manifest_sha256)            # remove the stored top hash before hashing
           ' "$MAN")
+
           # Compute hash exactly like the build workflow (no extra newline)
           CALC=$(printf '%s' "$CANON" | sha256sum | cut -d' ' -f1)
+
+          # Read the stored top-level hash from the manifest itself
           STORED=$(jq -r '.manifest_sha256' "$MANIFEST_PATH")
+
           echo "Stored: $STORED"
           echo "Calc  : $CALC"
 
-          test -n "$STORED" && [ "$STORED" != "null" ] || { echo "manifest_sha256 is empty" >&2; exit 1; }
-          test "$STORED" = "$CALC" || { echo "Top-level manifest_sha256 mismatch" >&2; exit 1; }
+          # Fail if missing/empty/null
+          if [ -z "${STORED:-}" ] || [ "$STORED" = "null" ]; then
+            echo "manifest_sha256 is empty or null" >&2
+            exit 1
+          fi
+
+          # Must match exactly
+          if [ "$STORED" != "$CALC" ]; then
+            echo "Top-level manifest_sha256 mismatch" >&2
+            exit 1
+          fi
+
           echo "Top-level manifest_sha256 ok"
 
-      # --- Cross-check that every locked path is represented in the manifest
+      # Cross-check that every locked path is represented in the manifest
       - name: Cross-check version_lock ↔ checksums_manifest (paths)
         run: |
           set -euo pipefail
+          # Validate inputs exist and parse as JSON
           test -f "$LOCK" || { echo "Missing $LOCK" >&2; exit 1; }
+          test -f "$MAN"  || { echo "Missing $MAN"  >&2; exit 1; }
           jq -e . "$LOCK" >/dev/null
-          # Build a set of manifest paths (unique)
-          mapfile -t MAN < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
+          jq -e . "$MAN"  >/dev/null
+
+          # Build a unique set of manifest paths (do NOT clobber $MAN; use MAN_PATHS)
+          mapfile -t MAN_PATHS < <(jq -r '.artifacts[].path' "$MAN" | sort -u)
+
           ERR=0
+          # Every locked component path must appear in the manifest artifacts set
           while IFS= read -r P; do
-            if ! printf '%s\n' "${MAN[@]}" | grep -Fx -- "$P" >/dev/null; then
+            if ! printf '%s\n' "${MAN_PATHS[@]}" | grep -Fx -- "$P" >/dev/null; then
               echo "Locked component missing in manifest: $P" >&2
               ERR=1
             fi
           done < <(jq -r '.components[].path' "$LOCK")
+
           test $ERR -eq 0 || exit 1
           echo "All locked paths are present in manifest"
 
-      # --- Verify each artifact’s recorded sha256 and size_bytes match the file on disk
+      # Verify each artifact’s recorded sha256 and size_bytes match the file on disk
       - name: Enforce per-artifact sha256 and size_bytes
         run: |
           set -euo pipefail
           ERR=0
-          while read -r ART; do
-            NAME=$(jq -r '.name'       <<<"$ART")
-            PATHF=$(jq -r '.path'       <<<"$ART")
-            SREC=$(jq -r '.size_bytes'  <<<"$ART")
-            HREC=$(jq -r '.sha256'      <<<"$ART")
 
+          # Iterate each artifact object from the manifest
+          while read -r ART; do
+            NAME=$(jq -r '.name'       <<<"$ART")        # artifact display name
+            PATHF=$(jq -r '.path'       <<<"$ART")        # repo-relative file path
+            SREC=$(jq -r '.size_bytes'  <<<"$ART")        # recorded size (bytes)
+            HREC=$(jq -r '.sha256'      <<<"$ART")        # recorded sha256
+
+            # File must exist
             if [ ! -f "$PATHF" ]; then
-              echo "Missing file: $PATHF (artifact=$NAME)" >&2; ERR=1; continue
+              echo "Missing file: $PATHF (artifact=$NAME)" >&2
+              ERR=1
+              continue
             fi
 
-            SACT=$(stat -c%s "$PATHF")
-            HACT=$(sha256sum "$PATHF"); HACT="${HACT%%*}"
-            [ "$SREC" = "$SACT" ] || { echo "size_bytes mismatch for $NAME ($PATHF) recorded=$SREC actual=$SACT" >&2; ERR=1; }
-            [ "$HREC" = "$HACT" ] || { echo "sha256 mismatch for $NAME ($PATHF) recorded=$HREC actual=$HACT" >&2; ERR=1; }
-          done < <(jq -c '.artifacts[]' "$MANIFEST_PATH")
+            # Compute actual size + hash
+            SACT=$(stat -c%s "$PATHF")                    # actual size (bytes)
+            HACT=$(sha256sum "$PATHF"); HACT="${HACT%% *}"# first field of sha256sum output
+
+            # Validate recorded fields are present/non-null
+            if [ -z "${SREC:-}" ] || [ "$SREC" = "null" ]; then
+              echo "Missing size_bytes in manifest for $PATHF (artifact=$NAME)" >&2
+              ERR=1
+            fi
+            if [ -z "${HREC:-}" ] || [ "$HREC" = "null" ]; then
+              echo "Missing sha256 in manifest for $PATHF (artifact=$NAME)" >&2
+              ERR=1
+            fi
+
+            # Compare size (numeric) and hash (string)
+            [ "${SREC:-x}" != "x" ] && [ "$SREC" -eq "$SACT" ] || { echo "size_bytes mismatch for $NAME ($PATHF) recorded=$SREC actual=$SACT" >&2; ERR=1; }
+            [ "${HREC:-x}" != "x" ] && [ "$HREC" = "$HACT" ] || { echo "sha256 mismatch for $NAME ($PATHF) recorded=$HREC actual=$HACT" >&2; ERR=1; }
+          done < <(jq -c '.artifacts[]' "$MAN")
+
           test $ERR -eq 0 || exit 1
           echo "All artifact sizes + hashes match"
 
-      # --- If version_lock specifies sha256 for any path, it must equal the manifest value
+      # If version_lock specifies sha256 for any path, it must equal the manifest value
       - name: Enforce version_lock sha256 ⇆ manifest sha256 (when provided)
         run: |
           set -euo pipefail
+
           # Build mapping path -> sha from manifest
           MANMAP="$(jq -r '[.artifacts[] | {key:.path, val:.sha256}] | from_entries' "$MAN")"
-          ERR=0
-          jq -c '.components[]' "$LOCK" | while read -r C; do
-            P=$(jq -r '.path' <<<"$C")
-            HSPEC=$(jq -r '.sha256 // empty' <<<"$C")  # empty if not provided
-            test -z "$HSPEC" && continue               # skip when lock didn’t specify a hash
 
+          ERR=0
+          # Use process substitution so the while runs in the current shell (ERR persists)
+          while read -r C; do
+            P=$(jq -r '.path'    <<<"$C")                 # path from version_lock component
+            HSPEC=$(jq -r '.sha256 // empty' <<<"$C")     # empty if not provided
+
+            # If the lock doesn't specify a hash for this component, skip comparison
+            [ -z "${HSPEC:-}" ] && continue
+            
+            # Lookup the manifest's sha256 for this path
             HMAN=$(jq -r --arg p "$P" '.[$p] // empty' <<<"$MANMAP")
+
             if [ -z "$HMAN" ]; then
               echo "path not found in manifest when comparing hash: $P" >&2
               ERR=1
               continue
             fi
-            if [ "$HSPEC" != "$HMAN" ]; then
-              echo "version_lock sha256 != manifest sha256 for $P  lock=$HSPEC manifest=$HMAN" >&2
-              ERR=1
-            fi
-          done
-          test $ERR -eq 0 || exit 1
-          echo "version_lock sha256 values (when provided) match manifest"
