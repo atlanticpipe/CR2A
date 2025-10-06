@@ -7,6 +7,8 @@ import json                      # parse JSON files
 import hashlib                   # compute/verify sha256 checksums
 from pathlib import Path         # path-safe file handling
 from typing import Dict, Any, Union, Optional
+import asyncio                                  # stdlib: event loop
+from utils.error_handler import handle_exception  # our handler function
 
 try:
     import yaml                  # parse YAML rulebook (install pyyaml if missing)

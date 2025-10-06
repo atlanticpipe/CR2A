@@ -33,6 +33,8 @@ import json5                    # parse JSONC runtime config
 from pypdf import PdfReader     # extract text from PDFs (simple text layer)
 import docx2txt                 # extract text from .docx if needed
 from jinja2 import Template     # render HTML for the filled template
+import asyncio                                  # stdlib: event loop
+from utils.error_handler import handle_exception  # our handler function
 
 # `pdfkit` is our HTML->PDF bridge (wkhtmltopdf must be available in PATH)
 try:

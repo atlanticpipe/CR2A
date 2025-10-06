@@ -27,3 +27,17 @@ def handle_ecxeption(exc_type, exc_value, exc_traceback):
 sys.excepthook = handle_ecxeption
 # sys.excepthook = sys.__excepthook__
 # Uncomment the above line to disable custom error handling and use default behavior.
+# Install an asyncio exception handler that funnels to our handler
+def _asyncio_handler(loop, context):                     # define callback
+    exc = context.get("exception")                       # grab Exception if present
+    if exc is not None:
+        handle_exception(type(exc), exc, exc.__traceback__)  # use our hook
+    else:
+        # Fallback when only a message exists — still print something useful
+        print("[asyncio error]", context.get("message", "unknown error"))
+
+try:
+    asyncio.get_event_loop().set_exception_handler(_asyncio_handler)  # register
+except RuntimeError:
+    # No loop yet (possible during import); main() will create it, safe to ignore
+    pass

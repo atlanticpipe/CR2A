@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from jsonschema import Draft7Validator  # validates against Draft-07 schemas
 from typing import Dict, Any, Iterable, List
-
+import asyncio                                  # stdlib: event loop
+from utils.error_handler import handle_exception  # our handler function
 
 # ---------- JSON Schema validation (strict) ----------
 def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> None:

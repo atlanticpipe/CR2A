@@ -38,15 +38,9 @@
       "size_bytes": 749
     }
   ],
-  "files": {
-    "policy/rulebook_v1.yaml": "12a883eaf298ef7a5db389b4c5bc5405bacb8512adec49396d2221f66c6b56",
-    "schemas/output_schemas_v1.json": "42523ad3393f586456988d68fd3d927a87ffd0e68883cff75a83c22b6b95513bb",
-    "schemas/run_manifest_schema_v1.json": "79a7adc3f3fa36a7d6e128313356c9a0299ce927467d38fc09f7fa949c88fce1",
-    "schemas/api_schemas_v1.json": "dbc5801593323512fdfedfe0044d2e26d8d8527dbddc6238612389335a2bb7bb2",
-    "policy/policy_rules_v1.json": "2f8c91bfd8cc898265fdacb6c1bf2942f72992b2f69216dbf470265cbabcc72574b",
-    "policy/control_flags_v1.json": "1d3f4e726cf049914ece9f12d517813d8f23d8632947dd014e6873562fa1d3f",
-    "policy/validation_rules_v1.json": "e98904aa1548af0b415863b77854132e5a4f260bb8a8c09c9ca988edf64559db"
-  },
-  "manifest_sha256": "ac32e6403af190a90a3983deedff72e80e68684998ce85df2e9d298fe8da55a4",
-  "generated_at": "2025-10-06T11:33:41Z"
+  "enforcement": {
+  "require_exact_tag": true,
+  "require_all_present": true,
+  "require_versions_match": true,
+  "enforce_sha256": true
 }
