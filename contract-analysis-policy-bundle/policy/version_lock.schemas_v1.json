@@ -25,7 +25,7 @@
     {
       "name": "api_schemas_v1",
       "path": "contract-analysis-policy-bundle/schemas/api_schemas_v1.json",
-      "sha256": "b5c80159332351f2dfedfe044d2e260bd8527dbd62c23860123893353be77bb2"
+      "sha256": "0914acb72b7fecbeafaae0a7c377a01e891489a85ab37f38af25b8cd584480c9"
     },
     {
       "name": "policy_rules_v1",
@@ -35,7 +35,7 @@
     {
       "name": "control_flags_v1",
       "path": "contract-analysis-policy-bundle/policy/control_flags_v1.json",
-      "sha256": "1d3f4e726cf049a1ce92f12d517813def238dc7a974da16036ba76375fad413f"
+      "sha256": "d7c7fcb8485eda28be0b4fbab7acbdbd09c70aad6076fac4128b98329da68af6"
     },
     {
       "name": "validation_rules_v1",
