@@ -53,6 +53,6 @@
     "policy/control_flags_v1.json": "1d3f4e726cf049a1ce92f12d517813def238dc7a974da16036ba76375fad413f",
     "policy/validation_rules_v1.json": "e989043ae145a8fb415863b77854132e5a4f260bb8a8c09c9ca98e8d4e6f459b"
   },
-  "manifest_sha256": "54979d046d2502140e59e4149693c6888c78680120ccfd957a3684e59fd12e14",
+  "manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "generated_at": "2025-10-06T12:02:14Z"
 }
