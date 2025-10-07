@@ -9,5 +9,6 @@
     "enforce_sha256": true
   },
   "manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "generated_at": "2025-10-06T12:02:14Z"
+  "generated_at": "2025-10-06T12:02:14Z",
+  "canonical": null
 }
