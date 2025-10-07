@@ -142,3 +142,30 @@ jobs:
           git fetch origin "${GITHUB_REF_NAME}" || true
           git pull --rebase origin "${GITHUB_REF_NAME}" || true
           git push origin "HEAD:${GITHUB_REF_NAME}"
+      
+      - name: Update component sha256 (and optional size_bytes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAN=contract-analysis-policy-bundle/policy/checksums_manifest_v1.json
+          TMP="$(mktemp)"
+          # fail clearly if JSON is invalid
+          jq -e . "$MAN" >/dev/null || { echo "Manifest is not valid JSON: $MAN"; exit 1; }
+
+          # Iterate over whichever array exists (.canonical or .artifacts). If both are null, use [] to avoid jq's "iterate over null".
+          jq -c '(.canonical // .artifacts // [])[]' "$MAN" \   # ← pipe belongs OUTSIDE the quotes (no trailing | inside the jq filter)
+            | while read -r ART; do                            # ← stream each artifact object as compact JSON into the loop
+            p=$(jq -r '.path' <<<"$ART")                     # extract the artifact's file path
+            [ -f "$p" ] || { echo "Missing canonical file: $p" >&2; exit 1; }  # hard fail if the file isn't on disk
+
+          sz=$(stat -c%s "$p")             # recompute size
+          sha=$(sha256sum "$p" | cut -d' ' -f1)  # recompute sha256
+
+          # Write recomputed values back into BOTH arrays (if present) so everything stays in sync
+          jq --arg p "$p" --argjson sz "$sz" --arg sha "$sha" '
+            ( .canonical |= (map( if .path==$p then (.size_bytes=$sz|.sha256=$sha) else . end )) ) |
+            ( .artifacts |= (map( if .path==$p then (.size_bytes=$sz|.sha256=$sha) else . end )) )
+          ' "$MAN" > "$TMP" && mv "$TMP" "$MAN"
+
+          echo "Updated $p size_bytes=$sz sha256=$sha"
+          done
