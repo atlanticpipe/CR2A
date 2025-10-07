@@ -1,14 +1,14 @@
 {
   "tag": "schemas@v1.0",
   "version": "1.0",
-  "artifacts": null,
+  "artifacts": [],
   "enforcement": {
     "require_exact_tag": true,
     "require_all_present": true,
     "require_versions_match": true,
     "enforce_sha256": true
   },
-  "manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "manifest_sha256": "fba741fa0d3ba7ae62f8cf6a6f22fb34199f7b9db019f911f5dc559d625d738c",
   "generated_at": "2025-10-06T12:02:14Z",
-  "canonical": null
+  "canonical": []
 }
