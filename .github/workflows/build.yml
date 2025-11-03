@@ -1,0 +1,37 @@
+name: Build (inject OPENAI_API_KEY)
+
+on:
+    push:
+        branches: [ main ]
+    workflow_dispatch:
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+            
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                node-version: 20
+                cache: 'npm'
+
+            - name: Create .env.production from repo secret
+              # Wtire the OPENAI_API_KEY to an env file used by Next.js at build time.
+              # Fail fast if the secret isn't present to avoid confusing bilds.
+              run: |
+                if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
+                    echo "::error::OPENAI_API_KEY repository secret is not set."
+                    exit 1
+                fi
+                echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > .env.production
+
+            - name: Install and build
+              # Build uses process.env.OPENAI_API_KEY in server code; nothing is logged.continue-on-error:
+              run: |
+                npm ci
+                npm run build
+                
