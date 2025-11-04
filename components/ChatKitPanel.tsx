@@ -347,8 +347,8 @@ export function ChatKitPanel({
 
   return (
     <div className="relative pb-8 flex h-[90vh] w-full rounded-2xl flex-col overflow-hidden bg-white shadow-sm transition-colors dark:bg-slate-900">
-      {/* Wrapper so the export button can read the final text from this subtree */}
-      <div id="cr2a-answer">
+      {/* Make the ChatKit area flex, not fixed height */}
+      <div id="cr2a-answer" className="flex-1 min-h-0">
         <ChatKit
           key={widgetInstanceKey}
           control={chatkit.control}
@@ -359,6 +359,8 @@ export function ChatKitPanel({
           }
         />
       </div>
+
+      {/* Footer row that stays visible */}
       <div className="px-4 pt-3 flex justify-end">
         <ExportPdfButton filename="CR2A" />
       </div>

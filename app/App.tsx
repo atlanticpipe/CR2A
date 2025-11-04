@@ -28,10 +28,6 @@ export default function App() {
           onResponseEnd={handleResponseEnd}
           onThemeRequest={setScheme}
         />
-        {/* Download the workflow results as a PDF */}
-        <div clasName="mt-4 flex justify-end">
-          <ExportPdfButton filename="CR@A" />
-        </div>
       </div>
     </main>
   );
