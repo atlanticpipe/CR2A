@@ -95,7 +95,7 @@ return (
     <button
         type="button"
         onClick={onClick}
-        disabled={busy || !content?.trim()}
+        disabled={busy}
         className={className}
         aria-busy={busy}
         title="Download PDF"

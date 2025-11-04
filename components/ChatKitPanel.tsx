@@ -359,6 +359,9 @@ export function ChatKitPanel({
           }
         />
       </div>
+      <div className="px-4 pt-3 flex justify-end">
+        <ExportPdfButton filename="CR2A" />
+      </div>
     </div>
   );
 }
