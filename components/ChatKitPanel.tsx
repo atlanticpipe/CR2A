@@ -61,7 +61,7 @@ export function ChatKitPanel({
       ? "ready"
       : "pending"
   );
-  const [widgetInstanceKey, setWidgetInstanceKey] = useState(0);
+  const [widgetInstanceKey] = useState(0);
 
   const setErrorState = useCallback((updates: Partial<ErrorState>) => {
     setErrors((current) => ({ ...current, ...updates }));
