@@ -346,25 +346,30 @@ export function ChatKitPanel({
   }
 
   return (
-    <div className="relative pb-8 flex h-[90vh] w-full rounded-2xl flex-col overflow-hidden bg-white shadow-sm transition-colors dark:bg-slate-900">
-      {/* Make the ChatKit area flex, not fixed height */}
-      <div id="cr2a-answer" className="flex-1 min-h-0">
-        <ChatKit
-          key={widgetInstanceKey}
-          control={chatkit.control}
-          className={
-            blockingError || isInitializingSession
-              ? "pointer-events-none opacity-0"
-              : "block h-full w-full"
-          }
-        />
-      </div>
-
-      {/* Footer row that stays visible */}
-      <div className="px-4 pt-3 flex justify-end">
+    <>
+      {/* Fixed header at page top */}
+      <div className="fixed inset-x-0 top-0 z-50 flex justify-end gap-3
+                      border-b border-slate-200/60 dark:border-slate-800/60
+                      bg-white/80 dark:bg-slate-900/80 backdrop-blur px-4 py-3">
         <ExportPdfButton filename="CR2A" />
       </div>
-    </div>
+
+      {/* Panel content; add top padding so it doesn't hide under the fixed bar */}
+      <div className="relative pt-14 flex h-[90vh] w-full rounded-2xl flex-col
+                      bg-white shadow-sm transition-colors dark:bg-slate-900">
+        <div id="cr2a-answer" className="flex-1 min-h-0">
+          <ChatKit
+            key={widgetInstanceKey}
+            control={chatkit.control}
+            className={
+              blockingError || isInitializingSession
+                ? "pointer-events-none opacity-0"
+                : "block h-full w-full"
+            }
+          />
+        </div>
+      </div>
+    </>
   );
 }
 
