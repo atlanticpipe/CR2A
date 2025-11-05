@@ -10,7 +10,6 @@ import {
   WORKFLOW_ID,
   getThemeConfig,
 } from "@/lib/config";
-import { ErrorOverlay } from "./ErrorOverlay";
 import type { ColorScheme } from "@/hooks/useColorScheme";
 import ExportPdfButton from "@/components/ExportPdfButton";
 
@@ -146,18 +145,6 @@ export function ChatKitPanel({
       setIsInitializingSession(false);
     }
   }, [isWorkflowConfigured, setErrorState]);
-
-  const handleResetChat = useCallback(() => {
-    processedFacts.current.clear();
-    if (isBrowser) {
-      setScriptStatus(
-        window.customElements?.get("openai-chatkit") ? "ready" : "pending"
-      );
-    }
-    setIsInitializingSession(true);
-    setErrors(createInitialErrors());
-    setWidgetInstanceKey((prev) => prev + 1);
-  }, []);
 
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
