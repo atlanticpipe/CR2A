@@ -62,7 +62,8 @@ export async function POST(req: NextRequest) {
         }
 
         const bytes = await pdf.save();
-        return new Response(bytes, {
+        const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        return new Response(ab, {
             status: 200,
             headers: {
                 "Content-Type": "application/pdf",
