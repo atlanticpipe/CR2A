@@ -9,6 +9,9 @@ type Props = {
   className?: string;  // optional styling hook
 };
 
+// What the API may return on error
+type ErrorPayload = { type?: string; message?: string };
+
 export default function ExportPdfButton({
   content,
   title = 'CR2A Results',
@@ -17,8 +20,12 @@ export default function ExportPdfButton({
 }: Props) {
   const [busy, setBusy] = useState(false);
 
-  // Small helper: fetch with a hard timeout so the UI never gets stuck.
-  const postWithTimeout = async (url: string, body: unknown, ms = 20000) => {
+  // Fetch with a hard timeout so the UI never gets stuck.
+  const postWithTimeout = async (
+    url: string,
+    body: unknown,
+    ms = 20_000
+  ): Promise<Response> => {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), ms);
     try {
@@ -33,7 +40,7 @@ export default function ExportPdfButton({
     }
   };
 
-  const onClick = async () => {
+  const onClick = async (): Promise<void> => {
     // Fallback: scrape the final answer from the DOM if no prop was given
     const scraped =
       typeof document !== 'undefined'
@@ -47,15 +54,22 @@ export default function ExportPdfButton({
 
     setBusy(true);
     try {
-      // Call our minimal API -> may fail due to env, auth, or server error
       const res = await postWithTimeout('/api/export-pdf', { content: text, title, filename });
 
       if (!res.ok) {
-        // Try to classify the failure for a clear, actionable message
-        let payload: any = null;
-        try { payload = await res.json(); } catch { /* ignore */ }
+        // Parse an optional error body without using `any`
+        let payload: ErrorPayload | null = null;
+        try {
+          const json: unknown = await res.json();
+          if (json && typeof json === 'object') {
+            payload = json as ErrorPayload;
+          }
+        } catch {
+          // ignore parse errors
+        }
+
         const t =
-          payload?.type ||
+          payload?.type ??
           (res.status === 422
             ? 'ValidationError'
             : res.status === 408
@@ -64,9 +78,9 @@ export default function ExportPdfButton({
             ? 'ProcessingError'
             : 'NetworkError');
 
-        const msg = payload?.message || `Export failed (HTTP ${res.status}).`;
+        const msg = payload?.message ?? `Export failed (HTTP ${res.status}).`;
         alert(`${t}: ${msg}`);
-        console.error('[export-pdf]', t, res.status); // terse; no secrets
+        console.error('[export-pdf]', t, res.status);
         return;
       }
 
@@ -80,13 +94,14 @@ export default function ExportPdfButton({
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch (err: any) {
-      // AbortError = timeout; otherwise treat as network
-      const type = err?.name === 'AbortError' ? 'TimeoutError' : 'NetworkError';
+    } catch (err: unknown) {
+      // Narrow unknown error without `any`
+      const name = err instanceof Error ? err.name : undefined;
+      const type = name === 'AbortError' ? 'TimeoutError' : 'NetworkError';
       alert(`${type}: Unable to reach /api/export-pdf.`);
-      console.error('[export-pdf]', type); // terse, no details
+      console.error('[export-pdf]', type);
     } finally {
-      setBusy(false); // always clear busy state
+      setBusy(false);
     }
   };
 
