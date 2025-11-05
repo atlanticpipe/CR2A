@@ -42,10 +42,11 @@ export default function ExportPdfButton({
 
   const onClick = async (): Promise<void> => {
     // Fallback: scrape the final answer from the DOM if no prop was given
-    const scraped =
+    const node =
       typeof document !== 'undefined'
-        ? (document.getElementById('cr2a-answer')?.textContent ?? '')
-        : '';
+        ? (document.getElementById('cr2a-answer') as HTMLElement | null)
+        : null;
+    const scraped = node ? (node.innerText?.trimEnd() || node.textContent ||'') : '';
     const text = content && content.trim() ? content : scraped;
     if (!text || !text.trim()) {
       alert('ValidationError: Nothing to export yet.');
