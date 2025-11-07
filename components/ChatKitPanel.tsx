@@ -253,54 +253,6 @@ export function ChatKitPanel({
       attachments: { enabled: true },
     },
     threadItemActions: { feedback: false },
-
-    // Keep types local and simple so TS is happy across library versions
-    onClientTool: async (invocation) => {
-      // safe params view
-      const params =
-        invocation?.params && typeof invocation.params === "object"
-          ? (invocation.params as Record<string, unknown>)
-          : {};
-
-      if (invocation.name === "switch_theme") {
-        const raw = params["theme"];
-        const requested = typeof raw === "string" ? raw : undefined;
-        if (requested === "light" || requested === "dark") {
-          if (process.env.NODE_ENV !== "production") {
-            console.debug("[ChatKitPanel] switch_theme", requested);
-          }
-          onThemeRequest(requested);
-          return { success: true };
-        }
-        // known tool, but unsupported value
-        return { success: false };
-      }
-
-      if (invocation.name === "record_fact") {
-        const idRaw = params["fact_id"];
-        const textRaw = params["fact_text"];
-        const id = typeof idRaw === "string" ? idRaw : String(idRaw ?? "");
-        const text = typeof textRaw === "string" ? textRaw : String(textRaw ?? "");
-        if (!id || processedFacts.current.has(id)) {
-          return { success: true };
-        }
-        processedFacts.current.add(id);
-        void onWidgetAction({
-          type: "save",
-          factId: id,
-          factText: text.replace(/\s+/g, " ").trim(),
-        });
-        return { success: true };
-      }
-
-      // 🔑 Fallback: let ChatKit handle built-ins like "user_approval".
-      // Return an empty object (not `{ success: false }`, which triggers retries).
-      if (process.env.NODE_ENV !== "production") {
-        console.debug("[ChatKitPanel] letting ChatKit handle", invocation?.name);
-      }
-      return {};
-    },
-
     onResponseEnd: () => {
       onResponseEnd();
     },
