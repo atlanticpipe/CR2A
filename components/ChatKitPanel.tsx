@@ -341,8 +341,7 @@ export function ChatKitPanel({
     },
   });
 
-  const activeError = errors.session ?? errors.integration;
-  const blockingError = errors.script ?? activeError;
+  const blockingError = scriptStatus === "error";
 
   if (isDev) {
     console.debug("[ChatKitPanel] render state", {
