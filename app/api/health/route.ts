@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
+import { getWorkflowId } from "@/lib/config";
 
-export const dynamic = "force-dynamic";
-
-export async function GET() {
-    const hasKey = Boolean(process.env.OPENAI_API_KEY);
-    return NextResponse.json({ ok: true, env: { OPENAI_API_KEY: hasKey } });
+export function GET() {
+  try {
+    const id = getWorkflowId();
+    return NextResponse.json({ status: "ok", workflowIdTail: id.slice(-6) });
+  } catch (e: any) {
+    return NextResponse.json(
+      { status: "error", message: e.message ?? "Workflow not configured" },
+      { status: 500 }
+    );
+  }
 }

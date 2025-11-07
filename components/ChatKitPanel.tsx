@@ -137,13 +137,30 @@ export function ChatKitPanel({
   );
 
   useEffect(() => {
-    if (!isWorkflowConfigured && isMountedRef.current) {
-      setErrorState({
-        session: "Set NEXT_PUBLIC_CHATKIT_WORKFLOW_ID in your .env.local file.",
-        retryable: false,
-      });
-      setIsInitializingSession(false);
-    }
+    (async () => {
+      if (!isMountedRef.current) return;
+      try {
+        const r = await fetch("/api/health", { cache: "no-store" });
+        const j = await r.json();
+        if (j.status !== "ok") {
+          setErrorState({
+            session:
+              "Workflow not configured. Set CHATKIT_WORKFLOW_ID on the server (or NEXT_PUBLIC_CHATKIT_WORKFLOW_ID if you intentionally expose it).",
+            retryable: false,
+          });
+          setIsInitializingSession(false);
+          return;
+        }
+      } catch {
+        setErrorState({
+          session:
+            "Could not verify workflow configuration. Ensure CHATKIT_WORKFLOW_ID is set on the server.",
+          retryable: false,
+        });
+        setIsInitializingSession(false);
+        return;
+      }
+    })();
   }, [isWorkflowConfigured, setErrorState]);
 
   const getClientSecret = useCallback(
@@ -156,9 +173,13 @@ export function ChatKitPanel({
         });
       }
 
-      if (!isWorkflowConfigured) {
+      const healthy = await fetch("/api/health", { cache: "no-store" })
+        .then(r => r.json())
+        .catch(() => ({ status: "error" }));
+
+      if (healthy.status !== "ok") {
         const detail =
-          "Set NEXT_PUBLIC_CHATKIT_WORKFLOW_ID in your .env.local file.";
+          "Workflow not configured. Set CHATKIT_WORKFLOW_ID on the server (or NEXT_PUBLIC_CHATKIT_WORKFLOW_ID if needed on the client).";
         if (isMountedRef.current) {
           setErrorState({ session: detail, retryable: false });
           setIsInitializingSession(false);

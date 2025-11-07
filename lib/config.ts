@@ -1,7 +1,48 @@
 import { ColorScheme, StartScreenPrompt, ThemeOption } from "@openai/chatkit";
 
+export const IS_SERVER = typeof window === "undefined";
+
+function readEnv(name: string): string | undefined {
+  return process.env[name];
+}
+
+function requireEnv(name: string, hint?: string): string {
+  const v = readEnv(name);
+  if (!v || !v.trim()) {
+    throw new Error(`[config] Missing ${name}${hint ? ` — ${hint}` : ""}`);
+  }
+  return v;
+}
+
+// Prefer server-only ID; fall back to NEXT_PUBLIC_ only if needed on client.
+export const CHATKIT_BASE_URL =
+  readEnv("CHATKIT_BASE_URL") ?? "https://api.chatkit.run";
+
 export const WORKFLOW_ID =
-  process.env.NEXT_PUBLIC_CHATKIT_WORKFLOW_ID?.trim() ?? "";
+  (IS_SERVER ? readEnv("CHATKIT_WORKFLOW_ID") : undefined) ??
+  readEnv("NEXT_PUBLIC_CHATKIT_WORKFLOW_ID") ??
+  "";
+
+/** Call this wherever you execute the workflow to fail fast if unset. */
+export function getWorkflowId(): string {
+  const id = WORKFLOW_ID?.trim();
+  if (!id) {
+    throw new Error(
+      "[config] Workflow ID not set. Use CHATKIT_WORKFLOW_ID (server) " +
+        "or NEXT_PUBLIC_CHATKIT_WORKFLOW_ID (client)."
+    );
+  }
+  return id;
+}
+
+/** Guard against workflow/output drift so bugs are obvious. */
+export function assertWorkflowResponseShape(x: any) {
+  if (!x || typeof x !== "object" || typeof x.html !== "string") {
+    throw new Error(
+      "[config] Unexpected workflow output (missing `html`). Check workflow ID or published version."
+    );
+  }
+}
 
 export const CREATE_SESSION_ENDPOINT = "/api/create-session";
 
