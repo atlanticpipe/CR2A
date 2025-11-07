@@ -12,6 +12,7 @@ import {
 } from "@/lib/config";
 import type { ColorScheme } from "@/hooks/useColorScheme";
 import ExportPdfButton from "@/components/ExportPdfButton";
+import { useMemo } from "react";
 
 export type FactAction = {
   type: "save";
@@ -45,9 +46,7 @@ const createInitialErrors = (): ErrorState => ({
 
 export function ChatKitPanel({
   theme,
-  onWidgetAction,
   onResponseEnd,
-  onThemeRequest,
 }: ChatKitPanelProps) {
   const processedFacts = useRef(new Set<string>());
   const [errors, setErrors] = useState<ErrorState>(() => createInitialErrors());
@@ -68,10 +67,8 @@ export function ChatKitPanel({
     };
   }, []);
 
-  // Check chatkit.js presence
   useEffect(() => {
     if (!isBrowser) return;
-
     let timeoutId: number | undefined;
 
     const handleLoaded = () => {
@@ -238,34 +235,35 @@ export function ChatKitPanel({
     [setErrorState, setIsInitializingSession]
   );
 
-  const chatkit = useChatKit({
-    api: { getClientSecret },
-    theme: {
-      colorScheme: theme,
-      ...getThemeConfig(theme),
-    },
-    startScreen: {
-      greeting: GREETING,
-      prompts: STARTER_PROMPTS,
-    },
-    composer: {
-      placeholder: PLACEHOLDER_INPUT,
-      attachments: { enabled: true },
-    },
+  const onRespEndCb = useCallback(() => { onResponseEnd(); }, [onResponseEnd]);
+  const onRespStartCb = useCallback(() => {
+    setErrorState({ integration: null, retryable: false });
+  }, [setErrorState]);
+  const onThreadChangeCb = useCallback(() => {
+    processedFacts.current.clear();
+  }, []);
+  const onErrCb = useCallback(({ error }: { error: unknown }) => {
+    console.error("ChatKit error", error);
+  }, []);
+
+  const themeCfg = useMemo(() => getThemeConfig(theme), [theme]);
+
+  const chatkitOptions = useMemo(() => ({
+    api: { getClientSecret },                 // <-- your existing hook
+    theme: { colorScheme: theme, ...themeCfg },
+    startScreen: { greeting: GREETING, prompts: STARTER_PROMPTS },
+    composer: { placeholder: PLACEHOLDER_INPUT, attachments: { enabled: true } },
     threadItemActions: { feedback: false },
-    onResponseEnd: () => {
-      onResponseEnd();
-    },
-    onResponseStart: () => {
-      setErrorState({ integration: null, retryable: false });
-    },
-    onThreadChange: () => {
-      processedFacts.current.clear();
-    },
-    onError: ({ error }: { error: unknown }) => {
-      console.error("ChatKit error", error);
-    },
-  });
+    onResponseEnd: onRespEndCb,
+    onResponseStart: onRespStartCb,
+    onThreadChange: onThreadChangeCb,
+    onError: onErrCb,
+  }), [
+    getClientSecret, theme, themeCfg,
+    onRespEndCb, onRespStartCb, onThreadChangeCb, onErrCb
+  ]);
+
+  const chatkit = useChatKit(chatkitOptions);
 
   const blockingError = scriptStatus === "error";
 
@@ -278,6 +276,12 @@ export function ChatKitPanel({
       workflowId: WORKFLOW_ID,
     });
   }
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[ChatKitPanel] control changed", !!chatkit.control);
+    }
+  }, [chatkit.control]);
 
   return (
     <>
