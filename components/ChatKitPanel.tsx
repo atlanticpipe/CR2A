@@ -147,6 +147,11 @@ export function ChatKitPanel({
           setIsInitializingSession(false);
           return;
         }
+
+        // ✅ Health check succeeded — let the UI render while ChatKit starts up
+        setErrorState({ session: null, retryable: false });
+        setIsInitializingSession(false);
+
       } catch {
         setErrorState({
           session:
@@ -156,7 +161,7 @@ export function ChatKitPanel({
         setIsInitializingSession(false);
         return;
       }
-    })()
+    })();
   }, []);
 
   const getClientSecret = useCallback(
