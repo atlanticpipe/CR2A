@@ -68,7 +68,7 @@ export function ChatKitPanel({
     };
   }, []);
 
-  // chatkit.js presence
+  // Check chatkit.js presence
   useEffect(() => {
     if (!isBrowser) return;
 
@@ -81,7 +81,7 @@ export function ChatKitPanel({
     };
 
     const handleError = (event: Event) => {
-      console.error("Failed to load chatkit.js for some reason", event);
+      console.error("Failed to load chatkit.js", event);
       if (!isMountedRef.current) return;
       setScriptStatus("error");
       const detail = (event as CustomEvent<unknown>)?.detail ?? "unknown error";
@@ -114,7 +114,7 @@ export function ChatKitPanel({
     };
   }, [scriptStatus, setErrorState]);
 
-  // health check once
+  // Health-check once on mount
   useEffect(() => {
     (async () => {
       if (!isMountedRef.current) return;
@@ -180,7 +180,7 @@ export function ChatKitPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            // server injects workflow id
+            // Server injects the workflow id; do not send it from the client
             chatkit_configuration: { file_upload: { enabled: true } },
           }),
         });
@@ -235,7 +235,7 @@ export function ChatKitPanel({
         }
       }
     },
-    [setErrorState, setIsInitializingSession] // removed isDev to satisfy exhaustive-deps
+    [setErrorState, setIsInitializingSession]
   );
 
   const chatkit = useChatKit({
@@ -253,13 +253,12 @@ export function ChatKitPanel({
       attachments: { enabled: true },
     },
     threadItemActions: { feedback: false },
-    onClientTool: async (invocation: {
-      name: string;
-      params: Record<string, unknown>;
-    }) => {
-      // helper to safely read string fields without `any`
+
+    // Keep types local and simple so TS is happy across library versions
+    onClientTool: async (invocation) => {
+      // safe params view
       const params =
-        invocation.params && typeof invocation.params === "object"
+        invocation?.params && typeof invocation.params === "object"
           ? (invocation.params as Record<string, unknown>)
           : {};
 
@@ -267,10 +266,13 @@ export function ChatKitPanel({
         const raw = params["theme"];
         const requested = typeof raw === "string" ? raw : undefined;
         if (requested === "light" || requested === "dark") {
-          if (isDev) console.debug("[ChatKitPanel] switch_theme", requested);
+          if (process.env.NODE_ENV !== "production") {
+            console.debug("[ChatKitPanel] switch_theme", requested);
+          }
           onThemeRequest(requested);
           return { success: true };
         }
+        // known tool, but unsupported value
         return { success: false };
       }
 
@@ -291,10 +293,14 @@ export function ChatKitPanel({
         return { success: true };
       }
 
-      // Let ChatKit handle built-ins (e.g., user_approval)
-      if (isDev) console.debug("[ChatKitPanel] letting ChatKit handle", invocation.name);
-      return;
+      // 🔑 Fallback: let ChatKit handle built-ins like "user_approval".
+      // Return an empty object (not `{ success: false }`, which triggers retries).
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[ChatKitPanel] letting ChatKit handle", invocation?.name);
+      }
+      return {};
     },
+
     onResponseEnd: () => {
       onResponseEnd();
     },
@@ -323,7 +329,7 @@ export function ChatKitPanel({
 
   return (
     <>
-      {/* Fixed header at page top */}
+      {/* Fixed header */}
       <div
         className="fixed inset-x-0 top-0 z-50 flex justify-end gap-3
                     border-b border-slate-200/60 dark:border-slate-800/60
@@ -332,7 +338,7 @@ export function ChatKitPanel({
         <ExportPdfButton filename="CR2A" />
       </div>
 
-      {/* Panel content; add top padding so it doesn't hide under the fixed bar */}
+      {/* Panel */}
       <div
         className="relative pt-14 flex h-[90vh] w-full rounded-2xl flex-col
                     bg-white shadow-sm transition-colors dark:bg-slate-900"
