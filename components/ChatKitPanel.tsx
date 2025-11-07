@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatKit, useChatKit } from "@openai/chatkit-react";
 import {
   STARTER_PROMPTS,
@@ -12,7 +12,6 @@ import {
 } from "@/lib/config";
 import type { ColorScheme } from "@/hooks/useColorScheme";
 import ExportPdfButton from "@/components/ExportPdfButton";
-import { useMemo } from "react";
 
 export type FactAction = {
   type: "save";
@@ -46,9 +45,13 @@ const createInitialErrors = (): ErrorState => ({
 
 export function ChatKitPanel({
   theme,
+  onWidgetAction, // kept for future custom tools; referenced in memoized callbacks
   onResponseEnd,
+  onThemeRequest,
 }: ChatKitPanelProps) {
   const processedFacts = useRef(new Set<string>());
+  const clientSecretRef = useRef<string | null>(null);
+
   const [errors, setErrors] = useState<ErrorState>(() => createInitialErrors());
   const [isInitializingSession, setIsInitializingSession] = useState(true);
   const isMountedRef = useRef(true);
@@ -67,8 +70,10 @@ export function ChatKitPanel({
     };
   }, []);
 
+  // Handle chatkit.js presence
   useEffect(() => {
     if (!isBrowser) return;
+
     let timeoutId: number | undefined;
 
     const handleLoaded = () => {
@@ -78,7 +83,7 @@ export function ChatKitPanel({
     };
 
     const handleError = (event: Event) => {
-      console.error("Failed to load chatkit.js", event);
+      console.error("Failed to load chatkit.js for some reason", event);
       if (!isMountedRef.current) return;
       setScriptStatus("error");
       const detail = (event as CustomEvent<unknown>)?.detail ?? "unknown error";
@@ -141,8 +146,20 @@ export function ChatKitPanel({
     })();
   }, [setErrorState]);
 
+  // Create/reuse client secret (cached to avoid session resets)
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
+      // Reuse existing secret if ChatKit already has one
+      if (currentSecret) {
+        if (isDev) console.info("[ChatKitPanel] reusing current clientSecret");
+        return currentSecret;
+      }
+      // Or reuse a cached one we obtained earlier in this page session
+      if (clientSecretRef.current) {
+        if (isDev) console.info("[ChatKitPanel] reusing cached clientSecret");
+        return clientSecretRef.current;
+      }
+
       if (isDev) {
         console.info("[ChatKitPanel] getClientSecret invoked", {
           currentSecretPresent: Boolean(currentSecret),
@@ -166,9 +183,6 @@ export function ChatKitPanel({
       }
 
       if (isMountedRef.current) {
-        if (!currentSecret) {
-          // setIsInitializingSession(true); // keep commented to avoid flicker
-        }
         setErrorState({ session: null, integration: null, retryable: false });
       }
 
@@ -213,6 +227,9 @@ export function ChatKitPanel({
         const clientSecret = data?.client_secret as string | undefined;
         if (!clientSecret) throw new Error("Missing client secret in response");
 
+        // Cache the secret for subsequent calls
+        clientSecretRef.current = clientSecret;
+
         if (isMountedRef.current) {
           setErrorState({ session: null, integration: null });
         }
@@ -227,7 +244,7 @@ export function ChatKitPanel({
         }
         throw error instanceof Error ? error : new Error(detail);
       } finally {
-        if (isMountedRef.current && !currentSecret) {
+        if (isMountedRef.current) {
           setIsInitializingSession(false);
         }
       }
@@ -235,33 +252,49 @@ export function ChatKitPanel({
     [setErrorState, setIsInitializingSession]
   );
 
-  const onRespEndCb = useCallback(() => { onResponseEnd(); }, [onResponseEnd]);
+  // Stable callbacks to avoid re-inits
+  const onRespEndCb = useCallback(() => {
+    onResponseEnd();
+  }, [onResponseEnd]);
+
   const onRespStartCb = useCallback(() => {
     setErrorState({ integration: null, retryable: false });
   }, [setErrorState]);
+
   const onThreadChangeCb = useCallback(() => {
     processedFacts.current.clear();
   }, []);
+
   const onErrCb = useCallback(({ error }: { error: unknown }) => {
     console.error("ChatKit error", error);
   }, []);
 
+  // Memoize theme config and full ChatKit options
   const themeCfg = useMemo(() => getThemeConfig(theme), [theme]);
 
-  const chatkitOptions = useMemo(() => ({
-    api: { getClientSecret },                 // <-- your existing hook
-    theme: { colorScheme: theme, ...themeCfg },
-    startScreen: { greeting: GREETING, prompts: STARTER_PROMPTS },
-    composer: { placeholder: PLACEHOLDER_INPUT, attachments: { enabled: true } },
-    threadItemActions: { feedback: false },
-    onResponseEnd: onRespEndCb,
-    onResponseStart: onRespStartCb,
-    onThreadChange: onThreadChangeCb,
-    onError: onErrCb,
-  }), [
-    getClientSecret, theme, themeCfg,
-    onRespEndCb, onRespStartCb, onThreadChangeCb, onErrCb
-  ]);
+  const chatkitOptions = useMemo(
+    () => ({
+      api: { getClientSecret },
+      theme: { colorScheme: theme, ...themeCfg },
+      startScreen: { greeting: GREETING, prompts: STARTER_PROMPTS },
+      composer: { placeholder: PLACEHOLDER_INPUT, attachments: { enabled: true } },
+      threadItemActions: { feedback: false },
+      // Let ChatKit handle built-ins like User approval; no onClientTool here.
+      onResponseEnd: onRespEndCb,
+      onResponseStart: onRespStartCb,
+      onThreadChange: onThreadChangeCb,
+      onError: onErrCb,
+    }),
+    [
+      getClientSecret,
+      theme,
+      themeCfg,
+      onRespEndCb,
+      onRespStartCb,
+      onThreadChangeCb,
+      onErrCb,
+    ]
+  );
 
   const chatkit = useChatKit(chatkitOptions);
 
@@ -276,12 +309,6 @@ export function ChatKitPanel({
       workflowId: WORKFLOW_ID,
     });
   }
-
-  useEffect(() => {
-    if (process.env.NODE_ENV !== "production") {
-      console.debug("[ChatKitPanel] control changed", !!chatkit.control);
-    }
-  }, [chatkit.control]);
 
   return (
     <>
