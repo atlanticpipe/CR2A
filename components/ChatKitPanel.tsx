@@ -68,7 +68,7 @@ export function ChatKitPanel({
     };
   }, []);
 
-  // Handle chatkit.js script presence
+  // chatkit.js presence
   useEffect(() => {
     if (!isBrowser) return;
 
@@ -114,7 +114,7 @@ export function ChatKitPanel({
     };
   }, [scriptStatus, setErrorState]);
 
-  // Health-check the server configuration once on mount
+  // health check once
   useEffect(() => {
     (async () => {
       if (!isMountedRef.current) return;
@@ -130,7 +130,6 @@ export function ChatKitPanel({
           setIsInitializingSession(false);
           return;
         }
-        // Success → allow UI to render while session creation begins
         setErrorState({ session: null, retryable: false });
         setIsInitializingSession(false);
       } catch {
@@ -143,7 +142,7 @@ export function ChatKitPanel({
         return;
       }
     })();
-  }, []);
+  }, [setErrorState]);
 
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
@@ -171,7 +170,7 @@ export function ChatKitPanel({
 
       if (isMountedRef.current) {
         if (!currentSecret) {
-          // setIsInitializingSession(true); // optional: keep commented to avoid flicker
+          // setIsInitializingSession(true); // keep commented to avoid flicker
         }
         setErrorState({ session: null, integration: null, retryable: false });
       }
@@ -181,7 +180,7 @@ export function ChatKitPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            // Server injects the workflow id; do not send it from the client
+            // server injects workflow id
             chatkit_configuration: { file_upload: { enabled: true } },
           }),
         });
@@ -215,9 +214,7 @@ export function ChatKitPanel({
         }
 
         const clientSecret = data?.client_secret as string | undefined;
-        if (!clientSecret) {
-          throw new Error("Missing client secret in response");
-        }
+        if (!clientSecret) throw new Error("Missing client secret in response");
 
         if (isMountedRef.current) {
           setErrorState({ session: null, integration: null });
@@ -238,7 +235,7 @@ export function ChatKitPanel({
         }
       }
     },
-    [isDev, setErrorState, setIsInitializingSession]
+    [setErrorState, setIsInitializingSession] // removed isDev to satisfy exhaustive-deps
   );
 
   const chatkit = useChatKit({
@@ -260,8 +257,15 @@ export function ChatKitPanel({
       name: string;
       params: Record<string, unknown>;
     }) => {
+      // helper to safely read string fields without `any`
+      const params =
+        invocation.params && typeof invocation.params === "object"
+          ? (invocation.params as Record<string, unknown>)
+          : {};
+
       if (invocation.name === "switch_theme") {
-        const requested = (invocation.params as any).theme;
+        const raw = params["theme"];
+        const requested = typeof raw === "string" ? raw : undefined;
         if (requested === "light" || requested === "dark") {
           if (isDev) console.debug("[ChatKitPanel] switch_theme", requested);
           onThemeRequest(requested);
@@ -271,8 +275,10 @@ export function ChatKitPanel({
       }
 
       if (invocation.name === "record_fact") {
-        const id = String((invocation.params as any).fact_id ?? "");
-        const text = String((invocation.params as any).fact_text ?? "");
+        const idRaw = params["fact_id"];
+        const textRaw = params["fact_text"];
+        const id = typeof idRaw === "string" ? idRaw : String(idRaw ?? "");
+        const text = typeof textRaw === "string" ? textRaw : String(textRaw ?? "");
         if (!id || processedFacts.current.has(id)) {
           return { success: true };
         }
@@ -285,9 +291,9 @@ export function ChatKitPanel({
         return { success: true };
       }
 
-      // Fallback: let ChatKit handle built-ins like "user_approval"
+      // Let ChatKit handle built-ins (e.g., user_approval)
       if (isDev) console.debug("[ChatKitPanel] letting ChatKit handle", invocation.name);
-      return; // return undefined so ChatKit takes over
+      return;
     },
     onResponseEnd: () => {
       onResponseEnd();
@@ -299,12 +305,10 @@ export function ChatKitPanel({
       processedFacts.current.clear();
     },
     onError: ({ error }: { error: unknown }) => {
-      // ChatKit UI already shows user-facing errors.
       console.error("ChatKit error", error);
     },
   });
 
-  // Only hide on script error or while initializing
   const blockingError = scriptStatus === "error";
 
   if (isDev) {
