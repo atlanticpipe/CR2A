@@ -190,7 +190,7 @@ export function ChatKitPanel({
 
       if (isMountedRef.current) {
         if (!currentSecret) {
-          setIsInitializingSession(true);
+          //setIsInitializingSession(true);
         }
         setErrorState({ session: null, integration: null, retryable: false });
       }
@@ -341,7 +341,7 @@ export function ChatKitPanel({
     },
   });
 
-  const blockingError = scriptStatus === "error";
+  const blockingError = false;
 
   if (isDev) {
     console.debug("[ChatKitPanel] render state", {
@@ -369,11 +369,7 @@ export function ChatKitPanel({
           <ChatKit
             key={widgetInstanceKey}
             control={chatkit.control}
-            className={
-              blockingError || isInitializingSession
-                ? "pointer-events-none opacity-0"
-                : "block h-full w-full"
-            }
+            className='block h-full w-full'
           />
         </div>
       </div>
