@@ -40,8 +40,7 @@ export async function POST(request: Request): Promise<Response> {
     const { userId, sessionCookie: resolvedSessionCookie } =
       await resolveUserId(request);
     sessionCookie = resolvedSessionCookie;
-    const resolvedWorkflowId =
-      parsedBody?.workflow?.id ?? parsedBody?.workflowId ?? WORKFLOW_ID;
+    const resolvedWorkflowId = WORKFLOW_ID;
 
     if (process.env.NODE_ENV !== "production") {
       console.info("[create-session] handling request", {
