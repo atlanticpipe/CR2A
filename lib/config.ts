@@ -6,14 +6,6 @@ function readEnv(name: string): string | undefined {
   return process.env[name];
 }
 
-function requireEnv(name: string, hint?: string): string {
-  const v = readEnv(name);
-  if (!v || !v.trim()) {
-    throw new Error(`[config] Missing ${name}${hint ? ` — ${hint}` : ""}`);
-  }
-  return v;
-}
-
 // Prefer server-only ID; fall back to NEXT_PUBLIC_ only if needed on client.
 export const CHATKIT_BASE_URL =
   readEnv("CHATKIT_BASE_URL") ?? "https://api.chatkit.run";
@@ -36,8 +28,14 @@ export function getWorkflowId(): string {
 }
 
 /** Guard against workflow/output drift so bugs are obvious. */
-export function assertWorkflowResponseShape(x: any) {
-  if (!x || typeof x !== "object" || typeof x.html !== "string") {
+export function assertWorkflowResponseShape(
+  x: unknown
+): asserts x is { html: string } {
+  if (typeof x !== "object" || x === null) {
+    throw new Error("[config] Unexpected workflow output (not an object).");
+  }
+  const obj = x as Record<string, unknown>;
+  if (typeof obj.html !== "string") {
     throw new Error(
       "[config] Unexpected workflow output (missing `html`). Check workflow ID or published version."
     );

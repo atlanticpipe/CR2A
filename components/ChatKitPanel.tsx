@@ -132,10 +132,6 @@ export function ChatKitPanel({
     };
   }, [scriptStatus, setErrorState]);
 
-  const isWorkflowConfigured = Boolean(
-    WORKFLOW_ID && !WORKFLOW_ID.startsWith("wf_replace")
-  );
-
   useEffect(() => {
     (async () => {
       if (!isMountedRef.current) return;
@@ -160,8 +156,8 @@ export function ChatKitPanel({
         setIsInitializingSession(false);
         return;
       }
-    })();
-  }, [isWorkflowConfigured, setErrorState]);
+    })()
+  }, []);
 
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
@@ -268,7 +264,7 @@ export function ChatKitPanel({
         }
       }
     },
-    [isWorkflowConfigured, setErrorState]
+    [isDev, setErrorState, setIsInitializingSession]
   );
 
   const chatkit = useChatKit({
