@@ -26,9 +26,16 @@ if (process.env.NEXT_PUBLIC_OPENAI_API_KEY) {
   );
 }
 
-/** Keep your existing config fields below */
-const nextConfig: NextConfig = {
-  // ...your current settings
-};
+const required = ['OPENAI_API_KEY'];
 
+if (!process.env.CI) {
+  for (const key of required) {
+    if (!process.env[key]) {
+      throw new Error(`[env] Missing required server env var: ${key}`);
+    }
+  }
+}
+
+// export the config as usual
+const nextConfig = {};
 export default nextConfig;
