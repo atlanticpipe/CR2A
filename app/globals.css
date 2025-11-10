@@ -1,13 +1,18 @@
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+:root { color-scheme: light; }
+html, body {
+  background: #fff !important;
+  color: #111 !important;
 }
 
+main { min-height: 100vh; padding: 2rem; }
+button { cursor: pointer; }
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root { color-scheme: light; }
+html, body {
+  background: #fff !important;
+  color: #111 !important;
+}
 }
 
 html,
@@ -40,3 +45,7 @@ a {
     color-scheme: dark;
   }
 }
+
+:root { color-scheme: light; }
+html, body { background: #fff !important; color: #111 !important; }
+main { min-height: 100vh; padding: 2rem; }
