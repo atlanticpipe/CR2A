@@ -43,9 +43,14 @@ const createInitialErrors = (): ErrorState => ({
   retryable: false,
 });
 
+// Local helper types (no `any`)
+type UnknownParams = Record<string, unknown>;
+type ClientInvocation = { name: string; params?: UnknownParams };
+type ClientResult = { success?: boolean } | Record<string, unknown> | void;
+
 export function ChatKitPanel({
   theme,
-  onWidgetAction, // kept for future custom tools; referenced in memoized callbacks
+  onWidgetAction,
   onResponseEnd,
   onThemeRequest,
 }: ChatKitPanelProps) {
@@ -70,7 +75,7 @@ export function ChatKitPanel({
     };
   }, []);
 
-  // Handle chatkit.js presence
+  // chatkit.js presence
   useEffect(() => {
     if (!isBrowser) return;
 
@@ -116,7 +121,7 @@ export function ChatKitPanel({
     };
   }, [scriptStatus, setErrorState]);
 
-  // Health-check once on mount
+  // Health-check once
   useEffect(() => {
     (async () => {
       if (!isMountedRef.current) return;
@@ -141,22 +146,29 @@ export function ChatKitPanel({
           retryable: false,
         });
         setIsInitializingSession(false);
-        return;
       }
     })();
   }, [setErrorState]);
 
-  // Create/reuse client secret (cached to avoid session resets)
+  // Create/reuse client secret (cached)
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
-      if (process.env.NODE_ENV !== "production") console.count("[ChatKitPanel] getClientSecret");
-      if (process.env.NODE_ENV !== "production") console.log("[ChatKitPanel] currentSecret:", !!currentSecret, "cached:", !!clientSecretRef.current);
-      // Reuse existing secret if ChatKit already has one
+      if (process.env.NODE_ENV !== "production") {
+        console.count("[ChatKitPanel] getClientSecret");
+        console.log(
+          "[ChatKitPanel] currentSecret:",
+          !!currentSecret,
+          "cached:",
+          !!clientSecretRef.current
+        );
+      }
+
+      // Reuse if already provided by ChatKit
       if (currentSecret) {
         if (isDev) console.info("[ChatKitPanel] reusing current clientSecret");
         return currentSecret;
       }
-      // Or reuse a cached one we obtained earlier in this page session
+      // Or reuse cached one
       if (clientSecretRef.current) {
         if (isDev) console.info("[ChatKitPanel] reusing cached clientSecret");
         return clientSecretRef.current;
@@ -229,7 +241,7 @@ export function ChatKitPanel({
         const clientSecret = data?.client_secret as string | undefined;
         if (!clientSecret) throw new Error("Missing client secret in response");
 
-        // Cache the secret for subsequent calls
+        // Cache for future calls
         clientSecretRef.current = clientSecret;
 
         if (isMountedRef.current) {
@@ -254,7 +266,7 @@ export function ChatKitPanel({
     [setErrorState, setIsInitializingSession]
   );
 
-  // Stable callbacks to avoid re-inits
+  // Stable callbacks
   const onRespEndCb = useCallback(() => {
     onResponseEnd();
   }, [onResponseEnd]);
@@ -271,7 +283,56 @@ export function ChatKitPanel({
     console.error("ChatKit error", error);
   }, []);
 
-  // Memoize theme config and full ChatKit options
+  // Minimal client-tool handler: handle ours; ACK everything else.
+  // NOTE: return type is always a Record<string, unknown>.
+  const onClientToolCb = useCallback(
+    async (
+      invocation: { name: string; params: Record<string, unknown> }
+    ): Promise<Record<string, unknown>> => {
+      const params = invocation.params ?? {};
+
+      if (invocation.name === "switch_theme") {
+        const raw = params["theme"];
+        const requested = typeof raw === "string" ? raw : undefined;
+        if (requested === "light" || requested === "dark") {
+          if (process.env.NODE_ENV !== "production") {
+            console.debug("[ChatKitPanel] switch_theme", requested);
+          }
+          onThemeRequest(requested);
+          return { success: true };
+        }
+        // Known tool but unsupported value – still return a record
+        return { success: false };
+      }
+
+      if (invocation.name === "record_fact") {
+        const idRaw = params["fact_id"];
+        const textRaw = params["fact_text"];
+        const id = typeof idRaw === "string" ? idRaw : String(idRaw ?? "");
+        const text = typeof textRaw === "string" ? textRaw : String(textRaw ?? "");
+        if (!id || processedFacts.current.has(id)) {
+          return { success: true };
+        }
+        processedFacts.current.add(id);
+        void onWidgetAction({
+          type: "save",
+          factId: id,
+          factText: text.replace(/\s+/g, " ").trim(),
+        });
+        return { success: true };
+      }
+
+      // 🔑 Fallback for built-ins like user_approval:
+      // Acknowledge with an empty object so ChatKit doesn't retry.
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[ChatKitPanel] ack unknown client tool", invocation.name, params);
+      }
+      return {}; // <- MUST be a record, not void
+    },
+    [onThemeRequest, onWidgetAction]
+  );
+
+  // Memoized theme + full options (prevents re-inits)
   const themeCfg = useMemo(() => getThemeConfig(theme), [theme]);
 
   const chatkitOptions = useMemo(
@@ -281,7 +342,7 @@ export function ChatKitPanel({
       startScreen: { greeting: GREETING, prompts: STARTER_PROMPTS },
       composer: { placeholder: PLACEHOLDER_INPUT, attachments: { enabled: true } },
       threadItemActions: { feedback: false },
-      // Let ChatKit handle built-ins like User approval; no onClientTool here.
+      onClientTool: onClientToolCb, // explicit ACK fallback
       onResponseEnd: onRespEndCb,
       onResponseStart: onRespStartCb,
       onThreadChange: onThreadChangeCb,
@@ -291,6 +352,7 @@ export function ChatKitPanel({
       getClientSecret,
       theme,
       themeCfg,
+      onClientToolCb,
       onRespEndCb,
       onRespStartCb,
       onThreadChangeCb,
@@ -301,6 +363,41 @@ export function ChatKitPanel({
   const chatkit = useChatKit(chatkitOptions);
 
   const blockingError = scriptStatus === "error";
+
+  // Observe ChatKit iframe messages (no `any`)
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      const origin = String(ev.origin || "");
+      if (!origin.includes("openai.com")) return;
+      const data = ev.data;
+      if (typeof data !== "object" || data === null) return;
+
+      const hasType = (d: unknown): d is { type: unknown } =>
+        typeof d === "object" && d !== null && "type" in (d as Record<string, unknown>);
+      const hasEvent = (d: unknown): d is { event: unknown } =>
+        typeof d === "object" && d !== null && "event" in (d as Record<string, unknown>);
+      const hasAction = (d: unknown): d is { action: unknown } =>
+        typeof d === "object" && d !== null && "action" in (d as Record<string, unknown>);
+
+      let kind = "message";
+      if (hasType(data) && typeof (data as { type: unknown }).type === "string") {
+        kind = (data as { type: string }).type;
+      } else if (hasEvent(data) && typeof (data as { event: unknown }).event === "string") {
+        kind = (data as { event: string }).event;
+      } else if (
+        hasAction(data) &&
+        typeof (data as { action: unknown }).action === "string"
+      ) {
+        kind = (data as { action: string }).action;
+      }
+
+      const summary = JSON.stringify(data).slice(0, 300);
+      console.log("[ChatKit iframe]", origin, kind, summary);
+    }
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   if (isDev) {
     console.debug("[ChatKitPanel] render state", {
