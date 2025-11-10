@@ -5,60 +5,90 @@ export const runtime = "nodejs";
 
 // ----- Env (server-only) -----
 const MUST = (k: string, v?: string) => { if (!v) throw new Error(`Missing env: ${k}`); return v; };
-const OPENAI_API_KEY      = MUST("OPENAI_API_KEY", process.env.OPENAI_API_KEY);
-const OPENAI_WORKFLOW_ID  = MUST("OPENAI_WORKFLOW_ID", process.env.OPENAI_WORKFLOW_ID);
+const OPENAI_API_KEY     = MUST("OPENAI_API_KEY", process.env.OPENAI_API_KEY);
+const OPENAI_WORKFLOW_ID = MUST("OPENAI_WORKFLOW_ID", process.env.OPENAI_WORKFLOW_ID);
 
 // ----- SDK client -----
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// Small helper
+// Resolve the Workflows surface regardless of SDK version
+function getWfApi(c: any) {
+  // known homes for the API across versions
+  const wf =
+    c.workflows ??
+    c.beta?.workflows ??
+    c.agentWorkflows ??          // some enterprise builds
+    c.agents?.workflows ?? null; // very old previews
+
+  if (!wf) {
+    const available = Object.keys(c).join(", ");
+    throw new Error(
+      `Workflows API not available in this SDK build. Installed surfaces: [${available}]. ` +
+      `Upgrade: npm i openai@latest`
+    );
+  }
+  return wf;
+}
+
+// Submit approval across method variants
+async function submitApproval(wf: any, runId: string, nodeId: string, action: "approve" | "reject") {
+  // 1) .runs.approvals.create(runId, {...})
+  if (wf.runs?.approvals?.create) {
+    return wf.runs.approvals.create(runId, { node_id: nodeId, action });
+  }
+  // 2) .runs.submitApproval({ run_id, node_id, action })
+  if (wf.runs?.submitApproval) {
+    return wf.runs.submitApproval({ run_id: runId, node_id: nodeId, action });
+  }
+  // 3) Separate helpers (rare)
+  if (action === "approve" && wf.runs?.approve) return wf.runs.approve(runId, { node_id: nodeId });
+  if (action === "reject"  && wf.runs?.reject)  return wf.runs.reject(runId,  { node_id: nodeId });
+
+  throw new Error("SDK lacks a known approval method. Update the openai package.");
+}
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export async function POST(req: Request) {
   try {
+    const wf = getWfApi(client as any);
+
     const form = await req.formData();
     const file = form.get("file") as File | null;
     const approvedClick = (form.get("approved") as string) === "true";
-    const isPublic = (form.get("isPublic") as string) === "true"; // Approve => public path; Reject => private path
+    const isPublic = (form.get("isPublic") as string) === "true"; // Approve => public branch
 
     if (!approvedClick) return NextResponse.json({ error: "Not approved" }, { status: 400 });
-    if (!file) return NextResponse.json({ error: "No file" }, { status: 400 });
+    if (!file)          return NextResponse.json({ error: "No file" }, { status: 400 });
 
-    // 1) Upload file to Files API
-    const upload = await client.files.create({
-      file,
-      purpose: "assistants",
-    });
-    // 2) Start the workflow run (no app-side logic; your builder controls branching)
-    //    NOTE: Workflows are in the SDK (no REST needed for your tenant).
-    //    The method names are available on the latest 'openai' package.
-    //    If TS types lag, cast to any to avoid build-time friction.
-    // @ts-ignore - accommodate SDK version drift
-    const run = await (client as any).workflows.runs.create({
+    // 1) Upload file
+    const uploaded = await client.files.create({ file, purpose: "assistants" });
+
+    // 2) Start workflow run (support both .create({}) and .create({ ...payload }))
+    const startPayload = {
       workflow_id: OPENAI_WORKFLOW_ID,
-      attachments: [{ file_id: upload.id, name: (file as any).name ?? "input.pdf" }],
-      input: {},   // your graph doesn’t require explicit inputs
-      inputs: {},  // keep both for forward-compat
-    });
+      attachments: [{ file_id: uploaded.id, name: (file as any).name ?? "input.pdf" }],
+      input: {},
+      inputs: {}
+    };
 
-    let runId = run.id;
+    const runStart =
+      (await (wf.runs?.create?.(startPayload))) ??
+      (await (wf.runs?.create?.call(wf.runs, startPayload)));
 
-    // 3) Poll and submit the approval as soon as it’s requested
-    // @ts-ignore
-    const retrieve = (id: string) => (client as any).workflows.runs.retrieve(id);
-    // @ts-ignore
-    const approve = (id: string, node_id: string, action: "approve" | "reject") =>
-      (client as any).workflows.runs.approvals.create(id, { node_id, action });
+    if (!runStart?.id) {
+      throw new Error("Workflows: run start returned no id (check SDK version).");
+    }
 
+    // 3) Poll and handle approval
     for (;;) {
-      const cur = await retrieve(runId);
+      const cur = await wf.runs.retrieve(runStart.id);
 
-      if (cur.status === "requires_action" && cur.required_action?.type === "user_approval") {
-        await approve(cur.id, cur.required_action.node_id, isPublic ? "approve" : "reject");
+      if (cur?.status === "requires_action" && cur.required_action?.type === "user_approval") {
+        await submitApproval(wf, cur.id, cur.required_action.node_id, isPublic ? "approve" : "reject");
       }
 
-      if (cur.status === "succeeded" || cur.status === "completed") {
-        // 4) Find the PDF artifact and stream it back
+      if (cur?.status === "succeeded" || cur?.status === "completed") {
         const outputs = cur.outputs ?? cur.result ?? [];
         const candidate =
           outputs.find?.((o: any) =>
@@ -87,7 +117,7 @@ export async function POST(req: Request) {
         });
       }
 
-      if (cur.status === "failed" || cur.status === "cancelled") {
+      if (cur?.status === "failed" || cur?.status === "cancelled") {
         throw new Error(`Workflow ${cur.status}`);
       }
 
