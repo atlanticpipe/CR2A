@@ -1,0 +1,4 @@
+{
+  "name": "AI Document Workflow",
+  "description": "An application to process documents through an AI-powered workflow, including a user approval step, and generate a final PDF for download."
+}
