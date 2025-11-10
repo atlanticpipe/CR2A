@@ -1,66 +1,57 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+"use client";
+import { useState } from "react";
+import FilePicker from "@/components/FilePicker";
+import ApprovalModal from "@/components/ApprovalModal";
 
-export default function Home() {
+export default function Page() {
+  const [file, setFile] = useState<File | null>(null);
+  const [showApproval, setShowApproval] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  async function handleApprove() {
+    if (!file) return;
+    setShowApproval(false);
+    setDownloading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("approved", "true");
+      const res = await fetch("/api/process", { method: "POST", body: fd });
+      if (!res.ok) throw new Error(await res.text());
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "results.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Minimal workflow</h1>
+      <div className="flex flex-col gap-4 max-w-xl">
+        <FilePicker onPick={setFile} />
+        <button
+          disabled={!file || downloading}
+          onClick={() => setShowApproval(true)}
+          className="px-4 py-2 rounded bg-black text-white disabled:opacity-50 w-fit"
+        >
+          {downloading ? "Processing…" : "Start workflow"}
+        </button>
+        {!file && <p className="text-sm text-gray-600">Choose a file to enable the button.</p>}
+      </div>
+      <ApprovalModal
+        open={showApproval}
+        onApprove={handleApprove}
+        onCancel={() => setShowApproval(false)}
+      />
+    </main>
   );
 }
