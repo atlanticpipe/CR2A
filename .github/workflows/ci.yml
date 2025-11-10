@@ -41,5 +41,17 @@ jobs:
       - name: Assert OPENAI_API_KEY present (masked)
         run: node -e "console.log('OPENAI_API_KEY set:', !!process.env.OPENAI_API_KEY)"
 
-      - name: Build
-        run: npm run build
+      - name: Build (capture logs)
+        run: |
+          set -euxo pipefail
+          npm run build 2>&1 | tee build.log
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
