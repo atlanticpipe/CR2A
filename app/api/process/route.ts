@@ -25,9 +25,9 @@ export async function POST(req: Request) {
     });
 
     // 2) Start workflow run (use exact method/fields from the Builder “Code” panel)
-    let run: any = await client.beta.workflows.runs.create({
+    let run = await client.workflows.runs.create({
       workflow_id: WORKFLOW_ID,
-      input: { is_public: isPublic },          // map to your node/state variable
+      input: { is_public: isPublic },
       attachments: [{ file_id: uploaded.id, name: file.name }],
     } as any);
 
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     for (;;) {
       if (run.status === "requires_action" && run.required_action?.type === "user_approval") {
         // Approve => public path (no redline). Reject => private path (redline).
-        await client.beta.workflows.runs.submitApproval({
+        await client.workflows.runs.submitApproval({
           run_id: run.id,
           node_id: run.required_action.node_id,
           action: isPublic ? "approve" : "reject",
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
       if (run.status === "failed" || run.status === "cancelled") throw new Error(`Workflow ${run.status}`);
 
       await sleep(800);
-      run = await client.beta.workflows.runs.get({ run_id: run.id } as any);
+      run = await client.workflows.runs.get({ run_id: run.id } as any);
     }
 
     // 4) Locate the PDF artifact in outputs and stream it
