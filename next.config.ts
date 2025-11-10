@@ -36,6 +36,20 @@ if (!process.env.CI) {
   }
 }
 
-// export the config as usual
+const requireEnv = (keys: string[]) => {
+  for (const k of keys) {
+    if (!process.env[k]) throw new Error(`[env] Missing required env var: ${k}`);
+  }
+};
+
+const SERVER_REQUIRED = ['OPENAI_API_KEY'];
+const PUBLIC_REQUIRED = ['NEXT_PUBLIC_CHATKIT_WORKFLOW_ID']; // add others
+
+// Skip during CI tasks like next lint / typecheck
+if (!process.env.CI) {
+  requireEnv(SERVER_REQUIRED);
+  requireEnv(PUBLIC_REQUIRED);
+}
+
 const nextConfig = {};
 export default nextConfig;
