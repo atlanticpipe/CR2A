@@ -1,12 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  webpack: (config) => {
-    config.resolve.alias = {
-      ...(config.resolve.alias ?? {}),
-    };
-    return config;
-  },
+  /* config options here */
+  reactCompiler: true,
 };
 
 export default nextConfig;
