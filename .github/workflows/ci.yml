@@ -11,11 +11,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # If you use Environment secrets, uncomment and set the correct environment:
-    # environment: production
-    env:
-      NODE_ENV: production
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
       - name: Checkout repository
