@@ -149,6 +149,8 @@ export function ChatKitPanel({
   // Create/reuse client secret (cached to avoid session resets)
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
+      if (process.env.NODE_ENV !== "production") console.count("[ChatKitPanel] getClientSecret");
+      if (process.env.NODE_ENV !== "production") console.log("[ChatKitPanel] currentSecret:", !!currentSecret, "cached:", !!clientSecretRef.current);
       // Reuse existing secret if ChatKit already has one
       if (currentSecret) {
         if (isDev) console.info("[ChatKitPanel] reusing current clientSecret");
