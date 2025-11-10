@@ -342,7 +342,7 @@ export function ChatKitPanel({
       startScreen: { greeting: GREETING, prompts: STARTER_PROMPTS },
       composer: { placeholder: PLACEHOLDER_INPUT, attachments: { enabled: true } },
       threadItemActions: { feedback: false },
-      onClientTool: onClientToolCb, // explicit ACK fallback
+      onClientTool: onClientToolCb,   // <- now returns a record in all cases
       onResponseEnd: onRespEndCb,
       onResponseStart: onRespStartCb,
       onThreadChange: onThreadChangeCb,
