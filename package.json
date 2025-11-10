@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@openai/chatkit-react": ">=1.1.1 <2.0.0",
-    "next": "^15.5.6",
+    "express": "^5.1.0",
+    "next": "^15.5.4",
+    "pdf-lib": "^1.17.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
@@ -20,14 +22,21 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
-    "@tailwindcss/postcss": "^4.1.17",
-    "@types/node": "^20.19.24",
-    "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2",
-    "eslint": "^9.39.1",
-    "eslint-config-next": "^15.5.4",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.17",
-    "typescript": "^5.9.3"
-  }
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "description": "[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![NextJS](https://img.shields.io/badge/Built_with-NextJS-blue) ![OpenAI API](https://img.shields.io/badge/Powered_by-OpenAI_API-orange)",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

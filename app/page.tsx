@@ -1,3 +1,5 @@
-export default function Page() {
-  return <h1>Next.js minimal baseline</h1>;
+import App from "./App";
+
+export default function Home() {
+  return <App />;
 }
