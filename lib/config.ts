@@ -1,35 +1,17 @@
-import { ColorScheme, StartScreenPrompt, ThemeOption } from "@openai/chatkit";
-
-export const WORKFLOW_ID =
-  process.env.NEXT_PUBLIC_CHATKIT_WORKFLOW_ID?.trim() ?? "";
-
-export const CREATE_SESSION_ENDPOINT = "/api/create-session";
+import type { StartScreenPrompt } from "@openai/chatkit";
 
 export const STARTER_PROMPTS: StartScreenPrompt[] = [
-  {
-    label: "What can you do?",
-    prompt: "What can you do?",
-    icon: "circle-question",
-  },
+  { label: "Summarize a PDF", prompt: "Summarize the attached PDF." },
+  { label: "Draft an email",  prompt: "Draft a concise reply to this thread." },
 ];
 
-export const PLACEHOLDER_INPUT = "Ask anything...";
+export const PLACEHOLDER_INPUT = "Type a message…";
+export const GREETING = "How can I help today?";
 
-export const GREETING = "How can I help you today?";
+export const CREATE_SESSION_ENDPOINT =
+  import.meta.env.VITE_CHATKIT_CREATE_SESSION_ENDPOINT ?? "/api/chatkit/session";
 
-export const getThemeConfig = (theme: ColorScheme): ThemeOption => ({
-  color: {
-    grayscale: {
-      hue: 220,
-      tint: 6,
-      shade: theme === "dark" ? -1 : -4,
-    },
-    accent: {
-      primary: theme === "dark" ? "#f1f5f9" : "#0f172a",
-      level: 1,
-    },
-  },
-  radius: "round",
-  // Add other theme options here
-  // chatkit.studio/playground to explore config options
-});
+export const WORKFLOW_ID =
+  import.meta.env.VITE_CHATKIT_WORKFLOW_ID ?? "wf_replace_me";
+
+export const getThemeConfig = (scheme: "light" | "dark") => ({ colorScheme: scheme });
