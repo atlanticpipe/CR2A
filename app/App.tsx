@@ -1,20 +1,19 @@
-"use client";
-
 import { useCallback } from "react";
-import { ChatKitPanel, type FactAction } from "@/components/ChatKitPanel";
-import { useColorScheme } from "@/hooks/useColorScheme";
+import { ChatKitPanel, type FactAction } from "components/ChatKitPanel";  // if ChatKitPanel.tsx is at repo root
+import { useColorScheme } from "hooks/useColorScheme";
+import ExportPdfButton from "components/ExportPdfButton";
 
 export default function App() {
   const { scheme, setScheme } = useColorScheme();
 
   const handleWidgetAction = useCallback(async (action: FactAction) => {
-    if (process.env.NODE_ENV !== "production") {
+    if (import.meta.env.MODE !== "production") {
       console.info("[ChatKitPanel] widget action", action);
     }
   }, []);
 
   const handleResponseEnd = useCallback(() => {
-    if (process.env.NODE_ENV !== "production") {
+    if (import.meta.env.MODE !== "production") {
       console.debug("[ChatKitPanel] response end");
     }
   }, []);
@@ -28,9 +27,8 @@ export default function App() {
           onResponseEnd={handleResponseEnd}
           onThemeRequest={setScheme}
         />
-        {/* Download the workflow results as a PDF */}
-        <div clasName="mt-4 flex justify-end">
-          <ExportPdfButton filename="CR@A" />
+        <div className="mt-4 flex justify-end">
+          <ExportPdfButton filename="CR2A" />
         </div>
       </div>
     </main>
