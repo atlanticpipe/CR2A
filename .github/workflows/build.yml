@@ -1,77 +1,51 @@
-name: Build (inject OPENAI_API_KEY)
+name: Build & Deploy (Vercel + OPENAI_API_KEY)
 
 on:
-    push:
-        branches: [ main ]
-    workflow_dispatch:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-    build:
-        runs-on: ubuntu-latest
-        timeout-minutes: 15
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
-            
-            - name: Setup Node
-              uses: actions/setup-node@v4
-              with:
-                node-version: 20
-                cache: 'npm'
-
-            - name: Create .env.production from repo secret
-              # Wtire the OPENAI_API_KEY to an env file used by Next.js at build time.
-              # Fail fast if the secret isn't present to avoid confusing bilds.
-              run: |
-                if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
-                    echo "::error::OPENAI_API_KEY repository secret is not set."
-                    exit 1
-                fi
-                echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" > .env.production
-
-            - name: Install and build
-              # Build uses process.env.OPENAI_API_KEY in server code; nothing is logged.continue-on-error:
-              run: |
-                npm ci
-                npm run build
-
-deploy:
-    # Onlyruns if Vercel secrets exist; otherwise ti's skipped.
-    needs: build
-    if: ${{ secrets.VERCEL_TOKEN && secrets.VERCEL_ORG_ID && secrets.VERCEL_PROJET_ID }}
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-        - name: Checkout
-          uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-        - name: Setup Node
-          uses: actions/setup-node@v4
-          with:
-            node-version: 20
-            cache: 'npm'
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-        - name:  Install deps
-          run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-        - name: Install Vercel CLI
-          run: npm i -g vercel@latest
+      - name: Vercel pull (link project/org)
+        run: npx vercel pull --yes --environment=production
+        env:
+          VERCEL_TOKEN: ${{ env.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ env.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_PROJECT_ID }}
 
-        - name: Vercel pull (non-interactive)
-          # Links repo to the Vercel project without prompts.
-          run: vercel pull --yes --environment=production \
-            --token=${{ secrets.VERCEL_TOKEN }} \
-            --project-id=${{ secrets.VERCEL_PROJECT_ID }} \
-            --org-id=${{ secrets.VERCEL_ORC_ID }}
+      - name: Build (inject build-time secret)
+        run: npx vercel build --prod
+        env:
+          VERCEL_TOKEN: ${{ env.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ env.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_PROJECT_ID }}
+          OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
 
-        - name: Vercel Build (inject buil-time secret)
-          # Ensures the key is available during the server build.
-          run: vercel build --prod \
-            --token=${{ secrets.VERCEL_TOKEN }} \
-            --build-env OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-
-        - name: Vercel deploy (inject runtime secret)
-          # Ensures serverless functions get the key at runtime.
-          run: vercel deploy --prebuilt --prod \
-            --token=${{ secrets.VERCEL_TOKEN }} \
-            --env OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+      - name: Deploy (inject runtime secret)
+        run: npx vercel deploy --prebuilt --prod --yes
+        env:
+          VERCEL_TOKEN: ${{ env.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ env.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ env.VERCEL_PROJECT_ID }}
+          OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
