@@ -9,7 +9,7 @@ import {
   CREATE_SESSION_ENDPOINT,
   WORKFLOW_ID,
   getThemeConfig,
-} from "../config";
+} from "./config";
 import { ErrorOverlay } from "../ErrorOverlay";
 import type { ColorScheme } from "../useColorScheme";
 import ExportPdfButton from "../ExportPdfButton";
