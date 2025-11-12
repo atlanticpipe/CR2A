@@ -9,10 +9,10 @@ import {
   CREATE_SESSION_ENDPOINT,
   WORKFLOW_ID,
   getThemeConfig,
-} from "./config";
-import { ErrorOverlay } from "./ErrorOverlay";
-import type { ColorScheme } from "./useColorScheme";
-import ExportPdfButton from "./ExportPdfButton";
+} from "../config";
+import { ErrorOverlay } from "../ErrorOverlay";
+import type { ColorScheme } from "../useColorScheme";
+import ExportPdfButton from "../ExportPdfButton";
 
 export type WidgetAction =
   | { type: "downloadPdf"; data: { html: string } }
@@ -145,7 +145,8 @@ export function ChatKitPanel({
   useEffect(() => {
     if (!isWorkflowConfigured && isMountedRef.current) {
       setErrorState({
-        session: "Set NEXT_PUBLIC_CHATKIT_WORKFLOW_ID in your .env.local file.",
+        session:
+          "Missing workflow ID. Set VITE_CHATKIT_WORKFLOW_ID in your Vercel Project → Settings → Environment Variables, then redeploy.",
         retryable: false,
       });
       setIsInitializingSession(false);
@@ -167,16 +168,6 @@ export function ChatKitPanel({
   const getClientSecret = useCallback(
     async (currentSecret: string | null) => {
       const isMissing = !currentSecret || currentSecret.trim().length === 0;
-      if (!isWorkflowConfigured) {
-        if (isMountedRef.current) {
-          setErrorState({
-            session: "Set NEXT_PUBLIC_CHATKIT_WORKFLOW_ID in your .env.local.",
-            retryable: false,
-          });
-        }
-        return null;
-      }
-
       if (isDev) {
         console.info("[ChatKitPanel] getClientSecret invoked", {
           currentSecretPresent: Boolean(currentSecret),
@@ -187,7 +178,7 @@ export function ChatKitPanel({
 
       if (!isWorkflowConfigured) {
         const detail =
-          "Set NEXT_PUBLIC_CHATKIT_WORKFLOW_ID in your .env.local file.";
+          "Missing workflow ID. Set VITE_CHATKIT_WORKFLOW_ID in your Vercel Project → Settings → Environment Variables, then redeploy.";
         if (isMountedRef.current) {
           setErrorState({ session: detail, retryable: false });
           setIsInitializingSession(false);

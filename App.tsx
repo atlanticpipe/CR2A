@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { ChatKitPanel, type WidgetAction } from "./ChatKitPanel";
+import { ChatKitPanel, type WidgetAction } from "./src/ChatKitPanel";
 import { useColorScheme } from "./useColorScheme";
 import ExportPdfButton from "./ExportPdfButton";
 
