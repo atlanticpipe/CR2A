@@ -5,7 +5,6 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    // Use server envs only
     const workflow_id = process.env.OPENAI_WORKFLOW_ID;
     if (!workflow_id) {
       res.status(500).json({ error: "Missing OPENAI_WORKFLOW_ID" });
@@ -18,8 +17,8 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    // Correct endpoint: Realtime Sessions
-    const r = await fetch("https://api.openai.com/v1/realtime/sessions", {
+    // Create short-lived client secret via Realtime Sessions
+    const resp = await fetch("https://api.openai.com/v1/realtime/sessions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -30,14 +29,21 @@ export default async function handler(req: any, res: any) {
       body: JSON.stringify({ workflow_id }),
     });
 
-    if (!r.ok) {
-      const text = await r.text().catch(() => "");
-      res.status(r.status).json({ error: "OpenAI session create failed", detail: text });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      res
+        .status(resp.status)
+        .json({ error: "OpenAI session create failed", detail: text });
       return;
     }
 
-    const json = await r.json(); // { client_secret: { value: "..." }, ... }
-    res.status(200).json({ client_secret: json.client_secret?.value ?? null });
+    const data: any = await resp.json();
+    const value =
+      (typeof data?.client_secret === "object"
+        ? data?.client_secret?.value
+        : data?.client_secret) ?? null;
+
+    res.status(200).json({ client_secret: { value } });
   } catch (err: any) {
     res.status(500).json({
       error: "Server error creating ChatKit session",
