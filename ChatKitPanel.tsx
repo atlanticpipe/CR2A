@@ -415,20 +415,6 @@ export function ChatKitPanel({
           <ChatKit
             key={widgetInstanceKey}
             control={chatkit.control}
-            configuration={{
-              composer: {
-                placeholder: PLACEHOLDER_INPUT,
-                attachments: { enabled: true },
-              },
-              startScreen: {
-                greeting: GREETING,
-                prompts: STARTER_PROMPTS,
-              },
-              options: {
-                attachments: { enabled: true },
-                chatkit_configuration: {},
-              },
-            }}
           />
         </div>
       )}

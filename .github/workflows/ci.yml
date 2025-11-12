@@ -28,11 +28,14 @@ jobs:
         run: npm ci
 
       - name: Vercel pull (link project/org)
-        run: >
-          npx vercel pull --yes --environment=production
-          --token $VERCEL_TOKEN
-          --project-id $VERCEL_PROJECT_ID
-          --org-id $VERCEL_ORG_ID
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+          # Optionally, if you have a team slug:
+          # npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN" --scope your-team-slug
 
       - name: Build (Vite)
         run: npx vercel build --prod --token $VERCEL_TOKEN
