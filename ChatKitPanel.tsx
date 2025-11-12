@@ -9,10 +9,10 @@ import {
   CREATE_SESSION_ENDPOINT,
   WORKFLOW_ID,
   getThemeConfig,
-} from "@/config";
-import { ErrorOverlay } from "@/ErrorOverlay";
-import type { ColorScheme } from "@/useColorScheme";
-import ExportPdfButton from "@/ExportPdfButton";
+} from "./config";
+import { ErrorOverlay } from "./ErrorOverlay";
+import type { ColorScheme } from "./useColorScheme";
+import ExportPdfButton from "./ExportPdfButton";
 
 export type WidgetAction =
   | { type: "downloadPdf"; data: { html: string } }

@@ -1,7 +1,7 @@
 import { useCallback } from "react";
-import { ChatKitPanel, type WidgetAction } from "@/ChatKitPanel";
-import { useColorScheme } from "@/useColorScheme";
-import ExportPdfButton from "@/ExportPdfButton";
+import { ChatKitPanel, type WidgetAction } from "./ChatKitPanel";
+import { useColorScheme } from "./useColorScheme";
+import ExportPdfButton from "./ExportPdfButton";
 
 export default function App() {
   const { scheme, setScheme } = useColorScheme();
