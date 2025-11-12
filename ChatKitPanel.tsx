@@ -9,39 +9,23 @@ import {
   CREATE_SESSION_ENDPOINT,
   WORKFLOW_ID,
   getThemeConfig,
-} from "../lib/config";
-import { ErrorOverlay } from "./ErrorOverlay";
-import type { ColorScheme } from "@/hooks/useColorScheme";
-import ExportPdfButton from "@/components/ExportPdfButton";
+} from "@/config";
+import { ErrorOverlay } from "@/ErrorOverlay";
+import type { ColorScheme } from "@/useColorScheme";
+import ExportPdfButton from "@/ExportPdfButton";
 
-export type FactAction = {
-  type: "save";
-  factId: string;
-  factText: string;
-};
+export type WidgetAction =
+  | { type: "downloadPdf"; data: { html: string } }
+  | { type: "savePdf"; data: { html: string } };
 
-type WidgetAction =
-  | {
-      type: "downloadPdf";
-      data: {
-        html: string;
-      };
-    }
-  | {
-      type: "savePdf";
-      data: {
-        html: string;
-      };
-    };
-
-type ChatKitPanelProps = {
+export type ChatKitPanelProps = {
   theme: ColorScheme;
   onWidgetAction: (action: WidgetAction) => void;
   onResponseEnd: () => void;
   onThemeRequest: (scheme: ColorScheme) => void;
 };
 
-type ErrorState = {
+export type ErrorState = {
   script: string | null;
   session: string | null;
   integration: string | null;

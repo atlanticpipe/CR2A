@@ -1,12 +1,12 @@
 import { useCallback } from "react";
-import { ChatKitPanel, type FactAction } from "@/components/ChatKitPanel";
-import { useColorScheme } from "@/hooks/useColorScheme";
-import ExportPdfButton from "@/components/ExportPdfButton";
+import { ChatKitPanel, type WidgetAction } from "@/ChatKitPanel";
+import { useColorScheme } from "@/useColorScheme";
+import ExportPdfButton from "@/ExportPdfButton";
 
 export default function App() {
   const { scheme, setScheme } = useColorScheme();
 
-  const handleWidgetAction = useCallback(async (action: FactAction) => {
+  const handleWidgetAction = useCallback(async (action: WidgetAction) => {
     if (import.meta.env.MODE !== "production") console.info("[ChatKitPanel]", action);
   }, []);
 
