@@ -3,8 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/**/*.[jt]s":  { "runtime": "nodejs20.x" },
-    "api/**/*.[jt]sx": { "runtime": "nodejs20.x" }
+    "api/**/*.{js,ts,jsx,tsx}": { "runtime": "nodejs20.x" }
   },
   "redirects": [
     {
