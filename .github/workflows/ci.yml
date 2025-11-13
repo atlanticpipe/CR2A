@@ -46,27 +46,25 @@ jobs:
       - name: Build (prebuilt with Vite env)
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          # Build-time (client) env
           VITE_CHATKIT_WORKFLOW_ID: ${{ secrets.VITE_CHATKIT_WORKFLOW_ID }}
-          # Optional: exposed to build in case your build references them
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_WORKFLOW_ID: ${{ secrets.OPENAI_WORKFLOW_ID }}
-        run: |
-          npx vercel build --prod --token "$VERCEL_TOKEN"
+        run: npx vercel build --prod --token "$VERCEL_TOKEN" --debug
 
       # --- STEP 6: Verify function packaged ---
-      - name: Verify ChatKit session function packaged
+      - name: Inspect functions output
+        run: |
+          echo "--- tree .vercel/output ---"
+          find .vercel/output -maxdepth 3 -type d -print
+          echo "--- list functions ---"
+          find .vercel/output/functions -maxdepth 3 -print || true
+
+      - name: Verify functions packaged
         run: |
           set -e
-          FUNC_DIR=".vercel/output/functions/api/chatkit/session.func"
-          if [ -d "$FUNC_DIR" ]; then
-            echo "✅ Found $FUNC_DIR"
-            cat "$FUNC_DIR/.vc-config.json" || true
-          else
-            echo "❌ Function not built. Contents of .vercel/output:"
-            ls -la .vercel/output || true
-            exit 1
-          fi
+          test -d .vercel/output/functions/api/ping.func
+          test -d .vercel/output/functions/api/chatkit/session.func
+          echo "✅ Functions packaged"
 
       # --- STEP 7: Deploy prebuilt artifact ---
       - name: Deploy (prebuilt)
