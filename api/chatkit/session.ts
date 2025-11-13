@@ -1,50 +1,70 @@
+const SESSIONS_URL =
+  process.env.OPENAI_SESSIONS_URL?.trim() ||
+  // If your account uses the Realtime Sessions API instead, set OPENAI_SESSIONS_URL to that.
+  "https://api.openai.com/v1/chat/sessions";
+
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") {
       res.setHeader("Allow", "POST");
-      return res.status(405).json({ error: "Method Not Allowed" });
+      res.statusCode = 405;
+      return res.end("Method Not Allowed");
     }
 
-    const id = process.env.OPENAI_WORKFLOW_ID; // may actually be a workflow *or* an assistant
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!id) return res.status(500).json({ error: "Missing OPENAI_WORKFLOW_ID" });
-    if (!apiKey) return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    const workflow = process.env.OPENAI_WORKFLOW_ID?.trim();
 
-    // Decide which parameter the OpenAI endpoint expects based on the ID prefix
-    const isWorkflow = /^wf_/.test(id);
-    const body =
-      isWorkflow ? { workflow_id: id } : { assistant_id: id };
+    if (!apiKey) {
+      res.statusCode = 500;
+      return res.end("Server misconfigured: missing OPENAI_API_KEY");
+    }
+    if (!workflow) {
+      res.statusCode = 500;
+      return res.end("Server misconfigured: missing OPENAI_WORKFLOW_ID");
+    }
 
-    // If your endpoint requires beta headers, include them.
-    // Assistants v2 is common; add workflows if you're really using a workflow id.
-    const beta = isWorkflow ? "assistants=v2,workflows=v1" : "assistants=v2";
+    // Build the request body: use the server’s workflow, not the client’s.
+    const body = { workflow };
 
-    const resp = await fetch("https://api.openai.com/v1/chat/sessions", {
+    const resp = await fetch(SESSIONS_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "OpenAI-Beta": beta
+        // Include Assistants v2; add workflows beta to be explicit.
+        "OpenAI-Beta": "assistants=v2,workflows=v1",
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     });
 
+    const text = await resp.text();
     if (!resp.ok) {
-      const detail = await resp.text().catch(() => "");
-      return res.status(resp.status).json({ error: "OpenAI session create failed", detail });
+      // Bubble a concise error + detail for debugging in Network tab
+      res.statusCode = resp.status;
+      return res.end(
+        JSON.stringify({
+          error: "OpenAI session create failed",
+          detail: text,
+        })
+      );
     }
 
-    const data: any = await resp.json();
-    const value =
-      (typeof data?.client_secret === "object"
-        ? data?.client_secret?.value
-        : data?.client_secret) ?? null;
+    const data = JSON.parse(text);
 
-    return res.status(200).json({ client_secret: { value } });
+    // Normalize the shape the widget expects
+    const clientSecretValue =
+      data?.client_secret?.value ?? data?.client_secret ?? null;
+
+    res.setHeader("Content-Type", "application/json");
+    res.statusCode = 200;
+    return res.end(JSON.stringify({ client_secret: { value: clientSecretValue } }));
   } catch (err: any) {
-    return res.status(500).json({
-      error: "Server error creating ChatKit session",
-      detail: err?.message ?? String(err),
-    });
+    res.statusCode = 500;
+    return res.end(
+      JSON.stringify({
+        error: "Server error creating ChatKit session",
+        detail: err?.message ?? String(err),
+      })
+    );
   }
 }
