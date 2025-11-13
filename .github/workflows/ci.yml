@@ -8,43 +8,69 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_WORKFLOW_ID: ${{ secrets.OPENAI_WORKFLOW_ID }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
+      - name: Seed .vercel/project.json
+        env:
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          mkdir -p .vercel
+          cat > .vercel/project.json <<'EOF'
+          { "orgId": "${VERCEL_TEAM_ID}", "projectId": "${VERCEL_PROJECT_ID}" }
+          EOF
+          echo "Seeded .vercel/project.json:"
+          cat .vercel/project.json
+
+      # --- STEP 4: Pull project config (should now succeed) ---
       - name: Vercel pull (link project/org)
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
           npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
-          # Optionally, if you have a team slug:
-          # npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN" --scope your-team-slug
 
-      - name: Build (Vite)
-        run: npx vercel build --prod --token $VERCEL_TOKEN
+      # --- STEP 5: Prebuild (produce .vercel/output) ---
+      - name: Build (prebuilt with Vite env)
         env:
-          OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          # Build-time (client) env
+          VITE_CHATKIT_WORKFLOW_ID: ${{ secrets.VITE_CHATKIT_WORKFLOW_ID }}
+          # Optional: exposed to build in case your build references them
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_WORKFLOW_ID: ${{ secrets.OPENAI_WORKFLOW_ID }}
+        run: |
+          npx vercel build --prod --token "$VERCEL_TOKEN"
 
+      # --- STEP 6: Verify function packaged ---
+      - name: Verify ChatKit session function packaged
+        run: |
+          set -e
+          FUNC_DIR=".vercel/output/functions/api/chatkit/session.func"
+          if [ -d "$FUNC_DIR" ]; then
+            echo "✅ Found $FUNC_DIR"
+            cat "$FUNC_DIR/.vc-config.json" || true
+          else
+            echo "❌ Function not built. Contents of .vercel/output:"
+            ls -la .vercel/output || true
+            exit 1
+          fi
+
+      # --- STEP 7: Deploy prebuilt artifact ---
       - name: Deploy (prebuilt)
-        run: >
-          npx vercel deploy --prebuilt --prod --yes
-          --token $VERCEL_TOKEN
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx vercel deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN"
