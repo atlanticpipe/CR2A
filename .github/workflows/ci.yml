@@ -32,13 +32,13 @@ jobs:
           cat > .vercel/project.json <<'EOF'
           { "orgId": "${VERCEL_TEAM_ID}", "projectId": "${VERCEL_PROJECT_ID}" }
           EOF
-          echo "Seeded .vercel/project.json:"
-          cat .vercel/project.json
-
+          
       # --- STEP 4: Pull project config (should now succeed) ---
       - name: Vercel pull (link project/org)
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}      # <-- map team → org
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
           npx vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
 
