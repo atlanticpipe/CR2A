@@ -1,53 +1,25 @@
 export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    res.statusCode = 405;
+    return res.end('Method Not Allowed');
+  }
+
   try {
-    if (req.method !== "POST") {
-      res.status(405).json({ error: "Method Not Allowed" });
-      return;
+    const { OPENAI_WORKFLOW_ID, OPENAI_API_KEY } = process.env;
+    if (!OPENAI_WORKFLOW_ID || !OPENAI_API_KEY) {
+      res.statusCode = 500;
+      return res.end('Server misconfigured');
     }
 
-    const workflow_id = process.env.OPENAI_WORKFLOW_ID;
-    if (!workflow_id) {
-      res.status(500).json({ error: "Missing OPENAI_WORKFLOW_ID" });
-      return;
-    }
+    // ... your existing session creation logic ...
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      res.status(500).json({ error: "Missing OPENAI_API_KEY" });
-      return;
-    }
-
-    // Create short-lived client secret via Realtime Sessions
-    const resp = await fetch("https://api.openai.com/v1/realtime/sessions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        // "OpenAI-Organization": process.env.OPENAI_ORG_ID ?? "",
-        // "OpenAI-Project": process.env.OPENAI_PROJECT_ID ?? "",
-      },
-      body: JSON.stringify({ workflow_id }),
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => "");
-      res
-        .status(resp.status)
-        .json({ error: "OpenAI session create failed", detail: text });
-      return;
-    }
-
-    const data: any = await resp.json();
-    const value =
-      (typeof data?.client_secret === "object"
-        ? data?.client_secret?.value
-        : data?.client_secret) ?? null;
-
-    res.status(200).json({ client_secret: { value } });
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ client_secret: { value: /* token */ '' } }));
   } catch (err: any) {
-    res.status(500).json({
-      error: "Server error creating ChatKit session",
-      detail: err?.message ?? String(err),
-    });
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: err?.message || 'Internal error' }));
   }
 }
