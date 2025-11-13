@@ -2,9 +2,6 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "api/**/*.{js,ts,jsx,tsx}": { "runtime": "nodejs20.x" }
-  },
   "redirects": [
     {
       "source": "/:path*",
