@@ -9,7 +9,7 @@ export const PLACEHOLDER_INPUT = "Type a message…";
 export const GREETING = "How can I help today?";
 
 export const CREATE_SESSION_ENDPOINT =
-  import.meta.env.VITE_CHATKIT_CREATE_SESSION_ENDPOINT ?? "/api/chatkit/session";
+  import.meta.env.VITE_CHATKIT_CREATE_SESSION_ENDPOINT ?? "";
 
 export const WORKFLOW_ID =
   import.meta.env.VITE_CHATKIT_WORKFLOW_ID ?? "wf_replace_me";
