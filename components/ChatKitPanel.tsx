@@ -14,7 +14,7 @@ import {
 import { ErrorOverlay } from "./ErrorOverlay";
 import type { ColorScheme } from "@/hooks/useColorScheme";
 
-// -------- HTML → PDF helper --------
+// ---------- HTML → PDF helper ----------
 
 let html2pdfModule: typeof import("html2pdf.js") | null = null;
 
@@ -22,7 +22,6 @@ async function getHtml2Pdf() {
   if (!html2pdfModule) {
     html2pdfModule = await import("html2pdf.js");
   }
-  // Handle both default and CommonJS export shapes
   const mod: any = html2pdfModule;
   return (mod.default ?? mod) as any;
 }
@@ -61,7 +60,7 @@ async function generateAndDownloadPdf(html: string, filename: string) {
   }
 }
 
-// -------- Types --------
+// ---------- Types ----------
 
 export type FactAction = {
   type: "save";
@@ -84,6 +83,7 @@ type ErrorState = {
 };
 
 const isBrowser = typeof window !== "undefined";
+// For now, log everywhere so we can see client tools firing
 const isDev = true;
 
 const createInitialErrors = (): ErrorState => ({
@@ -93,7 +93,7 @@ const createInitialErrors = (): ErrorState => ({
   retryable: false,
 });
 
-// -------- Component --------
+// ---------- Component ----------
 
 export function ChatKitPanel({
   theme,
@@ -335,19 +335,25 @@ export function ChatKitPanel({
       name: string;
       params: Record<string, unknown>;
     }) => {
-      if (isDev) {
-        console.log("[onClientTool]", invocation.name, invocation.params);
-      }
+      console.log("[onClientTool]", invocation.name, invocation.params);
 
       if (invocation.name === "download_pdf_from_html") {
         const html = String(invocation.params.html ?? "");
         const filename =
-          (invocation.params.filename as string | undefined) ?? "CR2A-report.pdf";
+          (invocation.params.filename as string | undefined) ??
+          "CR2A-report.pdf";
 
-        console.log("[download_pdf_from_html] html length:", html.length, "filename:", filename);
+        console.log(
+          "[download_pdf_from_html] html length:",
+          html.length,
+          "filename:",
+          filename
+        );
 
         if (!html) {
-          console.warn("[ChatKitPanel] download_pdf_from_html called with empty html");
+          console.warn(
+            "[ChatKitPanel] download_pdf_from_html called with empty html"
+          );
           return { success: false };
         }
 
@@ -360,6 +366,7 @@ export function ChatKitPanel({
           return { success: false };
         }
       }
+
       if (invocation.name === "switch_theme") {
         const requested = invocation.params.theme;
         if (requested === "light" || requested === "dark") {
@@ -434,45 +441,11 @@ export function ChatKitPanel({
         onRetry={blockingError && errors.retryable ? handleResetChat : null}
         retryLabel="Restart chat"
       />
-      return (
-        <div className="relative pb-8 flex h-[90vh] w-full rounded-2xl flex-col overflow-hidden bg-white shadow-sm transition-colors dark:bg-slate-900">
-          <ChatKit
-            key={widgetInstanceKey}
-            control={chatkit.control}
-            className={
-              blockingError || isInitializingSession
-                ? "pointer-events-none opacity-0"
-                : "block h-full w-full"
-            }
-          />
-          <ErrorOverlay
-            error={blockingError}
-            fallbackMessage={
-              blockingError || !isInitializingSession
-                ? null
-                : "Loading assistant session..."
-            }
-            onRetry={blockingError && errors.retryable ? handleResetChat : null}
-            retryLabel="Restart chat"
-          />
-
-          {/* TEMP: manual PDF test button */}
-          <button
-            type="button"
-            onClick={() =>
-              generateAndDownloadPdf("<h1>Test PDF</h1>", "test-cr2a.pdf")
-            }
-            className="absolute bottom-2 right-4 rounded-md border px-3 py-1 text-xs"
-          >
-            Test PDF
-          </button>
-        </div>
-      );
     </div>
   );
 }
 
-// -------- Helpers --------
+// ---------- Helper ----------
 
 function extractErrorDetail(
   payload: Record<string, unknown> | undefined,
