@@ -322,31 +322,16 @@ export function ChatKitPanel({
       name: string;
       params: Record<string, unknown>;
     }) => {
+      console.log("[onClientTool]", invocation.name, invocation.params);
 
       if (invocation.name === "download_pdf_from_html") {
-        const html = String(invocation.params.html ?? "");
-        const filename =
-          (invocation.params.filename as string | undefined) ??
-          "contract-report.pdf";
-
-        if (!html) {
-          if (isDev) {
-            console.warn(
-              "[ChatKitPanel] download_pdf_from_html called with empty html"
-            );
-          }
-          return { success: false };
-        }
-        await generateAndDownloadPdf(html, filename);
+        // Just log and immediately succeed – no PDF logic yet
         return { success: true };
       }
 
       if (invocation.name === "switch_theme") {
         const requested = invocation.params.theme;
         if (requested === "light" || requested === "dark") {
-          if (isDev) {
-            console.debug("[ChatKitPanel] switch_theme", requested);
-          }
           onThemeRequest(requested);
           return { success: true };
         }
@@ -370,7 +355,7 @@ export function ChatKitPanel({
 
       return { success: false };
     },
-
+      
     onResponseEnd: () => {
       onResponseEnd();
     },
