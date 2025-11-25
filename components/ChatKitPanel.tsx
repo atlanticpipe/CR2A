@@ -22,7 +22,9 @@ async function getHtml2Pdf() {
   if (!html2pdfModule) {
     html2pdfModule = await import("html2pdf.js");
   }
-  return html2pdfModule.default;
+  // Handle both default and CommonJS export shapes
+  const mod: any = html2pdfModule;
+  return (mod.default ?? mod) as any;
 }
 
 async function generateAndDownloadPdf(html: string, filename: string) {
@@ -32,11 +34,13 @@ async function generateAndDownloadPdf(html: string, filename: string) {
   container.style.position = "fixed";
   container.style.left = "-99999px";
   container.style.top = "0";
-  container.style.width = "800px"; // tweak as needed
+  container.style.width = "800px";
   container.innerHTML = html;
   document.body.appendChild(container);
 
   try {
+    console.log("[generateAndDownloadPdf] starting; html length:", html.length);
+
     const html2pdf = await getHtml2Pdf();
 
     const opt = {
@@ -47,8 +51,11 @@ async function generateAndDownloadPdf(html: string, filename: string) {
       jsPDF: { unit: "pt", format: "a4", orientation: "portrait" },
     };
 
-    // Cast through any so we don't fight html2pdf's TS defs
     await (html2pdf as any)().set(opt as any).from(container).save();
+    console.log("[generateAndDownloadPdf] done");
+  } catch (err) {
+    console.error("[generateAndDownloadPdf] error", err);
+    throw err;
   } finally {
     document.body.removeChild(container);
   }
@@ -77,7 +84,7 @@ type ErrorState = {
 };
 
 const isBrowser = typeof window !== "undefined";
-const isDev = process.env.NODE_ENV !== "production";
+const isDev = true;
 
 const createInitialErrors = (): ErrorState => ({
   script: null,
