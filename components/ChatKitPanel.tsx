@@ -36,7 +36,8 @@ async function generateAndDownloadPdf(html: string, filename: string) {
   try {
     const html2pdf = await getHtml2Pdf();
 
-    const opt = {
+    // Cast to any so we don't fight html2pdf's TS definitions
+    const opt: any = {
       filename,
       margin: 10,
       image: { type: "jpeg", quality: 0.98 },
@@ -44,7 +45,7 @@ async function generateAndDownloadPdf(html: string, filename: string) {
       jsPDF: { unit: "pt", format: "a4", orientation: "portrait" },
     };
 
-    await html2pdf().set(opt).from(container).save();
+    await (html2pdf as any)().set(opt).from(container).save();
   } finally {
     document.body.removeChild(container);
   }
