@@ -335,22 +335,24 @@ export function ChatKitPanel({
       if (invocation.name === "download_pdf_from_html") {
         const html = String(invocation.params.html ?? "");
         const filename =
-          (invocation.params.filename as string | undefined) ??
-          "CR2A-report.pdf";
+          (invocation.params.filename as string | undefined) ?? "CR2A-report.pdf";
+
+        console.log("[download_pdf_from_html] html length:", html.length, "filename:", filename);
 
         if (!html) {
-          if (isDev) {
-            console.warn(
-              "[ChatKitPanel] download_pdf_from_html called with empty html"
-            );
-          }
+          console.warn("[ChatKitPanel] download_pdf_from_html called with empty html");
           return { success: false };
         }
 
-        await generateAndDownloadPdf(html, filename);
-        return { success: true };
+        try {
+          await generateAndDownloadPdf(html, filename);
+          console.log("[download_pdf_from_html] PDF generation complete");
+          return { success: true };
+        } catch (err) {
+          console.error("[download_pdf_from_html] PDF generation error", err);
+          return { success: false };
+        }
       }
-
       if (invocation.name === "switch_theme") {
         const requested = invocation.params.theme;
         if (requested === "light" || requested === "dark") {
