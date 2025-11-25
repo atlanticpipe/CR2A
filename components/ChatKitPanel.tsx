@@ -13,6 +13,43 @@ import {
 import { ErrorOverlay } from "./ErrorOverlay";
 import type { ColorScheme } from "@/hooks/useColorScheme";
 
+let html2pdfModule: typeof import("html2pdf.js") | null = null;
+
+async function getHtml2Pdf() {
+  if (!html2pdfModule) {
+    html2pdfModule = await import("html2pdf.js");
+  }
+  return html2pdfModule.default;
+}
+
+async function generateAndDownloadPdf(html: string, filename: string) {
+  if (typeof window === "undefined") return;
+
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.left = "-99999px";
+  container.style.top = "0";
+  container.style.width = "800px"; // tweak as needed
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  try {
+    const html2pdf = await getHtml2Pdf();
+
+    const opt = {
+      filename,
+      margin: 10,
+      image: { type: "jpeg", quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: "pt", format: "a4", orientation: "portrait" },
+    };
+
+    await html2pdf().set(opt).from(container).save();
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
 export type FactAction = {
   type: "save";
   factId: string;
@@ -285,6 +322,25 @@ export function ChatKitPanel({
       name: string;
       params: Record<string, unknown>;
     }) => {
+
+      if (invocation.name === "download_pdf_from_html") {
+        const html = String(invocation.params.html ?? "");
+        const filename =
+          (invocation.params.filename as string | undefined) ??
+          "contract-report.pdf";
+
+        if (!html) {
+          if (isDev) {
+            console.warn(
+              "[ChatKitPanel] download_pdf_from_html called with empty html"
+            );
+          }
+          return { success: false };
+        }
+        await generateAndDownloadPdf(html, filename);
+        return { success: true };
+      }
+
       if (invocation.name === "switch_theme") {
         const requested = invocation.params.theme;
         if (requested === "light" || requested === "dark") {
@@ -314,6 +370,7 @@ export function ChatKitPanel({
 
       return { success: false };
     },
+
     onResponseEnd: () => {
       onResponseEnd();
     },
@@ -365,8 +422,8 @@ export function ChatKitPanel({
         retryLabel="Restart chat"
       />
     </div>
-  );
-}
+  )
+};
 
 function extractErrorDetail(
   payload: Record<string, unknown> | undefined,
