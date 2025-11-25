@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -12,6 +13,8 @@ import {
 } from "@/lib/config";
 import { ErrorOverlay } from "./ErrorOverlay";
 import type { ColorScheme } from "@/hooks/useColorScheme";
+
+// -------- HTML → PDF helper --------
 
 let html2pdfModule: typeof import("html2pdf.js") | null = null;
 
@@ -36,8 +39,7 @@ async function generateAndDownloadPdf(html: string, filename: string) {
   try {
     const html2pdf = await getHtml2Pdf();
 
-    // Cast to any so we don't fight html2pdf's TS definitions
-    const opt: any = {
+    const opt = {
       filename,
       margin: 10,
       image: { type: "jpeg", quality: 0.98 },
@@ -45,11 +47,14 @@ async function generateAndDownloadPdf(html: string, filename: string) {
       jsPDF: { unit: "pt", format: "a4", orientation: "portrait" },
     };
 
-    await (html2pdf as any)().set(opt).from(container).save();
+    // Cast through any so we don't fight html2pdf's TS defs
+    await (html2pdf as any)().set(opt as any).from(container).save();
   } finally {
     document.body.removeChild(container);
   }
 }
+
+// -------- Types --------
 
 export type FactAction = {
   type: "save";
@@ -80,6 +85,8 @@ const createInitialErrors = (): ErrorState => ({
   integration: null,
   retryable: false,
 });
+
+// -------- Component --------
 
 export function ChatKitPanel({
   theme,
@@ -231,7 +238,6 @@ export function ChatKitPanel({
           body: JSON.stringify({
             workflow: { id: WORKFLOW_ID },
             chatkit_configuration: {
-              // enable attachments
               file_upload: {
                 enabled: true,
               },
@@ -312,7 +318,6 @@ export function ChatKitPanel({
     composer: {
       placeholder: PLACEHOLDER_INPUT,
       attachments: {
-        // Enable attachments
         enabled: true,
       },
     },
@@ -323,10 +328,26 @@ export function ChatKitPanel({
       name: string;
       params: Record<string, unknown>;
     }) => {
-      console.log("[onClientTool]", invocation.name, invocation.params);
+      if (isDev) {
+        console.log("[onClientTool]", invocation.name, invocation.params);
+      }
 
       if (invocation.name === "download_pdf_from_html") {
-        // Just log and immediately succeed – no PDF logic yet
+        const html = String(invocation.params.html ?? "");
+        const filename =
+          (invocation.params.filename as string | undefined) ??
+          "CR2A-report.pdf";
+
+        if (!html) {
+          if (isDev) {
+            console.warn(
+              "[ChatKitPanel] download_pdf_from_html called with empty html"
+            );
+          }
+          return { success: false };
+        }
+
+        await generateAndDownloadPdf(html, filename);
         return { success: true };
       }
 
@@ -356,7 +377,6 @@ export function ChatKitPanel({
 
       return { success: false };
     },
-      
     onResponseEnd: () => {
       onResponseEnd();
     },
@@ -367,8 +387,6 @@ export function ChatKitPanel({
       processedFacts.current.clear();
     },
     onError: ({ error }: { error: unknown }) => {
-      // Note that Chatkit UI handles errors for your users.
-      // Thus, your app code doesn't need to display errors on UI.
       console.error("ChatKit error", error);
     },
   });
@@ -408,8 +426,10 @@ export function ChatKitPanel({
         retryLabel="Restart chat"
       />
     </div>
-  )
-};
+  );
+}
+
+// -------- Helpers --------
 
 function extractErrorDetail(
   payload: Record<string, unknown> | undefined,
