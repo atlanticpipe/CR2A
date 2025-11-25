@@ -23,11 +23,14 @@ export async function POST(request: Request): Promise<Response> {
   }
   let sessionCookie: string | null = null;
   try {
-    const openaiApiKey = process.env.OPENAI_API_KEY;
+    const openaiApiKey =
+      process.env.CHATKIT_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY;
+
     if (!openaiApiKey) {
       return new Response(
         JSON.stringify({
-          error: "Missing OPENAI_API_KEY environment variable",
+          error:
+            "Missing CHATKIT_OPENAI_API_KEY or OPENAI_API_KEY environment variable",
         }),
         {
           status: 500,
