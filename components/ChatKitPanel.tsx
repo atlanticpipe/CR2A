@@ -434,6 +434,40 @@ export function ChatKitPanel({
         onRetry={blockingError && errors.retryable ? handleResetChat : null}
         retryLabel="Restart chat"
       />
+      return (
+        <div className="relative pb-8 flex h-[90vh] w-full rounded-2xl flex-col overflow-hidden bg-white shadow-sm transition-colors dark:bg-slate-900">
+          <ChatKit
+            key={widgetInstanceKey}
+            control={chatkit.control}
+            className={
+              blockingError || isInitializingSession
+                ? "pointer-events-none opacity-0"
+                : "block h-full w-full"
+            }
+          />
+          <ErrorOverlay
+            error={blockingError}
+            fallbackMessage={
+              blockingError || !isInitializingSession
+                ? null
+                : "Loading assistant session..."
+            }
+            onRetry={blockingError && errors.retryable ? handleResetChat : null}
+            retryLabel="Restart chat"
+          />
+
+          {/* TEMP: manual PDF test button */}
+          <button
+            type="button"
+            onClick={() =>
+              generateAndDownloadPdf("<h1>Test PDF</h1>", "test-cr2a.pdf")
+            }
+            className="absolute bottom-2 right-4 rounded-md border px-3 py-1 text-xs"
+          >
+            Test PDF
+          </button>
+        </div>
+      );
     </div>
   );
 }
