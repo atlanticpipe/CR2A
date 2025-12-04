@@ -1,4 +1,11 @@
-const API_BASE_URL = ""; // Set to your API URL (e.g., https://api.example.com)
+// Detect API base from a global override or same-origin hosting; empty when running from file://
+const detectApiBase = () => {
+  if (window.CR2A_API_BASE) return String(window.CR2A_API_BASE).replace(/\/$/, "");
+  const origin = window.location.origin || "";
+  return origin.startsWith("http") ? origin.replace(/\/$/, "") : "";
+};
+
+const API_BASE_URL = detectApiBase();
 const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
 const MAX_FILE_MB = 500; // client-side guard; matches CLI default
 const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
@@ -9,6 +16,7 @@ const form = document.querySelector("#submission-form");
 const dropzone = document.querySelector("#dropzone");
 const fileInput = document.querySelector("#file-input");
 const fileName = document.querySelector("#file-name");
+const backendHelper = document.querySelector("#backend-helper");
 const timelineEl = document.querySelector("#timeline");
 const validationStatus = document.querySelector("#validation-status");
 const exportStatus = document.querySelector("#export-status");
@@ -36,6 +44,12 @@ const sampleResult = {
     llm_refinement: "off",
   },
 };
+
+if (backendHelper) {
+  backendHelper.textContent = API_BASE_URL
+    ? `Backend wired to ${API_BASE_URL}/analysis`
+    : "No backend wired yet — set window.CR2A_API_BASE to point the UI at your API.";
+}
 
 fdotToggle?.addEventListener("change", () => {
   fdotYearField.hidden = !fdotToggle.checked;
