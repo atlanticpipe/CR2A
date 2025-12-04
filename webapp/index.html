@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CR2A | Clause Risk & Compliance Analyzer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="brand">
+        <div class="logo">CR2A</div>
+        <div>
+          <p class="eyebrow">Clause Risk & Compliance Analyzer</p>
+          <h1>Upload, run, and review contract risk in minutes.</h1>
+          <p class="lede">
+            Streamlined intake for FDOT and internal contracts. Validate against policy, route through OCR, and export executive-ready outputs.
+          </p>
+          <div class="cta-group">
+            <button id="run-demo" class="btn primary">Run sample analysis</button>
+            <button id="doc-link" class="btn ghost">View policy bundle</button>
+          </div>
+          <p class="helper">No backend wired yet — UI is ready for your API endpoint.</p>
+        </div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-title">
+          <div>
+            <p class="eyebrow">New submission</p>
+            <h3>Submit contract</h3>
+          </div>
+          <span class="pill success">Draft</span>
+        </div>
+        <form id="submission-form">
+          <label class="field">
+            <span>Contract ID</span>
+            <input type="text" name="contract_id" placeholder="e.g., FDOT-Bridge-2024-18" required />
+          </label>
+          <label class="field">
+            <span>Contract URI (optional)</span>
+            <input type="url" name="contract_uri" placeholder="https://storage/contract.pdf" />
+          </label>
+          <div class="row">
+            <label class="field">
+              <span>FDOT contract?</span>
+              <div class="switch">
+                <input type="checkbox" name="fdot_contract" id="fdot_toggle" />
+                <label for="fdot_toggle"></label>
+              </div>
+            </label>
+            <label class="field" id="fdot_year_field" hidden>
+              <span>Assumed FDOT year</span>
+              <select name="assume_fdot_year">
+                <option value="">Select year</option>
+                <option>2025</option>
+                <option>2024</option>
+                <option>2023</option>
+                <option>2022</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span>Policy version</span>
+            <select name="policy_version">
+              <option value="">Use default</option>
+              <option>schemas@v1.0</option>
+              <option>schemas@latest</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Notes</span>
+            <textarea name="notes" rows="3" placeholder="Internal routing notes, edge cases, or client asks."></textarea>
+          </label>
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="file-input" accept=".pdf,.doc,.docx,.txt" />
+            <div>
+              <p class="drop-title">Drop a contract file or click to browse</p>
+              <p class="drop-sub">PDF / DOCX up to 500 MB. OCR auto-routes when needed.</p>
+              <div id="file-name" class="file-name">No file selected</div>
+            </div>
+          </label>
+          <div class="upload-status">
+            <div class="progress" id="upload-progress" hidden>
+              <div class="progress-bar" id="upload-progress-bar"></div>
+              <span id="upload-progress-text">0%</span>
+            </div>
+            <p id="upload-message" class="meta"></p>
+          </div>
+          <button type="submit" class="btn primary full">Queue analysis</button>
+        </form>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Run status</p>
+            <h3>Execution timeline</h3>
+          </div>
+          <span class="pill">Live preview</span>
+        </div>
+        <div class="timeline" id="timeline">
+          <div class="timeline-row">
+            <div class="dot active"></div>
+            <div>
+              <p class="title">Awaiting submission</p>
+              <p class="meta">Provide contract, FDOT hint, and notes to start.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel grid">
+        <div>
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Outputs</p>
+              <h3>Validation + export</h3>
+            </div>
+            <span class="pill">Sample data</span>
+          </div>
+          <div class="output">
+            <div class="output-row">
+              <p class="title">Validation</p>
+              <p class="meta" id="validation-status">Pending</p>
+            </div>
+            <div class="output-row">
+              <p class="title">PDF export</p>
+              <p class="meta" id="export-status">Pending</p>
+            </div>
+            <pre id="analysis-json" class="code-block"></pre>
+          </div>
+        </div>
+        <div class="insight">
+          <p class="eyebrow">Highlights</p>
+          <h4>Risk signals</h4>
+          <ul id="insights">
+            <li>Upload a contract to surface clause gaps.</li>
+            <li>FDOT detection toggles tailored policies.</li>
+            <li>Export-ready PDF with executive summary.</li>
+          </ul>
+          <div class="badge-group">
+            <span class="pill soft">OCR auto</span>
+            <span class="pill soft">Schema enforcement</span>
+            <span class="pill soft">LLM optional</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>CR2A · Atlantic Pipe Services · Deploy-ready for AWS Amplify Hosting</p>
+    </footer>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>
