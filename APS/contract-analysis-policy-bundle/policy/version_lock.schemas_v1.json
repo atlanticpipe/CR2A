@@ -1,0 +1,52 @@
+{
+  "tag": "schemas@v1.0",
+  "meta": {
+    "version": "1.0",
+    "created_utc": "2025-10-01T00:00:00Z",
+    "description": "Locks rulebook + schemas + rules into a single coherent release.",
+    "enforce_sha256": true
+  },
+  "components": [
+    {
+      "name": "rulebook_v1",
+      "path": "contract-analysis-policy-bundle/policy/rulebook_v1.yaml",
+      "sha256": "1a283e8af29e8f7a5d3b984c5bc5405bac8b0512adec49369d2221f6c66b5c66"
+    },
+    {
+      "name": "output_schemas_v1",
+      "path": "contract-analysis-policy-bundle/schemas/output_schemas_v1.json",
+      "sha256": "42532ad3393f5864569a868df3d927a87ffd05e6883cff375a8c320b659513bb"
+    },
+    {
+      "name": "run_manifest_schema_v1",
+      "path": "contract-analysis-policy-bundle/schemas/run_manifest_schema_v1.json",
+      "sha256": "79a7ad8cf3f336a7d6e128313356c9a0299ce927467d38fc09f7f0349c88fce1"
+    },
+    {
+      "name": "api_schemas_v1",
+      "path": "contract-analysis-policy-bundle/schemas/api_schemas_v1.json",
+      "sha256": "0914acb72b7fecbeafaae0a7c377a01e891489a85ab37f38af25b8cd584480c9"
+    },
+    {
+      "name": "policy_rules_v1",
+      "path": "contract-analysis-policy-bundle/policy/policy_rules_v1.json",
+      "sha256": "2f8c91bf0dc8c098265fda0c61bf294f270992b22f691b470c5bacb8c727545b"
+    },
+    {
+      "name": "control_flags_v1",
+      "path": "contract-analysis-policy-bundle/policy/control_flags_v1.json",
+      "sha256": "d7c7fcb8485eda28be0b4fbab7acbdbd09c70aad6076fac4128b98329da68af6"
+    },
+    {
+      "name": "validation_rules_v1",
+      "path": "contract-analysis-policy-bundle/policy/validation_rules_v1.json",
+      "sha256": "e989043ae145a8fb415863b77854132e5a4f260bb8a8c09c9ca98e8d4e6f459b"
+    }
+  ],
+  "enforcement": {
+    "require_exact_tag": true,
+    "require_all_present": true,
+    "require_versions_match": true,
+    "enforce_sha256": true
+  }
+}
