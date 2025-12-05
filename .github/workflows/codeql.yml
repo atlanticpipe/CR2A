@@ -27,21 +27,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
+          # Buildless JS extraction is more reliable for this repo because there
+          # is no npm/yarn workspace to autobuild. Scoping paths keeps analysis
+          # focused on the authored frontend and orchestrator sources.
           build-mode: none
-          config-file: .github/codeql/codeql-config.yml
-
-      # Create the JavaScript database from sources so analysis has an input.
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+          paths: |
+            webapp
+            src
+            orchestrator
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
