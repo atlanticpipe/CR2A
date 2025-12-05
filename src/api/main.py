@@ -89,6 +89,11 @@ def _http_error(status: int, category: str, message: str) -> HTTPException:
     return HTTPException(status_code=status, detail={"category": category, "message": message})
 
 
+def _is_truthy(value: Optional[str]) -> bool:
+    # Normalize common truthy env strings so "true"/"1" enable features reliably.
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
 def _load_output_schema() -> Dict[str, Any]:
     schema_path = REPO_ROOT / "schemas" / "output_schemas_v1.json"
     return json.loads(schema_path.read_text(encoding="utf-8"))
@@ -298,7 +303,7 @@ def analysis(payload: AnalysisRequestPayload):
         raw_json["fdot_contract"] = payload.fdot_contract
         raw_json["assume_fdot_year"] = payload.assume_fdot_year
 
-        llm_mode = os.getenv("LLM_REFINEMENT", "off").lower()
+        llm_mode = "on" if _is_truthy(os.getenv("LLM_REFINEMENT", "off")) else "off"
         if llm_mode == "on":
             # Only attempt OpenAI if explicitly enabled to avoid accidental calls without keys.
             refined = refine_cr2a(raw_json)
@@ -348,7 +353,7 @@ def analysis(payload: AnalysisRequestPayload):
         "policy_version": payload.policy_version or "schemas@v1.0",
         "notes": payload.notes,
         "ocr_mode": os.getenv("OCR_MODE", "auto"),
-        "llm_refinement": os.getenv("LLM_REFINEMENT", "off"),
+        "llm_refinement": llm_mode,
         "validation": {"ok": True, "findings": len(validation.findings)},
         "export": {"pdf": export_path.name, "backend": "docx"},
     }
