@@ -13,6 +13,7 @@ OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5")
 
 
 def _get_api_key() -> Optional[str]:
+    # Resolve key from env or AWS Secrets Manager; keep secrets out of logs.
     key = get_secret_env_or_aws("OPENAI_API_KEY", "OPENAI_SECRET_ARN")
     return key
 
@@ -50,8 +51,10 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     Best-effort JSON refinement with OpenAI. If no key is present, raises.
     Keeps token usage low by prompting for structured JSON only.
     """
+
     api_key = _get_api_key()
     if not api_key:
+        # Fail fast when no credentials are available so callers can skip refinement.
         raise RuntimeError("OPENAI_API_KEY/OPENAI_SECRET_ARN not set")
 
     model = os.getenv("OPENAI_MODEL", OPENAI_MODEL_DEFAULT)
