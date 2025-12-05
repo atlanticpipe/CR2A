@@ -1,5 +1,59 @@
-document.addEventListener("DOMContentLoaded", () => {
-  "use strict";
+// Detect API base from a global override or same-origin hosting; empty when running from file://
+const detectApiBase = () => {
+  if (window.CR2A_API_BASE) return String(window.CR2A_API_BASE).replace(/\/$/, "");
+  const origin = window.location.origin || "";
+  return origin.startsWith("http") ? origin.replace(/\/$/, "") : "";
+};
+
+const API_BASE_URL = detectApiBase();
+const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
+const MAX_FILE_MB = 500; // client-side guard; matches CLI default
+const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
+
+const fdotToggle = document.querySelector("#fdot_toggle");
+const fdotYearField = document.querySelector("#fdot_year_field");
+const form = document.querySelector("#submission-form");
+const dropzone = document.querySelector("#dropzone");
+const fileInput = document.querySelector("#file-input");
+const fileName = document.querySelector("#file-name");
+const backendHelper = document.querySelector("#backend-helper");
+const timelineEl = document.querySelector("#timeline");
+const validationStatus = document.querySelector("#validation-status");
+const exportStatus = document.querySelector("#export-status");
+const analysisJson = document.querySelector("#analysis-json");
+const insights = document.querySelector("#insights");
+const runDemoBtn = document.querySelector("#run-demo");
+const docLinkBtn = document.querySelector("#doc-link");
+const uploadProgress = document.querySelector("#upload-progress");
+const uploadProgressBar = document.querySelector("#upload-progress-bar");
+const uploadProgressText = document.querySelector("#upload-progress-text");
+const uploadMessage = document.querySelector("#upload-message");
+
+const sampleResult = {
+  run_id: "run_demo_123",
+  status: "completed",
+  completed_at: new Date().toISOString(),
+  manifest: {
+    contract_id: "FDOT-Bridge-2024-18",
+    fdot_contract: true,
+    assume_fdot_year: "2024",
+    policy_version: "schemas@v1.0",
+    validation: { ok: true, findings: 0 },
+    export: { pdf: "cr2a_export.pdf", backend: "docx" },
+    ocr_mode: "auto",
+    llm_refinement: "off",
+  },
+};
+
+if (backendHelper) {
+  backendHelper.textContent = API_BASE_URL
+    ? `Backend wired to ${API_BASE_URL}/analysis`
+    : "No backend wired yet — set window.CR2A_API_BASE to point the UI at your API.";
+}
+
+fdotToggle?.addEventListener("change", () => {
+  fdotYearField.hidden = !fdotToggle.checked;
+});
 
   // Detect API base from a global override or same-origin hosting; empty when running from file://.
   const detectApiBase = () => {
