@@ -36,15 +36,21 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
+          build-mode: none
           # Explicitly include web assets so JS analysis never skips.
           paths: |
             webapp
             src
             orchestrator
-
-      # Perform the default autobuild so a database is created before analysis.
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+          # Explicitly include web assets so JS analysis never skips.
+          paths: |
+            webapp/**
+            src/**
+            orchestrator/**
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
