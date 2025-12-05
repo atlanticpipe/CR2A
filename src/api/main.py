@@ -298,15 +298,12 @@ def analysis(payload: AnalysisRequestPayload):
         raw_json["fdot_contract"] = payload.fdot_contract
         raw_json["assume_fdot_year"] = payload.assume_fdot_year
 
-        llm_mode = os.getenv("LLM_REFINEMENT", "on").lower()
+        llm_mode = os.getenv("LLM_REFINEMENT", "off").lower()
         if llm_mode == "on":
-            # Run OpenAI refinement when enabled to polish the JSON before validation.
-            try:
-                refined = refine_cr2a(raw_json)
-                if isinstance(refined, dict) and refined:
-                    raw_json = refined
-            except RuntimeError as exc:
-                raise _http_error(500, "ProcessingError", f"OpenAI refinement failed: {exc}")
+            # Only attempt OpenAI if explicitly enabled to avoid accidental calls without keys.
+            refined = refine_cr2a(raw_json)
+            if isinstance(refined, dict) and refined:
+                raw_json = refined
 
         rules = load_validation_rules(REPO_ROOT)
         val = rules.get("validation", rules)
@@ -351,7 +348,7 @@ def analysis(payload: AnalysisRequestPayload):
         "policy_version": payload.policy_version or "schemas@v1.0",
         "notes": payload.notes,
         "ocr_mode": os.getenv("OCR_MODE", "auto"),
-        "llm_refinement": os.getenv("LLM_REFINEMENT", "on"),
+        "llm_refinement": os.getenv("LLM_REFINEMENT", "off"),
         "validation": {"ok": True, "findings": len(validation.findings)},
         "export": {"pdf": export_path.name, "backend": "docx"},
     }
