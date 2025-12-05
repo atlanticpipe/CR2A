@@ -70,6 +70,9 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     url = f"{OPENAI_BASE}/v1/responses"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    org_id = os.getenv("OPENAI_ORG_ID")
+    if org_id:
+        headers["OpenAI-Organization"] = org_id
     body = {
         "model": model,
         "input": [
