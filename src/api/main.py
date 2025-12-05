@@ -225,7 +225,16 @@ def upload_url(
 
     bucket = os.getenv("UPLOAD_BUCKET") or os.getenv("S3_UPLOAD_BUCKET")
     if not bucket:
-        raise HTTPException(status_code=500, detail="UPLOAD_BUCKET env var is required for presign.")
+        # Graceful local-mode fallback so deployments without S3 can still accept uploads.
+        key = f"{UPLOAD_PREFIX}{uuid.uuid4()}_{quote(os.path.basename(filename))}"
+        return UploadUrlResponse(
+            url="/upload-local",
+            upload_method="POST",
+            fields={"key": key},
+            bucket="local",
+            key=key,
+            expires_in=UPLOAD_EXPIRES_SECONDS,
+        )
 
     safe_name = quote(os.path.basename(filename))
     key = f"{UPLOAD_PREFIX}{uuid.uuid4()}_{safe_name}"
@@ -248,6 +257,29 @@ def upload_url(
         key=key,
         expires_in=UPLOAD_EXPIRES_SECONDS,
     )
+
+
+@app.post("/upload-local")
+async def upload_local(file: UploadFile = File(...), key: str = Query(..., description="Storage key from presign")):
+    # Minimal local upload handler to mirror the presign contract when S3 is unavailable.
+    size = 0
+    dest = RUN_OUTPUT_ROOT / "uploads" / key
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with dest.open("wb") as fh:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_FILE_BYTES:
+                    raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
+                fh.write(chunk)
+    finally:
+        await file.close()
+
+    return {"location": f"file://{dest}"}
 
 
 @app.post("/analysis", response_model=AnalysisResponse)
