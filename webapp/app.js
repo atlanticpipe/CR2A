@@ -1,5 +1,59 @@
-document.addEventListener("DOMContentLoaded", () => {
-  "use strict";
+// Detect API base from a global override or same-origin hosting; empty when running from file://
+const detectApiBase = () => {
+  if (window.CR2A_API_BASE) return String(window.CR2A_API_BASE).replace(/\/$/, "");
+  const origin = window.location.origin || "";
+  return origin.startsWith("http") ? origin.replace(/\/$/, "") : "";
+};
+
+const API_BASE_URL = detectApiBase();
+const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
+const MAX_FILE_MB = 500; // client-side guard; matches CLI default
+const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
+
+const fdotToggle = document.querySelector("#fdot_toggle");
+const fdotYearField = document.querySelector("#fdot_year_field");
+const form = document.querySelector("#submission-form");
+const dropzone = document.querySelector("#dropzone");
+const fileInput = document.querySelector("#file-input");
+const fileName = document.querySelector("#file-name");
+const backendHelper = document.querySelector("#backend-helper");
+const timelineEl = document.querySelector("#timeline");
+const validationStatus = document.querySelector("#validation-status");
+const exportStatus = document.querySelector("#export-status");
+const analysisJson = document.querySelector("#analysis-json");
+const insights = document.querySelector("#insights");
+const runDemoBtn = document.querySelector("#run-demo");
+const docLinkBtn = document.querySelector("#doc-link");
+const uploadProgress = document.querySelector("#upload-progress");
+const uploadProgressBar = document.querySelector("#upload-progress-bar");
+const uploadProgressText = document.querySelector("#upload-progress-text");
+const uploadMessage = document.querySelector("#upload-message");
+
+const sampleResult = {
+  run_id: "run_demo_123",
+  status: "completed",
+  completed_at: new Date().toISOString(),
+  manifest: {
+    contract_id: "FDOT-Bridge-2024-18",
+    fdot_contract: true,
+    assume_fdot_year: "2024",
+    policy_version: "schemas@v1.0",
+    validation: { ok: true, findings: 0 },
+    export: { pdf: "cr2a_export.pdf", backend: "docx" },
+    ocr_mode: "auto",
+    llm_refinement: "off",
+  },
+};
+
+if (backendHelper) {
+  backendHelper.textContent = API_BASE_URL
+    ? `Backend wired to ${API_BASE_URL}/analysis`
+    : "No backend wired yet — set window.CR2A_API_BASE to point the UI at your API.";
+}
+
+fdotToggle?.addEventListener("change", () => {
+  fdotYearField.hidden = !fdotToggle.checked;
+});
 
   // Detect API base from a global override or same-origin hosting; empty when running from file://.
   const detectApiBase = () => {
@@ -8,7 +62,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return origin.startsWith("http") ? origin.replace(/\/$/, "") : "";
   };
 
-  let API_BASE_URL = detectApiBase();
+  const API_BASE_URL = detectApiBase();
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
   const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
@@ -50,52 +104,11 @@ document.addEventListener("DOMContentLoaded", () => {
     },
   };
 
-  const updateBackendHelper = (base, status) => {
-    // Show detected backend base and any probe status for clarity.
-    if (!backendHelper) return;
-    if (base) {
-      backendHelper.textContent = `Backend wired to ${base}/analysis${status ? ` (${status})` : ""}`;
-    } else {
-      backendHelper.textContent =
-        "No backend wired yet — set window.CR2A_API_BASE or host alongside the API.";
-    }
-  };
-
-  const probeBackend = async () => {
-    // Try to find a reachable API by probing /health at plausible base paths.
-    const origin = window.location.origin || "";
-    const candidates = [];
-    if (API_BASE_URL) candidates.push(API_BASE_URL);
-    if (!API_BASE_URL && origin.startsWith("http")) {
-      candidates.push(origin.replace(/\/$/, ""));
-      candidates.push(`${origin.replace(/\/$/, "")}/api`);
-    }
-
-    for (const base of candidates) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      try {
-        const resp = await fetch(`${base}/health`, {
-          method: "GET",
-          signal: controller.signal,
-        });
-        if (resp.ok) {
-          API_BASE_URL = base.replace(/\/$/, "");
-          updateBackendHelper(API_BASE_URL, "health OK");
-          return;
-        }
-      } catch (err) {
-        // try next candidate
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-
-    API_BASE_URL = "";
-    updateBackendHelper("", "not reachable");
-  };
-
-  probeBackend();
+  if (backendHelper) {
+    backendHelper.textContent = API_BASE_URL
+      ? `Backend wired to ${API_BASE_URL}/analysis`
+      : "No backend wired yet — set window.CR2A_API_BASE to point the UI at your API.";
+  }
 
   fdotToggle?.addEventListener("change", () => {
     // Reveal FDOT year only when the FDOT toggle is on.
@@ -284,7 +297,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const presignUpload = async (file) => {
     // Request presigned URL for the selected file before uploading.
-    if (!API_BASE_URL) throw new Error("Backend unavailable; set CR2A_API_BASE or serve with API.");
     const params = new URLSearchParams({
       filename: file.name,
       contentType: file.type || "application/octet-stream",
@@ -303,13 +315,12 @@ document.addEventListener("DOMContentLoaded", () => {
     setUploadProgress(1);
     const presign = await presignUpload(file);
     const method = (presign.upload_method || "PUT").toUpperCase();
-    const targetUrl = presign.url?.startsWith("http") ? presign.url : `${API_BASE_URL}${presign.url}`;
 
     if (method === "POST" && presign.fields) {
       const formData = new FormData();
       Object.entries(presign.fields).forEach(([k, v]) => formData.append(k, v));
       formData.append("file", file);
-      const resp = await fetch(targetUrl, {
+      const resp = await fetch(presign.url, {
         method: "POST",
         body: formData,
       });
@@ -318,18 +329,8 @@ document.addEventListener("DOMContentLoaded", () => {
       return { location: presign.fields.key || presign.url };
     }
 
-    if (method === "POST") {
-      const formData = new FormData();
-      formData.append("file", file);
-      const resp = await fetch(targetUrl, { method: "POST", body: formData });
-      if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
-      const data = await resp.json().catch(() => ({}));
-      setUploadProgress(100);
-      return { location: data.location || presign.url };
-    }
-
     // Default: PUT pre-signed URL
-    const resp = await fetch(targetUrl, {
+    const resp = await fetch(presign.url, {
       method: "PUT",
       headers: {
         "Content-Type": file.type || "application/octet-stream",
