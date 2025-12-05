@@ -42,6 +42,15 @@ jobs:
             webapp
             src
             orchestrator
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+          # Explicitly include web assets so JS analysis never skips.
+          paths: |
+            webapp/**
+            src/**
+            orchestrator/**
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
