@@ -31,12 +31,14 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          # Explicitly include web assets so JS analysis never skips.
+          # Buildless JS extraction is more reliable for this repo because there
+          # is no npm/yarn workspace to autobuild. Scoping paths keeps analysis
+          # focused on the authored frontend and orchestrator sources.
+          build-mode: none
           paths: |
             webapp
             src
             orchestrator
-          build-mode: none # JS needs no build; avoid autobuild failures when no package is present.
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
