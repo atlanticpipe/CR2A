@@ -1,0 +1,8 @@
+# Scope CodeQL JavaScript analysis to the actual web assets and ignore vendored/built outputs.
+paths:
+  - webapp
+  - orchestrator
+paths-ignore:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
