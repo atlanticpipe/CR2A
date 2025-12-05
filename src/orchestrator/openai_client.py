@@ -20,6 +20,7 @@ def _get_api_key() -> Optional[str]:
 
 def _extract_text(data: Dict[str, Any]) -> str:
     # Prefer Responses API shape; fall back to chat-style messages if present.
+    # Prefer Responses API shape, fall back to chat-style if needed.
     if isinstance(data, dict):
         output = data.get("output") or []
         for block in output:
@@ -41,6 +42,8 @@ def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
         return json.loads(raw_text)
     except Exception:
         # Best-effort salvage: slice the outermost object to avoid total failure.
+        return json.loads(raw_text)
+    except Exception:
         start = raw_text.find("{")
         end = raw_text.rfind("}")
         if start != -1 and end > start:
@@ -87,6 +90,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         ],
         # text_format enforces JSON-only output per Responses API contract.
         "text_format": {"type": "json"},
+        "response_format": {"type": "json_object"},
         "temperature": 0,
         "max_output_tokens": 2000,
     }
@@ -112,4 +116,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         if k not in refined:
             refined[k] = payload.get(k, [] if k != "SECTION_I" else {})
 
+    for k in ["SECTION_I", "SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+        if k not in refined:
+            refined[k] = payload.get(k, [] if k != "SECTION_I" else {})
     return refined
