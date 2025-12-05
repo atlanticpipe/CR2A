@@ -40,6 +40,14 @@ jobs:
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
+          # Buildless JS extraction is more reliable for this repo because there
+          # is no npm/yarn workspace to autobuild. Scoping paths keeps analysis
+          # focused on the authored frontend and orchestrator sources.
+          build-mode: none
+          paths: |
+            webapp
+            src
+            orchestrator
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3

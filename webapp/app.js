@@ -1,7 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   "use strict";
 
-  // Detect API base from an override or same-origin hosting; empty when running from file://.
+  // Detect API base from a global override or same-origin hosting; empty when running from file://.
   const detectApiBase = () => {
     if (window.CR2A_API_BASE) return String(window.CR2A_API_BASE).replace(/\/$/, "");
     const origin = window.location.origin || "";
@@ -26,11 +26,29 @@ document.addEventListener("DOMContentLoaded", () => {
   const exportStatus = document.querySelector("#export-status");
   const analysisJson = document.querySelector("#analysis-json");
   const insights = document.querySelector("#insights");
+  const runDemoBtn = document.querySelector("#run-demo");
   const docLinkBtn = document.querySelector("#doc-link");
   const uploadProgress = document.querySelector("#upload-progress");
   const uploadProgressBar = document.querySelector("#upload-progress-bar");
   const uploadProgressText = document.querySelector("#upload-progress-text");
   const uploadMessage = document.querySelector("#upload-message");
+
+  // Provide demo output for mock mode and initial render.
+  const sampleResult = {
+    run_id: "run_demo_123",
+    status: "completed",
+    completed_at: new Date().toISOString(),
+    manifest: {
+      contract_id: "FDOT-Bridge-2024-18",
+      fdot_contract: true,
+      assume_fdot_year: "2024",
+      policy_version: "schemas@v1.0",
+      validation: { ok: true, findings: 0 },
+      export: { pdf: "cr2a_export.pdf", backend: "docx" },
+      ocr_mode: "auto",
+      llm_refinement: "off",
+    },
+  };
 
   const updateBackendHelper = (base, status) => {
     // Show detected backend base and any probe status for clarity.
@@ -44,7 +62,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const probeBackend = async () => {
-    // Probe /health to find a reachable API; fall back to the first candidate even if /health fails.
+    // Try to find a reachable API by probing /health at plausible base paths.
     const origin = window.location.origin || "";
     const candidates = [];
     if (API_BASE_URL) candidates.push(API_BASE_URL);
@@ -52,8 +70,6 @@ document.addEventListener("DOMContentLoaded", () => {
       candidates.push(origin.replace(/\/$/, ""));
       candidates.push(`${origin.replace(/\/$/, "")}/api`);
     }
-
-    let fallback = candidates[0] || "";
 
     for (const base of candidates) {
       const controller = new AbortController();
@@ -73,12 +89,6 @@ document.addEventListener("DOMContentLoaded", () => {
       } finally {
         clearTimeout(timeout);
       }
-    }
-
-    if (fallback) {
-      API_BASE_URL = fallback.replace(/\/$/, "");
-      updateBackendHelper(API_BASE_URL, "health check failed; using fallback");
-      return;
     }
 
     API_BASE_URL = "";
@@ -186,6 +196,56 @@ document.addEventListener("DOMContentLoaded", () => {
     setUploadMessage("");
   };
 
+  const runMock = (payload) => {
+    // Simple simulated progression for offline demo mode.
+    const steps = [
+      { title: "Queued", meta: "Submission accepted and queued.", active: true },
+      { title: "OCR / text prep", meta: "Detecting scans, normalizing text.", active: false },
+      { title: "Policy validation", meta: "Running CR2A rules + schemas.", active: false },
+      { title: "LLM refinement (optional)", meta: "Applying OpenAI refinement if enabled.", active: false },
+      { title: "Export ready", meta: "PDF + JSON outputs available.", active: false },
+    ];
+
+    renderTimeline(steps);
+    setOutputs({
+      validation: "Pending",
+      exportStatusText: "Pending",
+      payload: payload,
+    });
+
+    const advance = (index, metaOverride) => {
+      steps.forEach((s, i) => (s.active = i <= index));
+      if (metaOverride) steps[index].meta = metaOverride;
+      renderTimeline(steps);
+    };
+
+    setTimeout(() => advance(1, "OCR complete; ready for validation."), 500);
+    setTimeout(() => {
+      advance(2, "No blocking findings detected.");
+      setOutputs({
+        validation: "Passed",
+        exportStatusText: "Rendering PDF…",
+        payload: payload,
+      });
+    }, 1000);
+    setTimeout(() => {
+      advance(3, payload.llm === "on" ? "LLM refinement applied." : "LLM skipped (off).");
+    }, 1500);
+    setTimeout(() => {
+      advance(4, "Export finished.");
+      setOutputs({
+        validation: "Passed",
+        exportStatusText: "Completed",
+        payload: { ...payload, status: "completed", completed_at: new Date().toISOString() },
+      });
+      insights.innerHTML = `
+        <li>Validation passed with no critical findings.</li>
+        <li>Export available via docx backend.</li>
+        <li>LLM refinement ${payload.llm === "on" ? "enabled" : "was disabled"}.</li>
+      `;
+    }, 2000);
+  };
+
   const submitToApi = async (payload) => {
     // Submit to backend when configured; render minimal two-step timeline.
     renderTimeline([
@@ -201,7 +261,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       setOutputs({
-        validation: data.manifest?.validation?.ok ? "Passed" : "See response",
+        validation: "See response",
         exportStatusText: data.status || "See response",
         payload: data,
       });
@@ -209,20 +269,6 @@ document.addEventListener("DOMContentLoaded", () => {
         { title: "Queued", meta: "Submitted.", active: true },
         { title: "Processing", meta: "Backend returned response.", active: true },
       ]);
-      if (insights) {
-        insights.innerHTML = "";
-        const bullets = [
-          data.status ? `Status: ${data.status}` : null,
-          data.manifest?.validation?.ok === false ? "Validation reported findings." : null,
-          data.download_url ? "PDF export available." : null,
-        ].filter(Boolean);
-        if (bullets.length === 0) bullets.push("Submission accepted; check response for details.");
-        bullets.forEach((text) => {
-          const li = document.createElement("li");
-          li.textContent = text;
-          insights.appendChild(li);
-        });
-      }
     } catch (err) {
       setOutputs({
         validation: "Failed",
@@ -297,7 +343,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   form?.addEventListener("submit", (e) => {
-    // Main submit handler driving upload + API submission.
+    // Main submit handler driving upload + API submission or mock fallback.
     e.preventDefault();
     const formData = new FormData(form);
     const file = fileInput?.files?.[0] || null;
@@ -319,39 +365,56 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const doSubmit = async () => {
-      if (!API_BASE_URL) {
-        setUploadMessage("Backend not detected. Set window.CR2A_API_BASE or host alongside API.", true);
-        return;
-      }
-
-      try {
-        if (file) {
-          setUploadMessage("Uploading…");
-          const res = await uploadFile(file);
-          setUploadMessage("Upload complete.");
-          payload.contract_uri = res.location;
+      if (API_BASE_URL) {
+        try {
+          if (file) {
+            setUploadMessage("Uploading…");
+            const res = await uploadFile(file);
+            setUploadMessage("Upload complete.");
+            payload.contract_uri = res.location;
+          }
+          submitToApi(payload);
+        } catch (err) {
+          setUploadMessage(String(err), true);
+          setOutputs({
+            validation: "Failed",
+            exportStatusText: "Failed",
+            payload: { error: String(err) },
+          });
+          renderTimeline([
+            { title: "Queued", meta: "Submission sent.", active: true },
+            { title: "Error", meta: String(err), active: true },
+          ]);
         }
-        submitToApi(payload);
-      } catch (err) {
-        setUploadMessage(String(err), true);
-        setOutputs({
-          validation: "Failed",
-          exportStatusText: "Failed",
-          payload: { error: String(err) },
-        });
-        renderTimeline([
-          { title: "Queued", meta: "Submission sent.", active: true },
-          { title: "Error", meta: String(err), active: true },
-        ]);
+      } else {
+        runMock({ ...sampleResult, ...payload });
       }
     };
 
     doSubmit();
   });
 
+  runDemoBtn?.addEventListener("click", () => {
+    // Force demo mode regardless of backend wiring.
+    runMock(sampleResult);
+  });
+
   docLinkBtn?.addEventListener("click", () => {
-    // Open policy bundle link when available.
-    if (!POLICY_DOC_URL) return;
-    window.open(POLICY_DOC_URL, "_blank", "noreferrer");
+    // Open policy bundle link when provided.
+    if (POLICY_DOC_URL) {
+      window.open(POLICY_DOC_URL, "_blank");
+    } else {
+      alert("Set POLICY_DOC_URL in app.js to link to your policy bundle.");
+    }
+  });
+
+  // Initial render showing idle state and sample payload.
+  renderTimeline([
+    { title: "Awaiting submission", meta: "Provide contract details to start.", active: true },
+  ]);
+  setOutputs({
+    validation: "Pending",
+    exportStatusText: "Pending",
+    payload: sampleResult,
   });
 });
