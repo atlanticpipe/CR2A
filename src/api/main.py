@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from orchestrator.analyzer import analyze_to_json
-from orchestrator.openai_client import refine_cr2a
+from orchestrator.openai_client import OpenAIClientError, refine_cr2a
 from orchestrator.pdf_export import export_pdf_from_filled_json
 from orchestrator.policy_loader import load_validation_rules
 from orchestrator.validator import validate_filled_template
@@ -306,7 +306,19 @@ def analysis(payload: AnalysisRequestPayload):
         llm_mode = "on" if _is_truthy(os.getenv("LLM_REFINEMENT", "off")) else "off"
         if llm_mode == "on":
             # Only attempt OpenAI if explicitly enabled to avoid accidental calls without keys.
-            refined = refine_cr2a(raw_json)
+            try:
+                refined = refine_cr2a(raw_json)
+            except OpenAIClientError as exc:
+                # Map typed OpenAI errors onto HTTP status codes for clear client feedback.
+                status_map = {
+                    "ValidationError": 400,
+                    "TimeoutError": 504,
+                    "NetworkError": 502,
+                    "ProcessingError": 500,
+                }
+                status = status_map.get(exc.category, 500)
+                raise _http_error(status, exc.category, str(exc))
+
             if isinstance(refined, dict) and refined:
                 raw_json = refined
 
