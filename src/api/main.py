@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from orchestrator.analyzer import analyze_to_json
-from orchestrator.openai_client import OpenAIClientError, refine_cr2a
+from orchestrator.openai_client import refine_cr2a
 from orchestrator.pdf_export import export_pdf_from_filled_json
 from orchestrator.policy_loader import load_validation_rules
 from orchestrator.validator import validate_filled_template
@@ -87,11 +87,6 @@ RUNS: Dict[str, Dict[str, Path]] = {}
 def _http_error(status: int, category: str, message: str) -> HTTPException:
     # Standardized error envelope so the UI can surface actionable messages.
     return HTTPException(status_code=status, detail={"category": category, "message": message})
-
-
-def _is_truthy(value: Optional[str]) -> bool:
-    # Normalize common truthy env strings so "true"/"1" enable features reliably.
-    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
 def _load_output_schema() -> Dict[str, Any]:
@@ -303,22 +298,10 @@ def analysis(payload: AnalysisRequestPayload):
         raw_json["fdot_contract"] = payload.fdot_contract
         raw_json["assume_fdot_year"] = payload.assume_fdot_year
 
-        llm_mode = "on" if _is_truthy(os.getenv("LLM_REFINEMENT", "off")) else "off"
+        llm_mode = os.getenv("LLM_REFINEMENT", "off").lower()
         if llm_mode == "on":
             # Only attempt OpenAI if explicitly enabled to avoid accidental calls without keys.
-            try:
-                refined = refine_cr2a(raw_json)
-            except OpenAIClientError as exc:
-                # Map typed OpenAI errors onto HTTP status codes for clear client feedback.
-                status_map = {
-                    "ValidationError": 400,
-                    "TimeoutError": 504,
-                    "NetworkError": 502,
-                    "ProcessingError": 500,
-                }
-                status = status_map.get(exc.category, 500)
-                raise _http_error(status, exc.category, str(exc))
-
+            refined = refine_cr2a(raw_json)
             if isinstance(refined, dict) and refined:
                 raw_json = refined
 
@@ -365,7 +348,7 @@ def analysis(payload: AnalysisRequestPayload):
         "policy_version": payload.policy_version or "schemas@v1.0",
         "notes": payload.notes,
         "ocr_mode": os.getenv("OCR_MODE", "auto"),
-        "llm_refinement": llm_mode,
+        "llm_refinement": os.getenv("LLM_REFINEMENT", "off"),
         "validation": {"ok": True, "findings": len(validation.findings)},
         "export": {"pdf": export_path.name, "backend": "docx"},
     }
