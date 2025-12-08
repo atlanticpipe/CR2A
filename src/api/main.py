@@ -102,6 +102,9 @@ def _is_truthy(value: Optional[str]) -> bool:
 
 def _is_valid_s3_bucket(name: str) -> bool:
     # Enforce AWS-safe bucket names to avoid runtime presign failures.
+    if any(ch.isupper() for ch in name) or "_" in name:
+        # AWS rejects uppercase and underscore characters.
+        return False
     if not _VALID_BUCKET.fullmatch(name):
         return False
     if ".." in name or ".-" in name or "-." in name:
@@ -123,7 +126,7 @@ def _load_upload_bucket() -> Optional[str]:
                 "ValidationError",
                 (
                     f"Invalid S3 bucket '{value}'. "
-                    "Use lowercase letters, numbers, hyphens, or dots and ensure it starts/ends with alphanumerics."
+                    "Use lowercase letters or numbers, avoid underscores/uppercase, and ensure names start/end with alphanumerics."
                 ),
             )
         return value
