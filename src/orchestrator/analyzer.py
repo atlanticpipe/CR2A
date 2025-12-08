@@ -4,6 +4,7 @@ import io
 import json
 import re
 import time
+import logging
 from typing import Any, Dict, List, Tuple, Union
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -24,6 +25,10 @@ try:
 except Exception:
     pytesseract = None  # type: ignore
     Image = None  # type: ignore
+
+from orchestrator.mime_utils import infer_mime_type
+
+logger = logging.getLogger(__name__)
 
 
 def _read_json(path: Union[str, Path]) -> Dict[str, Any]:
@@ -262,12 +267,22 @@ def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], o
     input_path = Path(input_path).expanduser().resolve()
     closing_line = _get_policy_closing_line(repo_root)
 
-    ext = input_path.suffix.lower()
-    if ext == ".docx":
+    # Resolve MIME from content so renamed binaries are still classified correctly.
+    mime_type = infer_mime_type(input_path)
+    logger.debug(
+        "Analyzing file",
+        extra={
+            "file_name": input_path.name,
+            "mime_type": mime_type,
+            "detected_via": "mime-sniff",
+        },
+    )
+
+    if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or mime_type == "application/msword":
         lines = _docx_iter_paragraphs(input_path.read_bytes())
         return _build_from_lines(lines, closing_line)
 
-    if ext == ".pdf":
+    if mime_type == "application/pdf":
         pdf_bytes = input_path.read_bytes()
         pages = _pdf_extract_pages(pdf_bytes, ocr_mode=ocr)
         lines: List[str] = []
@@ -277,4 +292,4 @@ def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], o
             lines.append("")
         return _build_from_lines(lines, closing_line)
 
-    raise ValueError(f"Unsupported input type: {ext}")
+    raise ValueError(f"Unsupported input type: {mime_type}")

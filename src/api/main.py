@@ -4,10 +4,11 @@ import json
 import os
 import shutil
 import uuid
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
@@ -20,6 +21,7 @@ from orchestrator.openai_client import refine_cr2a
 from orchestrator.pdf_export import export_pdf_from_filled_json
 from orchestrator.policy_loader import load_validation_rules
 from orchestrator.validator import validate_filled_template
+from orchestrator.mime_utils import infer_extension_from_content_type_or_magic, infer_mime_type
 
 try:
     import boto3
@@ -44,6 +46,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger = logging.getLogger(__name__)
 
 
 class UploadUrlResponse(BaseModel):
@@ -289,11 +293,44 @@ def analysis(payload: AnalysisRequestPayload):
 
     run_id = f"run_{uuid.uuid4().hex[:12]}"
     run_dir = RUN_OUTPUT_ROOT / run_id
-    input_path = run_dir / "input.bin"
+    original_ext = Path(urlparse(str(payload.contract_uri)).path).suffix.lower()
+    dest_name = f"input{original_ext}" if original_ext else "input.bin"
+    input_path = run_dir / dest_name
 
     try:
         run_dir.mkdir(parents=True, exist_ok=True)
         downloaded = _download_contract(str(payload.contract_uri), input_path)
+
+        inferred_ext = None
+        target_path = downloaded
+        if not original_ext or original_ext == ".bin":
+            # Fall back to MIME sniffing when the URI lacks a useful extension.
+            try:
+                inferred_ext = infer_extension_from_content_type_or_magic(downloaded)
+            except ValueError as exc:
+                raise _http_error(400, "ValidationError", f"Unable to determine file type: {exc}")
+
+            if inferred_ext and downloaded.suffix.lower() != inferred_ext:
+                target_path = downloaded.with_suffix(inferred_ext)
+                downloaded = downloaded.rename(target_path)
+
+        input_path = target_path
+
+        try:
+            mime_type = infer_mime_type(input_path)
+        except ValueError:
+            mime_type = "unknown"
+
+        logger.debug(
+            "Prepared analysis input",
+            extra={
+                "file_name": input_path.name,
+                "original_ext": original_ext or "none",
+                "inferred_ext": inferred_ext or input_path.suffix,
+                "mime_type": mime_type,
+                "detected_via": "uri-extension" if original_ext and original_ext != ".bin" else "content-sniff",
+            },
+        )
         raw_json = analyze_to_json(downloaded, REPO_ROOT, ocr=os.getenv("OCR_MODE", "auto"))
         raw_json["fdot_contract"] = payload.fdot_contract
         raw_json["assume_fdot_year"] = payload.assume_fdot_year
