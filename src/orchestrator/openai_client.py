@@ -8,6 +8,14 @@ import httpx
 
 from .config import get_secret_env_or_aws
 
+
+class OpenAIClientError(RuntimeError):
+    """Typed error that carries an error category for HTTP mapping."""
+
+    def __init__(self, category: str, message: str):
+        super().__init__(message)
+        self.category = category
+
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
 OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5")
 
@@ -57,7 +65,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     api_key = _get_api_key()
     if not api_key:
         # Fail fast when no credentials are available so callers can skip refinement.
-        raise RuntimeError("OPENAI_API_KEY/OPENAI_SECRET_ARN not set")
+        raise OpenAIClientError("ValidationError", "Set OPENAI_API_KEY or OPENAI_SECRET_ARN to enable LLM refinement.")
 
     model = os.getenv("OPENAI_MODEL", OPENAI_MODEL_DEFAULT)
     timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
@@ -100,19 +108,26 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
             resp = client.post(url, headers=headers, json=body)
             resp.raise_for_status()
             data = resp.json()
+
+        # Pull the text content and decode as JSON; salvage partial objects when needed.
+        content = _extract_text(data)
+        refined = _parse_json_payload(content)
+
+        # Backfill any missing sections to keep schema alignment stable for downstream steps.
+        for k in ["SECTION_I", "SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+            if k not in refined:
+                refined[k] = payload.get(k, [] if k != "SECTION_I" else {})
+
+        return refined
     except httpx.TimeoutException as exc:
         # Bubble up a concise timeout message so the caller can retry or bypass refinement.
-        raise RuntimeError(f"OpenAI request timed out: {exc}")
+        raise OpenAIClientError("TimeoutError", f"OpenAI request timed out: {exc}")
     except httpx.RequestError as exc:
         # Network failures should not be silent; expose enough detail without leaking secrets.
-        raise RuntimeError(f"OpenAI request failed: {exc}")
-
-    content = _extract_text(data)
-    refined = _parse_json_payload(content)
-
-    # Backfill any missing sections to keep schema alignment stable for downstream steps.
-    for k in ["SECTION_I", "SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
-        if k not in refined:
-            refined[k] = payload.get(k, [] if k != "SECTION_I" else {})
-
-    return refined
+        raise OpenAIClientError("NetworkError", f"OpenAI request failed: {exc}")
+    except OpenAIClientError:
+        # Propagate typed errors unchanged for upstream mapping.
+        raise
+    except Exception as exc:
+        # Catch-all to avoid surfacing raw tracebacks to the API surface.
+        raise OpenAIClientError("ProcessingError", f"OpenAI refinement failed: {exc}")
