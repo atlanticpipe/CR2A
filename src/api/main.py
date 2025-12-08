@@ -115,22 +115,16 @@ def _is_valid_s3_bucket(name: str) -> bool:
 
 
 def _load_upload_bucket() -> Optional[str]:
-    # Pull the configured bucket (new `S3_UPLOAD_BUCKET` first) and fail fast on invalid names.
-    for env_name in ("S3_UPLOAD_BUCKET", "UPLOAD_BUCKET"):
-        value = os.getenv(env_name)
-        if not value:
-            continue
-        if not _is_valid_s3_bucket(value):
-            raise _http_error(
-                500,
-                "ValidationError",
-                (
-                    f"Invalid S3 bucket '{value}'. "
-                    "Use lowercase letters or numbers, avoid underscores/uppercase, and ensure names start/end with alphanumerics."
-                ),
-            )
-        return value
-    return None
+    # Hardwire the deployment bucket to avoid misconfiguration across environments.
+    bucket = "cr2a-uploads"
+    if not _is_valid_s3_bucket(bucket):
+        # Fail fast if the pinned bucket ever violates AWS rules (defensive guard).
+        raise _http_error(
+            500,
+            "ValidationError",
+            "Invalid S3 bucket 'cr2a-uploads'. Expected lowercase DNS-compatible name.",
+        )
+    return bucket
 
 
 def _load_output_schema() -> Dict[str, Any]:
