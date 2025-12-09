@@ -51,7 +51,6 @@ app.add_middleware(
 
 logger = logging.getLogger(__name__)
 
-
 class UploadUrlResponse(BaseModel):
     url: str
     upload_method: str = "PUT"
@@ -60,12 +59,10 @@ class UploadUrlResponse(BaseModel):
     key: str
     expires_in: int
 
-
 class AnalysisRequestPayload(BaseModel):
     contract_id: str
     contract_uri: Optional[str] = None
     llm_enabled: bool = True
-
 
 class AnalysisResponse(BaseModel):
     run_id: str
@@ -76,25 +73,20 @@ class AnalysisResponse(BaseModel):
     filled_template_url: Optional[str] = None
     error: Optional[dict] = None
 
-
 def _s3_client():
     if S3 is None:
         raise HTTPException(status_code=500, detail="boto3 not installed; cannot presign S3 upload URLs.")
     return S3
 
-
 RUNS: Dict[str, Dict[str, Path]] = {}
-
 
 def _http_error(status: int, category: str, message: str) -> HTTPException:
     # Standardized error envelope so the UI can surface actionable messages.
     return HTTPException(status_code=status, detail={"category": category, "message": message})
 
-
 def _is_truthy(value: Optional[str]) -> bool:
     # Normalize common truthy env strings so "true"/"1" enable features reliably.
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-
 
 def _is_valid_s3_bucket(name: str) -> bool:
     # Enforce AWS-safe bucket names to avoid runtime presign failures.
@@ -109,7 +101,6 @@ def _is_valid_s3_bucket(name: str) -> bool:
         return False
     return True
 
-
 def _load_upload_bucket() -> Optional[str]:
     # Normalize the configured upload bucket to avoid presign/runtime misconfigurations.
     bucket = UPLOAD_BUCKET or "cr2a-uploads"
@@ -122,11 +113,9 @@ def _load_upload_bucket() -> Optional[str]:
         )
     return bucket
 
-
 def _load_output_schema() -> Dict[str, Any]:
     schema_path = REPO_ROOT / "schemas" / "output_schemas_v1.json"
     return json.loads(schema_path.read_text(encoding="utf-8"))
-
 
 def _normalize_to_schema(raw: Dict[str, Any], closing_line: str, policy_version: Optional[str]) -> Dict[str, Any]:
     # Map heuristic output into the stricter JSON schema shape expected by the template exporter.
@@ -199,7 +188,6 @@ def _normalize_to_schema(raw: Dict[str, Any], closing_line: str, policy_version:
     }
     return normalized
 
-
 def load_contract_bytes(contract_uri: str) -> bytes:
     # Fetch the contract directly from S3 using IAM permissions instead of public HTTP downloads.
     if S3 is None:
@@ -208,18 +196,48 @@ def load_contract_bytes(contract_uri: str) -> bytes:
         raise _http_error(500, "ConfigError", "UPLOAD_BUCKET is required to fetch contract files.")
 
     parsed = urlparse(contract_uri)
-    expected_host = f"{UPLOAD_BUCKET}.s3.amazonaws.com"
-    if parsed.netloc != expected_host:
-        raise _http_error(400, "ConfigError", "Unexpected contract_uri host")
 
-    key = unquote(parsed.path.lstrip("/"))
+    # Enforce HTTPS for safety.
+    if parsed.scheme != "https":
+        raise _http_error(400, "ConfigError", f"Unexpected contract_uri scheme: {parsed.scheme}")
+
+    host = parsed.netloc
+
+    # Allow both classic global and regional virtual-hosted S3 endpoints.
+    expected_global_host = f"{UPLOAD_BUCKET}.s3.amazonaws.com"
+    expected_regional_host = f"{UPLOAD_BUCKET}.s3.{AWS_REGION}.amazonaws.com"
+    # Optional: allow regional path-style S3 endpoint.
+    path_style_host = f"s3.{AWS_REGION}.amazonaws.com"
+
+    if host not in (expected_global_host, expected_regional_host, path_style_host):
+        raise _http_error(400, "ConfigError", f"Unexpected contract_uri host: {host}")
+
+    # Extract the object key from the path, handling virtual-hosted vs path-style.
+    path = unquote(parsed.path.lstrip("/"))
+
+    if host == path_style_host:
+        # path-style: s3.<region>.amazonaws.com/<bucket>/<key>
+        parts = path.split("/", 1)
+        if len(parts) < 2:
+            raise _http_error(400, "ValidationError", "contract_uri path missing bucket/key segments.")
+        bucket_in_path, key = parts[0], parts[1]
+        if bucket_in_path != UPLOAD_BUCKET:
+            raise _http_error(400, "ConfigError", f"Unexpected bucket in contract_uri path: {bucket_in_path}")
+    else:
+        # virtual-hosted: <bucket>.s3[.<region>].amazonaws.com/<key>
+        key = path
+
     if not key:
         raise _http_error(400, "ValidationError", "contract_uri path is missing an object key.")
 
     try:
         obj = S3.get_object(Bucket=UPLOAD_BUCKET, Key=key)
     except Exception as exc:
-        # Surface S3 access issues as network errors to guide caller remediation.
+        # Surface S3 access issues as network errors, but log the real cause.
+        logger.exception(
+            "Failed to download contract from S3",
+            extra={"bucket": UPLOAD_BUCKET, "key": key},
+        )
         raise _http_error(502, "NetworkError", f"Download failed: {exc}")
 
     content_length = obj.get("ContentLength")
@@ -236,11 +254,9 @@ def load_contract_bytes(contract_uri: str) -> bytes:
 
     return data
 
-
 @app.get("/health")
 def health():
     return {"ok": True, "version": app.version}
-
 
 @app.get("/upload-url", response_model=UploadUrlResponse)
 def upload_url(
@@ -289,7 +305,6 @@ def upload_url(
         expires_in=UPLOAD_EXPIRES_SECONDS,
     )
 
-
 @app.post("/upload-local")
 async def upload_local(file: UploadFile = File(...), key: str = Query(..., description="Storage key from presign")):
     # Minimal local upload handler to mirror the presign contract when S3 is unavailable.
@@ -311,7 +326,6 @@ async def upload_local(file: UploadFile = File(...), key: str = Query(..., descr
         await file.close()
 
     return {"location": f"file://{dest}"}
-
 
 @app.post("/analysis", response_model=AnalysisResponse)
 def analysis(payload: AnalysisRequestPayload):
@@ -439,7 +453,6 @@ def analysis(payload: AnalysisRequestPayload):
         error=None,
     )
 
-
 @app.get("/runs/{run_id}/report")
 def download_report(run_id: str):
     record = RUNS.get(run_id)
@@ -451,7 +464,6 @@ def download_report(run_id: str):
     suffix = Path(pdf_path).suffix.lower()
     media_type = "application/pdf" if suffix == ".pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     return FileResponse(pdf_path, media_type=media_type, filename=Path(pdf_path).name)
-
 
 @app.get("/runs/{run_id}/filled-template")
 def download_json(run_id: str):
