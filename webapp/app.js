@@ -1,11 +1,10 @@
 document.addEventListener("DOMContentLoaded", () => {
   "use strict";
 
-  // Set API base from explicit override or fixed backend URL; trailing slash removed for consistency.
-  const normalizeBase = (base) => String(base || "").replace(/\/$/, "");
-  const API_BASE_URL = normalizeBase(
-    (typeof window !== "undefined" && window.CR2A_API_BASE) || "https://api.velmur.info"
-  );
+  // Fixed backend URL with optional window override; keep simple fallback.
+  const API_BASE_URL =
+    (typeof window !== "undefined" && window.CR2A_API_BASE) ||
+    "http://13.223.206.98:8000";
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
   const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
