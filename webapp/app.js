@@ -10,53 +10,41 @@ document.addEventListener("DOMContentLoaded", () => {
   const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
 
   // Cache DOM nodes once after load to avoid repeated lookups.
-  const fdotToggle = document.querySelector("#fdot_toggle");
-  const fdotYearField = document.querySelector("#fdot_year_field");
   const form = document.querySelector("#submission-form");
   const dropzone = document.querySelector("#dropzone");
   const fileInput = document.querySelector("#file-input");
   const fileName = document.querySelector("#file-name");
-  const backendHelper = document.querySelector("#backend-helper");
+  const llmToggle = document.querySelector("#llm_toggle");
   const timelineEl = document.querySelector("#timeline");
   const validationStatus = document.querySelector("#validation-status");
   const exportStatus = document.querySelector("#export-status");
   const analysisJson = document.querySelector("#analysis-json");
-  const insights = document.querySelector("#insights");
   const runDemoBtn = document.querySelector("#run-demo");
   const docLinkBtn = document.querySelector("#doc-link");
   const uploadProgress = document.querySelector("#upload-progress");
   const uploadProgressBar = document.querySelector("#upload-progress-bar");
   const uploadProgressText = document.querySelector("#upload-progress-text");
   const uploadMessage = document.querySelector("#upload-message");
+  let llmEnabled = llmToggle ? llmToggle.checked : true; // Track user preference for LLM refinement.
 
   // Provide demo output for mock mode and initial render.
   const sampleResult = {
     run_id: "run_demo_123",
     status: "completed",
     completed_at: new Date().toISOString(),
+    llm_enabled: true,
     manifest: {
       contract_id: "FDOT-Bridge-2024-18",
-      fdot_contract: true,
-      assume_fdot_year: "2024",
-      policy_version: "schemas@v1.0",
       validation: { ok: true, findings: 0 },
       export: { pdf: "cr2a_export.pdf", backend: "docx" },
       ocr_mode: "auto",
-      llm_refinement: "off",
+      llm_refinement: "on",
     },
   };
 
-  const updateBackendHelper = (base, status) => {
-    // Show configured backend base and any probe status for clarity.
-    if (!backendHelper) return;
-    backendHelper.textContent = `Backend wired to ${base}/analysis${status ? ` (${status})` : ""}`;
-  };
-
-  updateBackendHelper(API_BASE_URL, "configured");
-
-  fdotToggle?.addEventListener("change", () => {
-    // Reveal FDOT year only when the FDOT toggle is on.
-    fdotYearField.hidden = !fdotToggle.checked;
+  llmToggle?.addEventListener("change", (e) => {
+    // Mirror toggle state into submission payload flag.
+    llmEnabled = e.target.checked;
   });
 
   const handleFileSelect = (file) => {
@@ -186,7 +174,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }, 1000);
     setTimeout(() => {
-      advance(3, payload.llm === "on" ? "LLM refinement applied." : "LLM skipped (off).");
+      advance(3, payload.llm_enabled ? "LLM refinement applied." : "LLM skipped (off).");
     }, 1500);
     setTimeout(() => {
       advance(4, "Export finished.");
@@ -195,11 +183,6 @@ document.addEventListener("DOMContentLoaded", () => {
         exportStatusText: "Completed",
         payload: { ...payload, status: "completed", completed_at: new Date().toISOString() },
       });
-      insights.innerHTML = `
-        <li>Validation passed with no critical findings.</li>
-        <li>Export available via docx backend.</li>
-        <li>LLM refinement ${payload.llm === "on" ? "enabled" : "was disabled"}.</li>
-      `;
     }, 2000);
   };
 
@@ -310,14 +293,16 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    if (!file) {
+      // Require an upload since manual contract URIs were removed for safety.
+      setUploadMessage("Attach a contract file to continue.", true);
+      return;
+    }
+
     const payload = {
       contract_id: formData.get("contract_id") || "",
-      contract_uri: formData.get("contract_uri") || null,
-      fdot_contract: formData.get("fdot_contract") === "on",
-      assume_fdot_year: formData.get("assume_fdot_year") || null,
-      policy_version: formData.get("policy_version") || null,
-      notes: formData.get("notes") || null,
-      llm: "off",
+      contract_uri: null,
+      llm_enabled: llmEnabled,
     };
 
     const doSubmit = async () => {
