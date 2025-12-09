@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Single-prompt contract analysis orchestrator with strict schemas"
 authors = [{ name = "APS" }]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.112",
   "uvicorn>=0.30",

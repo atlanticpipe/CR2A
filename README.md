@@ -26,6 +26,8 @@ If `API_BASE_URL` is empty, the UI runs the built-in mock flow for demo purposes
 
 ## Backend stub (FastAPI)
 
+- Python 3.11+ is required for the orchestrator and API utilities.
+
 - Location: `src/api/main.py`
 - Endpoints:
   - `GET /health` – basic health check

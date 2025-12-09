@@ -1,14 +1,10 @@
 document.addEventListener("DOMContentLoaded", () => {
   "use strict";
 
-  // Detect API base from a global override or same-origin hosting; empty when running from file://.
-  const detectApiBase = () => {
-    if (window.CR2A_API_BASE) return String(window.CR2A_API_BASE).replace(/\/$/, "");
-    const origin = window.location.origin || "";
-    return origin.startsWith("http") ? origin.replace(/\/$/, "") : "";
-  };
-
-  let API_BASE_URL = detectApiBase();
+  // Fixed backend URL with optional window override; keep simple fallback.
+  const API_BASE_URL =
+    (typeof window !== "undefined" && window.CR2A_API_BASE) ||
+    "http://13.223.206.98:8000";
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
   const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
@@ -51,51 +47,12 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const updateBackendHelper = (base, status) => {
-    // Show detected backend base and any probe status for clarity.
+    // Show configured backend base and any probe status for clarity.
     if (!backendHelper) return;
-    if (base) {
-      backendHelper.textContent = `Backend wired to ${base}/analysis${status ? ` (${status})` : ""}`;
-    } else {
-      backendHelper.textContent =
-        "No backend wired yet — set window.CR2A_API_BASE or host alongside the API.";
-    }
+    backendHelper.textContent = `Backend wired to ${base}/analysis${status ? ` (${status})` : ""}`;
   };
 
-  const probeBackend = async () => {
-    // Try to find a reachable API by probing /health at plausible base paths.
-    const origin = window.location.origin || "";
-    const candidates = [];
-    if (API_BASE_URL) candidates.push(API_BASE_URL);
-    if (!API_BASE_URL && origin.startsWith("http")) {
-      candidates.push(origin.replace(/\/$/, ""));
-      candidates.push(`${origin.replace(/\/$/, "")}/api`);
-    }
-
-    for (const base of candidates) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      try {
-        const resp = await fetch(`${base}/health`, {
-          method: "GET",
-          signal: controller.signal,
-        });
-        if (resp.ok) {
-          API_BASE_URL = base.replace(/\/$/, "");
-          updateBackendHelper(API_BASE_URL, "health OK");
-          return;
-        }
-      } catch (err) {
-        // try next candidate
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-
-    API_BASE_URL = "";
-    updateBackendHelper("", "not reachable");
-  };
-
-  probeBackend();
+  updateBackendHelper(API_BASE_URL, "configured");
 
   fdotToggle?.addEventListener("change", () => {
     // Reveal FDOT year only when the FDOT toggle is on.
@@ -284,7 +241,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const presignUpload = async (file) => {
     // Request presigned URL for the selected file before uploading.
-    if (!API_BASE_URL) throw new Error("Backend unavailable; set CR2A_API_BASE or serve with API.");
     const params = new URLSearchParams({
       filename: file.name,
       contentType: file.type || "application/octet-stream",
@@ -365,29 +321,25 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const doSubmit = async () => {
-      if (API_BASE_URL) {
-        try {
-          if (file) {
-            setUploadMessage("Uploading…");
-            const res = await uploadFile(file);
-            setUploadMessage("Upload complete.");
-            payload.contract_uri = res.location;
-          }
-          submitToApi(payload);
-        } catch (err) {
-          setUploadMessage(String(err), true);
-          setOutputs({
-            validation: "Failed",
-            exportStatusText: "Failed",
-            payload: { error: String(err) },
-          });
-          renderTimeline([
-            { title: "Queued", meta: "Submission sent.", active: true },
-            { title: "Error", meta: String(err), active: true },
-          ]);
+      try {
+        if (file) {
+          setUploadMessage("Uploading…");
+          const res = await uploadFile(file);
+          setUploadMessage("Upload complete.");
+          payload.contract_uri = res.location;
         }
-      } else {
-        runMock({ ...sampleResult, ...payload });
+        submitToApi(payload);
+      } catch (err) {
+        setUploadMessage(String(err), true);
+        setOutputs({
+          validation: "Failed",
+          exportStatusText: "Failed",
+          payload: { error: String(err) },
+        });
+        renderTimeline([
+          { title: "Queued", meta: "Submission sent.", active: true },
+          { title: "Error", meta: String(err), active: true },
+        ]);
       }
     };
 
