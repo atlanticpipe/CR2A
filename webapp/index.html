@@ -23,7 +23,6 @@
           <div class="cta-group">
             <button id="doc-link" class="btn ghost">View policy bundle</button>
           </div>
-          <p id="backend-helper" class="helper">Detecting backend…</p>
         </div>
       </div>
       <div class="hero-card">
@@ -40,39 +39,11 @@
             <input type="text" name="contract_id" placeholder="e.g., FDOT-Bridge-2024-18" required />
           </label>
           <label class="field">
-            <span>Contract URI (optional)</span>
-            <input type="url" name="contract_uri" placeholder="https://storage/contract.pdf" />
-          </label>
-          <div class="row">
-            <label class="field">
-              <span>FDOT contract?</span>
-              <div class="switch">
-                <input type="checkbox" name="fdot_contract" id="fdot_toggle" />
-                <label for="fdot_toggle"></label>
-              </div>
-            </label>
-            <label class="field" id="fdot_year_field" hidden>
-              <span>Assumed FDOT year</span>
-              <select name="assume_fdot_year">
-                <option value="">Select year</option>
-                <option>2025</option>
-                <option>2024</option>
-                <option>2023</option>
-                <option>2022</option>
-              </select>
-            </label>
-          </div>
-          <label class="field">
-            <span>Policy version</span>
-            <select name="policy_version">
-              <option value="">Use default</option>
-              <option>schemas@v1.0</option>
-              <option>schemas@latest</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Notes</span>
-            <textarea name="notes" rows="3" placeholder="Internal routing notes, edge cases, or client asks."></textarea>
+            <span>Use LLM refinement?</span>
+            <div class="switch">
+              <input type="checkbox" name="llm_enabled" id="llm_toggle" checked />
+              <label for="llm_toggle"></label>
+            </div>
           </label>
           <label class="dropzone" id="dropzone">
             <input type="file" id="file-input" accept=".pdf,.doc,.docx,.txt" />
@@ -108,7 +79,7 @@
             <div class="dot active"></div>
             <div>
               <p class="title">Awaiting submission</p>
-              <p class="meta">Provide contract, FDOT hint, and notes to start.</p>
+              <p class="meta">Provide a contract and toggle LLM refinement to start.</p>
             </div>
           </div>
         </div>
@@ -137,20 +108,6 @@
               <a id="download-report" class="btn small" href="#" aria-disabled="true">Report</a>
             </div>
             <pre id="analysis-json" class="code-block"></pre>
-          </div>
-        </div>
-        <div class="insight">
-          <p class="eyebrow">Highlights</p>
-          <h4>Risk signals</h4>
-          <ul id="insights">
-            <li>Upload a contract to surface clause gaps.</li>
-            <li>FDOT detection toggles tailored policies.</li>
-            <li>Export-ready PDF with executive summary.</li>
-          </ul>
-          <div class="badge-group">
-            <span class="pill soft">OCR auto</span>
-            <span class="pill soft">Schema enforcement</span>
-            <span class="pill soft">LLM optional</span>
           </div>
         </div>
       </section>

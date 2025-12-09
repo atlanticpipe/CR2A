@@ -12,7 +12,7 @@ from urllib.parse import quote, urlparse, unquote
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from orchestrator.analyzer import analyze_to_json
 from orchestrator.openai_client import OpenAIClientError, refine_cr2a
@@ -64,10 +64,7 @@ class UploadUrlResponse(BaseModel):
 class AnalysisRequestPayload(BaseModel):
     contract_id: str
     contract_uri: Optional[str] = None
-    fdot_contract: bool = False
-    assume_fdot_year: Optional[str] = Field(default=None, pattern=r"^\d{4}$")
-    policy_version: Optional[str] = None
-    notes: Optional[str] = None
+    llm_enabled: bool = True
 
 
 class AnalysisResponse(BaseModel):
@@ -366,10 +363,9 @@ def analysis(payload: AnalysisRequestPayload):
             },
         )
         raw_json = analyze_to_json(downloaded, REPO_ROOT, ocr=os.getenv("OCR_MODE", "auto"))
-        raw_json["fdot_contract"] = payload.fdot_contract
-        raw_json["assume_fdot_year"] = payload.assume_fdot_year
 
-        llm_mode = "on" if _is_truthy(os.getenv("LLM_REFINEMENT", "off")) else "off"
+        # Respect user toggle and env flag before invoking OpenAI refinement.
+        llm_mode = "on" if payload.llm_enabled and _is_truthy(os.getenv("LLM_REFINEMENT", "off")) else "off"
         if llm_mode == "on":
             # Only attempt OpenAI if explicitly enabled to avoid accidental calls without keys.
             try:
@@ -394,7 +390,7 @@ def analysis(payload: AnalysisRequestPayload):
             "section_II_to_VI_closing_line",
             "All applicable clauses for [Item #/Title] have been identified and analyzed.",
         )
-        normalized = _normalize_to_schema(raw_json, closing_line, payload.policy_version)
+        normalized = _normalize_to_schema(raw_json, closing_line, None)
 
         schema = _load_output_schema()
         validation = validate_filled_template(normalized, schema, rules)
@@ -426,10 +422,8 @@ def analysis(payload: AnalysisRequestPayload):
     manifest = {
         "contract_id": payload.contract_id,
         "contract_uri": payload.contract_uri,
-        "fdot_contract": payload.fdot_contract,
-        "assume_fdot_year": payload.assume_fdot_year,
-        "policy_version": payload.policy_version or "schemas@v1.0",
-        "notes": payload.notes,
+        "llm_enabled": payload.llm_enabled,
+        "policy_version": "schemas@v1.0",
         "ocr_mode": os.getenv("OCR_MODE", "auto"),
         "llm_refinement": llm_mode,
         "validation": {"ok": True, "findings": len(validation.findings)},
