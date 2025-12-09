@@ -4,7 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Fixed backend URL with optional window override; keep simple fallback.
   const API_BASE_URL =
     (typeof window !== "undefined" && window.CR2A_API_BASE) ||
-    "http://api.velmur.info";
+    "https://api.velmur.info";
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
   const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL

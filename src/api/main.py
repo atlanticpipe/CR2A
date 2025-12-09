@@ -281,7 +281,8 @@ def upload_url(
     try:
         url = client.generate_presigned_url(
             "put_object",
-            Params={"Bucket": bucket, "Key": key, "ContentType": contentType},
+            # ContentType is omitted so callers can supply any type during upload without presign mismatch.
+            Params={"Bucket": bucket, "Key": key},
             ExpiresIn=UPLOAD_EXPIRES_SECONDS,
         )
     except Exception as e:  # pragma: no cover
