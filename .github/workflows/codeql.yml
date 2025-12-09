@@ -36,18 +36,8 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          config-file: .github/codeql/codeql-config.yml
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-          # Buildless JS extraction is more reliable for this repo because there
-          # is no npm/yarn workspace to autobuild. Scoping paths keeps analysis
-          # focused on the authored frontend and orchestrator sources.
           build-mode: none
-          paths: |
-            webapp
-            src
-            orchestrator
+          config-file: .github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
