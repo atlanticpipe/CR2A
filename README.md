@@ -29,11 +29,10 @@ If `API_BASE_URL` is empty, the UI runs the built-in mock flow for demo purposes
 - Location: `src/api/main.py`
 - Endpoints:
   - `GET /health` – basic health check
-  - `GET /upload-url` – returns an S3 presigned PUT URL (requires `UPLOAD_BUCKET` env and AWS creds). Enforces 500 MB limit by default (`MAX_FILE_MB` env overrides).
+  - `GET /upload-url` – returns an S3 presigned PUT URL against the `cr2a-uploads` bucket (requires AWS creds). Enforces 500 MB limit by default (`MAX_FILE_MB` env overrides).
   - `POST /analysis` – stub response echoing the submission with a generated `run_id`.
 - Run locally: `uvicorn src.api.main:app --host 0.0.0.0 --port 8000`
 - Required env:
-  - `UPLOAD_BUCKET` (or `S3_UPLOAD_BUCKET`)
   - `AWS_REGION` (default `us-east-1`)
   - Optional: `CORS_ALLOW_ORIGINS` (comma-separated, default `*`), `MAX_FILE_MB`, `UPLOAD_PREFIX`, `UPLOAD_EXPIRES_SECONDS`
 

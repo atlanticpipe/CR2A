@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import uuid
 import logging
@@ -34,6 +35,7 @@ UPLOAD_EXPIRES_SECONDS = int(os.getenv("UPLOAD_EXPIRES_SECONDS", "3600"))
 UPLOAD_PREFIX = os.getenv("UPLOAD_PREFIX", "uploads/")
 RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_VALID_BUCKET = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$")
 
 app = FastAPI(title="CR2A API stub", version="0.1.0")
 
@@ -96,6 +98,33 @@ def _http_error(status: int, category: str, message: str) -> HTTPException:
 def _is_truthy(value: Optional[str]) -> bool:
     # Normalize common truthy env strings so "true"/"1" enable features reliably.
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _is_valid_s3_bucket(name: str) -> bool:
+    # Enforce AWS-safe bucket names to avoid runtime presign failures.
+    if any(ch.isupper() for ch in name) or "_" in name:
+        # AWS rejects uppercase and underscore characters.
+        return False
+    if not _VALID_BUCKET.fullmatch(name):
+        return False
+    if ".." in name or ".-" in name or "-." in name:
+        return False
+    if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", name):
+        return False
+    return True
+
+
+def _load_upload_bucket() -> Optional[str]:
+    # Hardwire the deployment bucket to avoid misconfiguration across environments.
+    bucket = "cr2a-uploads"
+    if not _is_valid_s3_bucket(bucket):
+        # Fail fast if the pinned bucket ever violates AWS rules (defensive guard).
+        raise _http_error(
+            500,
+            "ValidationError",
+            "Invalid S3 bucket 'cr2a-uploads'. Expected lowercase DNS-compatible name.",
+        )
+    return bucket
 
 
 def _load_output_schema() -> Dict[str, Any]:
@@ -232,7 +261,7 @@ def upload_url(
             detail=f"File too large: {size} bytes. Limit is {MAX_FILE_BYTES} bytes ({MAX_FILE_MB} MB).",
         )
 
-    bucket = os.getenv("UPLOAD_BUCKET") or os.getenv("S3_UPLOAD_BUCKET")
+    bucket = _load_upload_bucket()
     if not bucket:
         # Graceful local-mode fallback so deployments without S3 can still accept uploads.
         key = f"{UPLOAD_PREFIX}{uuid.uuid4()}_{quote(os.path.basename(filename))}"
