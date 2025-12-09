@@ -3,15 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import uuid
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote, urlparse
-
-import httpx
+from urllib.parse import quote, urlparse, unquote
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -36,6 +33,9 @@ UPLOAD_PREFIX = os.getenv("UPLOAD_PREFIX", "uploads/")
 RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _VALID_BUCKET = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$")
+UPLOAD_BUCKET = os.getenv("UPLOAD_BUCKET", "cr2a-uploads")
+AWS_REGION = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "us-east-1"
+S3 = boto3.client("s3", region_name=AWS_REGION) if boto3 else None
 
 app = FastAPI(title="CR2A API stub", version="0.1.0")
 
@@ -81,10 +81,9 @@ class AnalysisResponse(BaseModel):
 
 
 def _s3_client():
-    if boto3 is None:
+    if S3 is None:
         raise HTTPException(status_code=500, detail="boto3 not installed; cannot presign S3 upload URLs.")
-    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "us-east-1"
-    return boto3.client("s3", region_name=region)
+    return S3
 
 
 RUNS: Dict[str, Dict[str, Path]] = {}
@@ -115,8 +114,8 @@ def _is_valid_s3_bucket(name: str) -> bool:
 
 
 def _load_upload_bucket() -> Optional[str]:
-    # Hardwire the deployment bucket to avoid misconfiguration across environments.
-    bucket = "cr2a-uploads"
+    # Normalize the configured upload bucket to avoid presign/runtime misconfigurations.
+    bucket = UPLOAD_BUCKET or "cr2a-uploads"
     if not _is_valid_s3_bucket(bucket):
         # Fail fast if the pinned bucket ever violates AWS rules (defensive guard).
         raise _http_error(
@@ -204,44 +203,41 @@ def _normalize_to_schema(raw: Dict[str, Any], closing_line: str, policy_version:
     return normalized
 
 
-def _download_contract(uri: str, dest: Path) -> Path:
-    # Stream to disk with a hard size check to avoid memory blow-ups.
-    if uri.startswith("file://"):
-        src = Path(uri[7:]).expanduser()
-        if not src.exists():
-            raise _http_error(400, "ValidationError", f"File not found: {src}")
-        if src.stat().st_size > MAX_FILE_BYTES:
-            raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
-        return Path(shutil.copy(src, dest))
+def load_contract_bytes(contract_uri: str) -> bytes:
+    # Fetch the contract directly from S3 using IAM permissions instead of public HTTP downloads.
+    if S3 is None:
+        raise _http_error(500, "ProcessingError", "boto3 not installed; cannot fetch contract from S3.")
+    if not UPLOAD_BUCKET:
+        raise _http_error(500, "ConfigError", "UPLOAD_BUCKET is required to fetch contract files.")
 
-    if uri.startswith("http://") or uri.startswith("https://"):
-        try:
-            # Stream remote content with a timeout and size guard to avoid partial downloads or memory spikes.
-            with httpx.stream("GET", uri, timeout=60, follow_redirects=True) as resp:
-                if resp.status_code >= 400:
-                    raise _http_error(502, "NetworkError", f"Download failed: HTTP {resp.status_code}")
-                total = 0
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                with dest.open("wb") as fh:
-                    for chunk in resp.iter_bytes():
-                        total += len(chunk)
-                        if total > MAX_FILE_BYTES:
-                            raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
-                        fh.write(chunk)
-            return dest
-        except httpx.TimeoutException as exc:
-            # Convert timeouts into a consistent error category for the UI to display.
-            raise _http_error(504, "TimeoutError", f"Download timed out: {exc}")
-        except httpx.RequestError as exc:
-            # Network issues need to be explicit so the caller can retry or adjust the URL.
-            raise _http_error(502, "NetworkError", f"Download failed: {exc}")
+    parsed = urlparse(contract_uri)
+    expected_host = f"{UPLOAD_BUCKET}.s3.amazonaws.com"
+    if parsed.netloc != expected_host:
+        raise _http_error(400, "ConfigError", "Unexpected contract_uri host")
 
-    local = Path(uri).expanduser()
-    if not local.exists():
-        raise _http_error(400, "ValidationError", "contract_uri must be an HTTP(S) URL or local path")
-    if local.stat().st_size > MAX_FILE_BYTES:
+    key = unquote(parsed.path.lstrip("/"))
+    if not key:
+        raise _http_error(400, "ValidationError", "contract_uri path is missing an object key.")
+
+    try:
+        obj = S3.get_object(Bucket=UPLOAD_BUCKET, Key=key)
+    except Exception as exc:
+        # Surface S3 access issues as network errors to guide caller remediation.
+        raise _http_error(502, "NetworkError", f"Download failed: {exc}")
+
+    content_length = obj.get("ContentLength")
+    if content_length and content_length > MAX_FILE_BYTES:
         raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
-    return Path(shutil.copy(local, dest))
+
+    body = obj.get("Body")
+    if body is None:
+        raise _http_error(502, "NetworkError", "Download failed: empty body")
+
+    data = body.read()
+    if len(data) > MAX_FILE_BYTES:
+        raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
+
+    return data
 
 
 @app.get("/health")
@@ -334,7 +330,10 @@ def analysis(payload: AnalysisRequestPayload):
 
     try:
         run_dir.mkdir(parents=True, exist_ok=True)
-        downloaded = _download_contract(str(payload.contract_uri), input_path)
+        content_bytes = load_contract_bytes(str(payload.contract_uri))
+        # Persist the S3 object to disk so downstream analyzers can operate on a stable file path.
+        input_path.write_bytes(content_bytes)
+        downloaded = input_path
 
         inferred_ext = None
         target_path = downloaded
