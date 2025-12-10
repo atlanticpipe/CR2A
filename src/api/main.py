@@ -5,13 +5,14 @@ import os
 import re
 import uuid
 import logging
-from datetime import datetime, timezone
+import tempfile
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlparse, unquote
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from orchestrator.analyzer import analyze_to_json
@@ -30,6 +31,9 @@ MAX_FILE_MB = float(os.getenv("MAX_FILE_MB", "500"))
 MAX_FILE_BYTES = int(MAX_FILE_MB * 1024 * 1024)
 UPLOAD_EXPIRES_SECONDS = int(os.getenv("UPLOAD_EXPIRES_SECONDS", "3600"))
 UPLOAD_PREFIX = os.getenv("UPLOAD_PREFIX", "uploads/")
+OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET")
+OUTPUT_PREFIX = os.getenv("OUTPUT_PREFIX", "runs/")
+OUTPUT_EXPIRES_SECONDS = int(os.getenv("OUTPUT_EXPIRES_SECONDS", "86400"))
 RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _VALID_BUCKET = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$")
@@ -78,8 +82,6 @@ def _s3_client():
         raise HTTPException(status_code=500, detail="boto3 not installed; cannot presign S3 upload URLs.")
     return S3
 
-RUNS: Dict[str, Dict[str, Path]] = {}
-
 def _http_error(status: int, category: str, message: str) -> HTTPException:
     # Standardized error envelope so the UI can surface actionable messages.
     return HTTPException(status_code=status, detail={"category": category, "message": message})
@@ -112,6 +114,23 @@ def _load_upload_bucket() -> Optional[str]:
             "Invalid S3 bucket 'cr2a-uploads'. Expected lowercase DNS-compatible name.",
         )
     return bucket
+
+def _load_output_bucket() -> str:
+    # Require an explicit output bucket so Lambda can persist results for download.
+    bucket = (OUTPUT_BUCKET or "").strip()
+    if not bucket:
+        raise _http_error(500, "ConfigError", "OUTPUT_BUCKET is required for result downloads.")
+    if not _is_valid_s3_bucket(bucket):
+        raise _http_error(500, "ValidationError", "Invalid S3 bucket for outputs; expected DNS-compatible name.")
+    return bucket
+
+def _output_key(run_id: str, filename: str) -> str:
+    # Build a predictable key path while preventing path traversal and unsafe characters.
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", run_id):
+        raise _http_error(400, "ValidationError", "Invalid run_id format.")
+    prefix = OUTPUT_PREFIX.strip("/")
+    parts = [part for part in (prefix, run_id, filename) if part]
+    return "/".join(parts)
 
 def _load_output_schema() -> Dict[str, Any]:
     schema_path = REPO_ROOT / "schemas" / "output_schemas_v1.json"
@@ -188,8 +207,8 @@ def _normalize_to_schema(raw: Dict[str, Any], closing_line: str, policy_version:
     }
     return normalized
 
-def load_contract_bytes(contract_uri: str) -> bytes:
-    # Fetch the contract directly from S3 using IAM permissions instead of public HTTP downloads.
+def _resolve_contract_key(contract_uri: str) -> str:
+    # Validate the contract URI and extract the S3 object key, rejecting unexpected hosts.
     if S3 is None:
         raise _http_error(500, "ProcessingError", "boto3 not installed; cannot fetch contract from S3.")
     if not UPLOAD_BUCKET:
@@ -197,26 +216,20 @@ def load_contract_bytes(contract_uri: str) -> bytes:
 
     parsed = urlparse(contract_uri)
 
-    # Enforce HTTPS for safety.
     if parsed.scheme != "https":
         raise _http_error(400, "ConfigError", f"Unexpected contract_uri scheme: {parsed.scheme}")
 
     host = parsed.netloc
-
-    # Allow both classic global and regional virtual-hosted S3 endpoints.
     expected_global_host = f"{UPLOAD_BUCKET}.s3.amazonaws.com"
     expected_regional_host = f"{UPLOAD_BUCKET}.s3.{AWS_REGION}.amazonaws.com"
-    # Optional: allow regional path-style S3 endpoint.
     path_style_host = f"s3.{AWS_REGION}.amazonaws.com"
 
     if host not in (expected_global_host, expected_regional_host, path_style_host):
         raise _http_error(400, "ConfigError", f"Unexpected contract_uri host: {host}")
 
-    # Extract the object key from the path, handling virtual-hosted vs path-style.
     path = unquote(parsed.path.lstrip("/"))
 
     if host == path_style_host:
-        # path-style: s3.<region>.amazonaws.com/<bucket>/<key>
         parts = path.split("/", 1)
         if len(parts) < 2:
             raise _http_error(400, "ValidationError", "contract_uri path missing bucket/key segments.")
@@ -224,20 +237,19 @@ def load_contract_bytes(contract_uri: str) -> bytes:
         if bucket_in_path != UPLOAD_BUCKET:
             raise _http_error(400, "ConfigError", f"Unexpected bucket in contract_uri path: {bucket_in_path}")
     else:
-        # virtual-hosted: <bucket>.s3[.<region>].amazonaws.com/<key>
         key = path
 
     if not key:
         raise _http_error(400, "ValidationError", "contract_uri path is missing an object key.")
+    return key
 
+def _download_contract_to_path(contract_uri: str, dest_path: Path) -> Path:
+    # Stream the contract from S3 onto disk to avoid double-buffering in memory.
+    key = _resolve_contract_key(contract_uri)
     try:
         obj = S3.get_object(Bucket=UPLOAD_BUCKET, Key=key)
     except Exception as exc:
-        # Surface S3 access issues as network errors, but log the real cause.
-        logger.exception(
-            "Failed to download contract from S3",
-            extra={"bucket": UPLOAD_BUCKET, "key": key},
-        )
+        logger.exception("Failed to download contract from S3", extra={"bucket": UPLOAD_BUCKET, "key": key})
         raise _http_error(502, "NetworkError", f"Download failed: {exc}")
 
     content_length = obj.get("ContentLength")
@@ -248,15 +260,76 @@ def load_contract_bytes(contract_uri: str) -> bytes:
     if body is None:
         raise _http_error(502, "NetworkError", "Download failed: empty body")
 
-    data = body.read()
-    if len(data) > MAX_FILE_BYTES:
-        raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
+    written = 0
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with dest_path.open("wb") as fh:
+        while True:
+            chunk = body.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > MAX_FILE_BYTES:
+                raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
+            fh.write(chunk)
 
-    return data
+    body.close()
+
+    return dest_path
 
 @app.get("/health")
 def health():
     return {"ok": True, "version": app.version}
+
+def _presign_output_url(key: str) -> str:
+    # Return a short-lived download URL to avoid serving large files from Lambda directly.
+    bucket = _load_output_bucket()
+    client = _s3_client()
+    try:
+        client.head_object(Bucket=bucket, Key=key)
+    except Exception:
+        raise _http_error(404, "NotFound", "Run artifact not found.")
+
+    try:
+        return client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=min(OUTPUT_EXPIRES_SECONDS, 604800),
+        )
+    except Exception as exc:  # pragma: no cover
+        raise _http_error(500, "ProcessingError", f"Failed to presign download: {exc}")
+
+def _upload_run_artifacts(run_id: str, filled: Dict[str, Any], pdf_path: Path) -> Dict[str, str]:
+    # Persist outputs to S3 so subsequent downloads rely on signed URLs instead of local disk.
+    bucket = _load_output_bucket()
+    client = _s3_client()
+    expiry = datetime.now(timezone.utc) + timedelta(seconds=OUTPUT_EXPIRES_SECONDS)
+    tagging = f"ttl={OUTPUT_EXPIRES_SECONDS}"
+    base_key = _output_key(run_id, "").rstrip("/")
+    if base_key:
+        base_key = f"{base_key}/"
+
+    json_key = f"{base_key}filled_template.json"
+    pdf_key = f"{base_key}cr2a_export.pdf"
+
+    try:
+        client.put_object(
+            Bucket=bucket,
+            Key=json_key,
+            Body=json.dumps(filled, indent=2).encode("utf-8"),
+            ContentType="application/json",
+            Expires=expiry,
+            Tagging=tagging,
+        )
+        client.upload_file(
+            Filename=str(pdf_path),
+            Bucket=bucket,
+            Key=pdf_key,
+            ExtraArgs={"ContentType": "application/pdf", "Expires": expiry, "Tagging": tagging},
+        )
+    except Exception as exc:
+        raise _http_error(500, "ProcessingError", f"Failed to store outputs: {exc}")
+
+    return {"bucket": bucket, "json_key": json_key, "pdf_key": pdf_key}
 
 @app.get("/upload-url", response_model=UploadUrlResponse)
 def upload_url(
@@ -333,96 +406,98 @@ def analysis(payload: AnalysisRequestPayload):
         raise _http_error(400, "ValidationError", "contract_uri is required to run analysis.")
 
     run_id = f"run_{uuid.uuid4().hex[:12]}"
-    run_dir = RUN_OUTPUT_ROOT / run_id
     original_ext = Path(urlparse(str(payload.contract_uri)).path).suffix.lower()
     dest_name = f"input{original_ext}" if original_ext else "input.bin"
-    input_path = run_dir / dest_name
+
+    llm_mode = "off"
+    artifact_refs: Dict[str, str] = {}
 
     try:
-        run_dir.mkdir(parents=True, exist_ok=True)
-        content_bytes = load_contract_bytes(str(payload.contract_uri))
-        # Persist the S3 object to disk so downstream analyzers can operate on a stable file path.
-        input_path.write_bytes(content_bytes)
-        downloaded = input_path
+        RUN_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=RUN_OUTPUT_ROOT) as tmpdir:
+            run_dir = Path(tmpdir)
+            input_path = run_dir / dest_name
+            downloaded = _download_contract_to_path(str(payload.contract_uri), input_path)
 
-        inferred_ext = None
-        target_path = downloaded
-        if not original_ext or original_ext == ".bin":
-            # Fall back to MIME sniffing when the URI lacks a useful extension.
+            inferred_ext = None
+            target_path = downloaded
+            if not original_ext or original_ext == ".bin":
+                # Fall back to MIME sniffing when the URI lacks a useful extension.
+                try:
+                    inferred_ext = infer_extension_from_content_type_or_magic(downloaded)
+                except ValueError as exc:
+                    raise _http_error(400, "ValidationError", f"Unable to determine file type: {exc}")
+
+                if inferred_ext and downloaded.suffix.lower() != inferred_ext:
+                    target_path = downloaded.with_suffix(inferred_ext)
+                    downloaded = downloaded.rename(target_path)
+
+            input_path = target_path
+
             try:
-                inferred_ext = infer_extension_from_content_type_or_magic(downloaded)
-            except ValueError as exc:
-                raise _http_error(400, "ValidationError", f"Unable to determine file type: {exc}")
+                mime_type = infer_mime_type(input_path)
+            except ValueError:
+                mime_type = "unknown"
 
-            if inferred_ext and downloaded.suffix.lower() != inferred_ext:
-                target_path = downloaded.with_suffix(inferred_ext)
-                downloaded = downloaded.rename(target_path)
+            logger.debug(
+                "Prepared analysis input",
+                extra={
+                    "file_name": input_path.name,
+                    "original_ext": original_ext or "none",
+                    "inferred_ext": inferred_ext or input_path.suffix,
+                    "mime_type": mime_type,
+                    "detected_via": "uri-extension" if original_ext and original_ext != ".bin" else "content-sniff",
+                },
+            )
+            raw_json = analyze_to_json(downloaded, REPO_ROOT, ocr=os.getenv("OCR_MODE", "auto"))
 
-        input_path = target_path
+            # Respect user toggle and env flag before invoking OpenAI refinement.
+            llm_mode = "on" if payload.llm_enabled and _is_truthy(os.getenv("LLM_REFINEMENT", "off")) else "off"
+            if llm_mode == "on":
+                # Only attempt OpenAI if explicitly enabled to avoid accidental calls without keys.
+                try:
+                    refined = refine_cr2a(raw_json)
+                except OpenAIClientError as exc:
+                    # Map typed OpenAI errors onto HTTP status codes for clear client feedback.
+                    status_map = {
+                        "ValidationError": 400,
+                        "TimeoutError": 504,
+                        "NetworkError": 502,
+                        "ProcessingError": 500,
+                    }
+                    status = status_map.get(exc.category, 500)
+                    raise _http_error(status, exc.category, str(exc))
 
-        try:
-            mime_type = infer_mime_type(input_path)
-        except ValueError:
-            mime_type = "unknown"
+                if isinstance(refined, dict) and refined:
+                    raw_json = refined
 
-        logger.debug(
-            "Prepared analysis input",
-            extra={
-                "file_name": input_path.name,
-                "original_ext": original_ext or "none",
-                "inferred_ext": inferred_ext or input_path.suffix,
-                "mime_type": mime_type,
-                "detected_via": "uri-extension" if original_ext and original_ext != ".bin" else "content-sniff",
-            },
-        )
-        raw_json = analyze_to_json(downloaded, REPO_ROOT, ocr=os.getenv("OCR_MODE", "auto"))
+            rules = load_validation_rules(REPO_ROOT)
+            val = rules.get("validation", rules)
+            closing_line = val.get("mandatory_fields", {}).get(
+                "section_II_to_VI_closing_line",
+                "All applicable clauses for [Item #/Title] have been identified and analyzed.",
+            )
+            normalized = _normalize_to_schema(raw_json, closing_line, None)
 
-        # Respect user toggle and env flag before invoking OpenAI refinement.
-        llm_mode = "on" if payload.llm_enabled and _is_truthy(os.getenv("LLM_REFINEMENT", "off")) else "off"
-        if llm_mode == "on":
-            # Only attempt OpenAI if explicitly enabled to avoid accidental calls without keys.
-            try:
-                refined = refine_cr2a(raw_json)
-            except OpenAIClientError as exc:
-                # Map typed OpenAI errors onto HTTP status codes for clear client feedback.
-                status_map = {
-                    "ValidationError": 400,
-                    "TimeoutError": 504,
-                    "NetworkError": 502,
-                    "ProcessingError": 500,
-                }
-                status = status_map.get(exc.category, 500)
-                raise _http_error(status, exc.category, str(exc))
+            schema = _load_output_schema()
+            validation = validate_filled_template(normalized, schema, rules)
+            if not validation.ok:
+                details = "; ".join(f"{f.code}: {f.message}" for f in validation.findings)
+                raise _http_error(400, "ValidationError", details)
 
-            if isinstance(refined, dict) and refined:
-                raw_json = refined
+            filled_path = run_dir / "filled_template.json"
+            filled_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
 
-        rules = load_validation_rules(REPO_ROOT)
-        val = rules.get("validation", rules)
-        closing_line = val.get("mandatory_fields", {}).get(
-            "section_II_to_VI_closing_line",
-            "All applicable clauses for [Item #/Title] have been identified and analyzed.",
-        )
-        normalized = _normalize_to_schema(raw_json, closing_line, None)
+            output_pdf = run_dir / "cr2a_export.pdf"
+            export_path = export_pdf_from_filled_json(
+                normalized,
+                output_pdf,
+                backend="docx",
+                template_docx=REPO_ROOT / "templates" / "CR2A_Template.docx",
+                title="Contract Risk & Compliance Analysis",
+            )
 
-        schema = _load_output_schema()
-        validation = validate_filled_template(normalized, schema, rules)
-        if not validation.ok:
-            details = "; ".join(f"{f.code}: {f.message}" for f in validation.findings)
-            raise _http_error(400, "ValidationError", details)
-
-        run_dir.mkdir(parents=True, exist_ok=True)
-        filled_path = run_dir / "filled_template.json"
-        filled_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
-
-        output_pdf = run_dir / "cr2a_export.pdf"
-        export_path = export_pdf_from_filled_json(
-            normalized,
-            output_pdf,
-            backend="docx",
-            template_docx=REPO_ROOT / "templates" / "CR2A_Template.docx",
-            title="Contract Risk & Compliance Analysis",
-        )
+            artifact_refs = _upload_run_artifacts(run_id, normalized, export_path)
 
     except HTTPException:
         # Passthrough for clean HTTP errors.
@@ -430,7 +505,6 @@ def analysis(payload: AnalysisRequestPayload):
     except Exception as exc:  # pragma: no cover - defensive guard
         raise _http_error(500, "ProcessingError", str(exc))
 
-    RUNS[run_id] = {"pdf": export_path, "json": filled_path}
     completed_at = datetime.now(timezone.utc)
     manifest = {
         "contract_id": payload.contract_id,
@@ -440,37 +514,30 @@ def analysis(payload: AnalysisRequestPayload):
         "ocr_mode": os.getenv("OCR_MODE", "auto"),
         "llm_refinement": llm_mode,
         "validation": {"ok": True, "findings": len(validation.findings)},
-        "export": {"pdf": export_path.name, "backend": "docx"},
+        "export": {"pdf": artifact_refs["pdf_key"], "backend": "docx"},
     }
+
+    pdf_url = _presign_output_url(artifact_refs["pdf_key"])
+    json_url = _presign_output_url(artifact_refs["json_key"])
 
     return AnalysisResponse(
         run_id=run_id,
         status="completed",
         completed_at=completed_at,
         manifest=manifest,
-        download_url=f"/runs/{run_id}/report",
-        filled_template_url=f"/runs/{run_id}/filled-template",
+        download_url=pdf_url,
+        filled_template_url=json_url,
         error=None,
     )
 
 @app.get("/runs/{run_id}/report")
 def download_report(run_id: str):
-    record = RUNS.get(run_id)
-    if not record:
-        raise _http_error(404, "NotFound", "Run not found.")
-    pdf_path = record.get("pdf")
-    if not pdf_path or not Path(pdf_path).exists():
-        raise _http_error(404, "NotFound", "Report not available.")
-    suffix = Path(pdf_path).suffix.lower()
-    media_type = "application/pdf" if suffix == ".pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    return FileResponse(pdf_path, media_type=media_type, filename=Path(pdf_path).name)
+    key = _output_key(run_id, "cr2a_export.pdf")
+    url = _presign_output_url(key)
+    return RedirectResponse(url=url, status_code=307)
 
 @app.get("/runs/{run_id}/filled-template")
 def download_json(run_id: str):
-    record = RUNS.get(run_id)
-    if not record:
-        raise _http_error(404, "NotFound", "Run not found.")
-    json_path = record.get("json")
-    if not json_path or not Path(json_path).exists():
-        raise _http_error(404, "NotFound", "Template JSON not available.")
-    return FileResponse(json_path, media_type="application/json", filename=Path(json_path).name)
+    key = _output_key(run_id, "filled_template.json")
+    url = _presign_output_url(key)
+    return RedirectResponse(url=url, status_code=307)
