@@ -2,9 +2,13 @@ version: 1
 frontend:
   phases:
     preBuild:
-      commands: []
+      commands:
+        # Static site: nothing to install before exposing artifacts
+        - echo "No dependencies to install for static webapp"
     build:
-      commands: []
+      commands:
+        # Static site: serve files directly from webapp/ without build tooling
+        - echo "Skipping build; using webapp directory as artifact root"
   artifacts:
     baseDirectory: webapp
     files:
