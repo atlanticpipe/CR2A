@@ -1,13 +1,15 @@
 version: 1
-frontend:
-  phases:
-    preBuild:
-      commands: []
-    build:
-      commands: []
-  artifacts:
-    baseDirectory: webapp
-    files:
-      - '**/*'
-  cache:
-    paths: []
+applications:
+  - appRoot: webapp
+    frontend:
+      phases:
+        preBuild:
+          commands: []  # Nothing to install for a static bundle
+        build:
+          commands: []  # No compilation; serve files as-is
+      artifacts:
+        baseDirectory: .  # Ship the raw webapp directory
+        files:
+          - '**/*'
+      cache:
+        paths: []
