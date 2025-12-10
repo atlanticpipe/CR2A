@@ -4,7 +4,14 @@ applications:
     frontend:
       phases:
         preBuild:
-          commands: []  # Nothing to install for a static bundle
+          commands:
+            - |
+              if [ -f ../amplify_outputs.json ]; then
+                API_GATEWAY_URL=$(node -e "const outputs=require('../amplify_outputs.json'); const custom=outputs?.custom || outputs?.api?.cr2aApi || outputs?.api || {}; console.log(custom.apiGatewayUrl || custom.url || custom.apiEndpoint || '');")
+                echo "window.CR2A_API_BASE='${API_GATEWAY_URL}'" > env.js
+              else
+                echo "window.CR2A_API_BASE=''" > env.js
+              fi
         build:
           commands:
             # Emit env.js with Amplify env vars so the static bundle can call the API.
@@ -18,8 +25,27 @@ applications:
               })();
               EOF
       artifacts:
-        baseDirectory: .  # Ship the raw webapp directory
+        baseDirectory: .
         files:
           - '**/*'
       cache:
         paths: []
+  - appRoot: amplify
+    backend:
+      phases:
+        preBuild:
+          commands:
+            - npm ci || npm install  # Install Amplify backend dependencies
+        build:
+          commands:
+            - cd functions/cr2a-api
+            - pip install -r requirements.txt -t .
+            - zip -r ../../artifacts/cr2a-api.zip .
+            - cd ../..
+      artifacts:
+        baseDirectory: artifacts
+        files:
+          - cr2a-api.zip
+      cache:
+        paths:
+          - node_modules/**/*
