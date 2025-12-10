@@ -1,3 +1,8 @@
-// Amplify build replaces this file to inject the deployed API Gateway URL.
-// Local default keeps the mock flow enabled when no backend is available.
-window.CR2A_API_BASE = "";
+(() => {
+  "use strict";
+  // Amplify overwrites this file at build to expose environment variables safely in the browser.
+  const injected = typeof window !== "undefined" && window._env ? window._env : {};
+  window._env = {
+    API_BASE_URL: injected.API_BASE_URL || "",
+  };
+})();

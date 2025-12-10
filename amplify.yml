@@ -13,7 +13,17 @@ applications:
                 echo "window.CR2A_API_BASE=''" > env.js
               fi
         build:
-          commands: []  # Static bundle; nothing to compile
+          commands:
+            # Emit env.js with Amplify env vars so the static bundle can call the API.
+            - |
+              cat > env.js <<'EOF'
+              (() => {
+                "use strict";
+                window._env = {
+                  API_BASE_URL: "${API_BASE_URL}"
+                };
+              })();
+              EOF
       artifacts:
         baseDirectory: .
         files:

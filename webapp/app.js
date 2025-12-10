@@ -1,9 +1,10 @@
 document.addEventListener("DOMContentLoaded", () => {
   "use strict";
 
-  // Fixed backend URL with optional window override; keep simple fallback.
+  // Backend URL comes from Amplify-injected env.js with optional window override; keep simple fallback.
   const API_BASE_URL =
-    (typeof window !== "undefined" && window.CR2A_API_BASE) ||
+    (typeof window !== "undefined" &&
+      (window._env?.API_BASE_URL || window.CR2A_API_BASE)) ||
     "https://api.velmur.info";
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
