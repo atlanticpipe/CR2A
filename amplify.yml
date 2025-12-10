@@ -6,7 +6,17 @@ applications:
         preBuild:
           commands: []  # Nothing to install for a static bundle
         build:
-          commands: []  # No compilation; serve files as-is
+          commands:
+            # Emit env.js with Amplify env vars so the static bundle can call the API.
+            - |
+              cat > env.js <<'EOF'
+              (() => {
+                "use strict";
+                window._env = {
+                  API_BASE_URL: "${API_BASE_URL}"
+                };
+              })();
+              EOF
       artifacts:
         baseDirectory: .  # Ship the raw webapp directory
         files:
