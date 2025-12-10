@@ -6,23 +6,21 @@ This repo now includes a lightweight static frontend (in `webapp/`) to drive the
 - Drag-and-drop contract file UI (client-side only; no upload wired yet).
 - Mocked execution timeline and output preview while the backend endpoint is not connected.
 
-## Deploying to Amplify Hosting
+## Deploying to Amplify Hosting + Backend
 
-Amplify is configured for static hosting via `amplify.yml`:
+Amplify now drives both hosting and a REST API backend:
 
-- Artifact path: `webapp`
-- Build commands: none (pure HTML/CSS/JS)
+- `amplify/backend.ts` defines a REST API (API Gateway) that sends all routes to the Lambda handler at `amplify/functions/cr2a-api/app.py`. The handler exposes `GET /health` and a placeholder `POST /analysis` response so the API surface is wired before orchestrator logic lands.
+- Backend env vars (configure in Amplify console): `UPLOAD_BUCKET`, `OUTPUT_BUCKET`, `AWS_REGION`, `MAX_FILE_MB`, `UPLOAD_EXPIRES_SECONDS`, `MAX_ANALYSIS_SECONDS`.
+- `amplify.yml` now has two jobs: the `webapp` frontend and a backend build that vendors the Lambda (`pip install -r requirements.txt -t .` then zips to `amplify/artifacts/cr2a-api.zip`).
+- Amplify publishes `amplify_outputs.json` after backend deployment. The frontend prebuild writes `webapp/env.js` with `window.CR2A_API_BASE` set to the API Gateway URL so the static app calls the deployed API automatically.
 
-Once connected, Amplify will serve `webapp/index.html` at your domain.
+### Deployment steps
 
-## Wiring the API
-
-Set `API_BASE_URL` (and optionally `POLICY_DOC_URL`) in `webapp/app.js`. When `API_BASE_URL` is non-empty:
-
-- File uploads up to 500 MB: the UI requests a presigned URL from `${API_BASE_URL}/upload-url?filename=...&contentType=...&size=...` and performs the upload (PUT by default, POST if `upload_method: "POST"` with `fields` is returned). The resulting URL is passed as `contract_uri` to the submit payload.
-- Analysis submit: the form POSTs JSON to `${API_BASE_URL}/analysis` with the collected fields.
-
-If `API_BASE_URL` is empty, the UI runs the built-in mock flow for demo purposes.
+1. Connect this repo to Amplify Hosting (monorepo mode) and enable both the `webapp` and `amplify` jobs defined in `amplify.yml`.
+2. In the backend environment settings, set the required env vars (`UPLOAD_BUCKET`, `OUTPUT_BUCKET`, `AWS_REGION`, limits). Deploy the backend; Amplify will produce `amplify_outputs.json` that includes `custom.apiGatewayUrl`.
+3. On subsequent frontend builds, `webapp/env.js` is rewritten with that API URL, so `webapp/app.js` picks it up at runtime via `window.CR2A_API_BASE`.
+4. Once connected, Amplify serves `webapp/index.html` at your domain while the REST API runs behind API Gateway + Lambda.
 
 ## Backend stub (FastAPI)
 
