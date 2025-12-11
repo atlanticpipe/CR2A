@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  // Amplify overwrites this file at build to expose environment variables safely in the browser.
+  // Static env shim for GitHub Pages; edit API_BASE_URL before pushing or inject window.CR2A_API_BASE elsewhere.
   const injected = typeof window !== "undefined" && window._env ? window._env : {};
   window._env = {
     API_BASE_URL: injected.API_BASE_URL || "",

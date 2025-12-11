@@ -1,11 +1,21 @@
 document.addEventListener("DOMContentLoaded", () => {
   "use strict";
 
-  // Backend URL comes from Amplify-injected env.js with optional window override; keep simple fallback.
-  const API_BASE_URL =
+  // Backend URL comes from env.js or a global override; GitHub Pages keeps this static.
+  const configuredApiBase =
     (typeof window !== "undefined" &&
       (window._env?.API_BASE_URL || window.CR2A_API_BASE)) ||
-    "https://api.velmur.info";
+    "";
+  const API_BASE_URL = configuredApiBase.replace(/\/+$/, "");
+  const requireApiBase = () => {
+    // Fail fast if the API base is missing so uploads never target the wrong host.
+    if (!API_BASE_URL) {
+      throw new Error(
+        "API base URL is not set. Edit webapp/env.js or set window.CR2A_API_BASE to your API Gateway base path.",
+      );
+    }
+    return API_BASE_URL;
+  };
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
   const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
@@ -194,7 +204,8 @@ document.addEventListener("DOMContentLoaded", () => {
       { title: "Processing", meta: "Waiting for backend response…", active: false },
     ]);
     try {
-      const resp = await fetch(`${API_BASE_URL}/analysis`, {
+      const apiBase = requireApiBase();
+      const resp = await fetch(`${apiBase}/analysis`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -225,12 +236,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const presignUpload = async (file) => {
     // Request presigned URL for the selected file before uploading.
+    const apiBase = requireApiBase();
     const params = new URLSearchParams({
       filename: file.name,
       contentType: file.type || "application/octet-stream",
       size: file.size.toString(),
     });
-    const resp = await fetch(`${API_BASE_URL}${UPLOAD_ENDPOINT}?${params.toString()}`, {
+    const resp = await fetch(`${apiBase}${UPLOAD_ENDPOINT}?${params.toString()}`, {
       method: "GET",
     });
     if (!resp.ok) throw new Error(`Presign failed: HTTP ${resp.status}`);
@@ -241,9 +253,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Upload via POST (form-data) or PUT (raw) depending on presign response.
     resetUploadUi();
     setUploadProgress(1);
+    const apiBase = requireApiBase();
     const presign = await presignUpload(file);
     const method = (presign.upload_method || "PUT").toUpperCase();
-    const targetUrl = presign.url?.startsWith("http") ? presign.url : `${API_BASE_URL}${presign.url}`;
+    const targetUrl = presign.url?.startsWith("http") ? presign.url : `${apiBase}${presign.url}`;
 
     if (method === "POST" && presign.fields) {
       const formData = new FormData();
