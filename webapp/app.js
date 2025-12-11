@@ -19,6 +19,21 @@ document.addEventListener("DOMContentLoaded", () => {
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
   const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
+  const getUploadUrl = async (filename, contentType, size) => {
+    // Request a presigned URL for the given file with explicit params.
+    const apiBase = requireApiBase();
+    const params = new URLSearchParams({
+      filename,
+      contentType,
+      size: String(size),
+    });
+
+    const res = await fetch(`${apiBase}${UPLOAD_ENDPOINT}?${params.toString()}`);
+    if (!res.ok) {
+      throw new Error("Failed to get upload URL");
+    }
+    return res.json(); // { uploadUrl, key }
+  };
 
   // Cache DOM nodes once after load to avoid repeated lookups.
   const form = document.querySelector("#submission-form");
@@ -234,54 +249,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  const presignUpload = async (file) => {
-    // Request presigned URL for the selected file before uploading.
-    const apiBase = requireApiBase();
-    const params = new URLSearchParams({
-      filename: file.name,
-      contentType: file.type || "application/octet-stream",
-      size: file.size.toString(),
-    });
-    const resp = await fetch(`${apiBase}${UPLOAD_ENDPOINT}?${params.toString()}`, {
-      method: "GET",
-    });
-    if (!resp.ok) throw new Error(`Presign failed: HTTP ${resp.status}`);
-    return resp.json(); // expected: { url: "...", fields?: {...}, upload_method?: "PUT"|"POST" }
-  };
-
   const uploadFile = async (file) => {
-    // Upload via POST (form-data) or PUT (raw) depending on presign response.
+    // Upload via pre-signed PUT URL returned by the backend.
     resetUploadUi();
     setUploadProgress(1);
-    const apiBase = requireApiBase();
-    const presign = await presignUpload(file);
-    const method = (presign.upload_method || "PUT").toUpperCase();
-    const targetUrl = presign.url?.startsWith("http") ? presign.url : `${apiBase}${presign.url}`;
+    const { uploadUrl, key } = await getUploadUrl(
+      file.name,
+      file.type || "application/octet-stream",
+      file.size,
+    );
+    const targetUrl = uploadUrl?.startsWith("http")
+      ? uploadUrl
+      : `${requireApiBase()}${uploadUrl}`;
 
-    if (method === "POST" && presign.fields) {
-      const formData = new FormData();
-      Object.entries(presign.fields).forEach(([k, v]) => formData.append(k, v));
-      formData.append("file", file);
-      const resp = await fetch(targetUrl, {
-        method: "POST",
-        body: formData,
-      });
-      if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
-      setUploadProgress(100);
-      return { location: presign.fields.key || presign.url };
-    }
-
-    if (method === "POST") {
-      const formData = new FormData();
-      formData.append("file", file);
-      const resp = await fetch(targetUrl, { method: "POST", body: formData });
-      if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
-      const data = await resp.json().catch(() => ({}));
-      setUploadProgress(100);
-      return { location: data.location || presign.url };
-    }
-
-    // Default: PUT pre-signed URL
     const resp = await fetch(targetUrl, {
       method: "PUT",
       headers: {
@@ -292,7 +272,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
     setUploadProgress(100);
-    return { location: presign.url.split("?")[0] };
+    return { location: key || targetUrl.split("?")[0] };
   };
 
   form?.addEventListener("submit", (e) => {
