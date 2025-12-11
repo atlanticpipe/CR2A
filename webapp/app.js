@@ -1,21 +1,45 @@
 document.addEventListener("DOMContentLoaded", () => {
   "use strict";
 
-  // Backend URL comes from Amplify-injected env.js with optional window override; keep simple fallback.
-  const API_BASE_URL =
+  // Backend URL comes from env.js or a global override; GitHub Pages keeps this static.
+  const configuredApiBase =
     (typeof window !== "undefined" &&
       (window._env?.API_BASE_URL || window.CR2A_API_BASE)) ||
-    "https://api.velmur.info";
+    "";
+  const API_BASE_URL = configuredApiBase.replace(/\/+$/, "");
+  const requireApiBase = () => {
+    // Fail fast if the API base is missing so uploads never target the wrong host.
+    if (!API_BASE_URL) {
+      throw new Error(
+        "API base URL is not set. Edit webapp/env.js or set window.CR2A_API_BASE to your API Gateway base path.",
+      );
+    }
+    return API_BASE_URL;
+  };
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
   const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
+  const getUploadUrl = async (filename, contentType, size) => {
+    // Request a presigned URL for the given file with explicit params.
+    const apiBase = requireApiBase();
+    const params = new URLSearchParams({
+      filename,
+      contentType,
+      size: String(size),
+    });
+
+    const res = await fetch(`${apiBase}${UPLOAD_ENDPOINT}?${params.toString()}`);
+    if (!res.ok) {
+      throw new Error("Failed to get upload URL");
+    }
+    return res.json(); // { uploadUrl, key }
+  };
 
   // Cache DOM nodes once after load to avoid repeated lookups.
   const form = document.querySelector("#submission-form");
   const dropzone = document.querySelector("#dropzone");
   const fileInput = document.querySelector("#file-input");
   const fileName = document.querySelector("#file-name");
-  const llmToggle = document.querySelector("#llm_toggle");
   const timelineEl = document.querySelector("#timeline");
   const validationStatus = document.querySelector("#validation-status");
   const exportStatus = document.querySelector("#export-status");
@@ -26,7 +50,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const uploadProgressBar = document.querySelector("#upload-progress-bar");
   const uploadProgressText = document.querySelector("#upload-progress-text");
   const uploadMessage = document.querySelector("#upload-message");
-  let llmEnabled = llmToggle ? llmToggle.checked : true; // Track user preference for LLM refinement.
 
   // Provide demo output for mock mode and initial render.
   const sampleResult = {
@@ -42,11 +65,6 @@ document.addEventListener("DOMContentLoaded", () => {
       llm_refinement: "on",
     },
   };
-
-  llmToggle?.addEventListener("change", (e) => {
-    // Mirror toggle state into submission payload flag.
-    llmEnabled = e.target.checked;
-  });
 
   const handleFileSelect = (file) => {
     // Enforce local size guard and surface the selected filename.
@@ -187,17 +205,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 2000);
   };
 
-  const submitToApi = async (payload) => {
-    // Submit to backend when configured; render minimal two-step timeline.
+  const submitToApi = async (key) => {
+    // Submit uploaded object key to backend; render minimal two-step timeline.
     renderTimeline([
       { title: "Queued", meta: "Submitting to API…", active: true },
       { title: "Processing", meta: "Waiting for backend response…", active: false },
     ]);
     try {
-      const resp = await fetch(`${API_BASE_URL}/analysis`, {
+      const apiBase = requireApiBase();
+      const resp = await fetch(`${apiBase}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ key }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
@@ -223,53 +242,17 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
-  const presignUpload = async (file) => {
-    // Request presigned URL for the selected file before uploading.
-    const params = new URLSearchParams({
-      filename: file.name,
-      contentType: file.type || "application/octet-stream",
-      size: file.size.toString(),
-    });
-    const resp = await fetch(`${API_BASE_URL}${UPLOAD_ENDPOINT}?${params.toString()}`, {
-      method: "GET",
-    });
-    if (!resp.ok) throw new Error(`Presign failed: HTTP ${resp.status}`);
-    return resp.json(); // expected: { url: "...", fields?: {...}, upload_method?: "PUT"|"POST" }
-  };
-
   const uploadFile = async (file) => {
-    // Upload via POST (form-data) or PUT (raw) depending on presign response.
+    // Upload via pre-signed PUT URL returned by the backend.
     resetUploadUi();
     setUploadProgress(1);
-    const presign = await presignUpload(file);
-    const method = (presign.upload_method || "PUT").toUpperCase();
-    const targetUrl = presign.url?.startsWith("http") ? presign.url : `${API_BASE_URL}${presign.url}`;
+    const { uploadUrl, key } = await getUploadUrl(
+      file.name,
+      file.type || "application/octet-stream",
+      file.size,
+    );
 
-    if (method === "POST" && presign.fields) {
-      const formData = new FormData();
-      Object.entries(presign.fields).forEach(([k, v]) => formData.append(k, v));
-      formData.append("file", file);
-      const resp = await fetch(targetUrl, {
-        method: "POST",
-        body: formData,
-      });
-      if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
-      setUploadProgress(100);
-      return { location: presign.fields.key || presign.url };
-    }
-
-    if (method === "POST") {
-      const formData = new FormData();
-      formData.append("file", file);
-      const resp = await fetch(targetUrl, { method: "POST", body: formData });
-      if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
-      const data = await resp.json().catch(() => ({}));
-      setUploadProgress(100);
-      return { location: data.location || presign.url };
-    }
-
-    // Default: PUT pre-signed URL
-    const resp = await fetch(targetUrl, {
+    const resp = await fetch(uploadUrl, {
       method: "PUT",
       headers: {
         "Content-Type": file.type || "application/octet-stream",
@@ -279,13 +262,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
     setUploadProgress(100);
-    return { location: presign.url.split("?")[0] };
+    return { key };
   };
 
   form?.addEventListener("submit", (e) => {
     // Main submit handler driving upload + API submission or mock fallback.
     e.preventDefault();
-    const formData = new FormData(form);
     const file = fileInput?.files?.[0] || null;
     const mb = file ? file.size / 1024 / 1024 : 0;
 
@@ -300,21 +282,14 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const payload = {
-      contract_id: formData.get("contract_id") || "",
-      contract_uri: null,
-      llm_enabled: llmEnabled,
-    };
-
     const doSubmit = async () => {
       try {
         if (file) {
           setUploadMessage("Uploading…");
           const res = await uploadFile(file);
           setUploadMessage("Upload complete.");
-          payload.contract_uri = res.location;
+          await submitToApi(res.key);
         }
-        submitToApi(payload);
       } catch (err) {
         setUploadMessage(String(err), true);
         setOutputs({
