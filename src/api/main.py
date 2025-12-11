@@ -62,6 +62,7 @@ class UploadUrlResponse(BaseModel):
     bucket: str
     key: str
     expires_in: int
+    headers: Optional[Dict[str, str]] = None
 
 class AnalysisRequestPayload(BaseModel):
     contract_id: str
@@ -354,16 +355,27 @@ def upload_url(
             bucket="local",
             key=key,
             expires_in=UPLOAD_EXPIRES_SECONDS,
+            headers=None,
         )
 
     safe_name = quote(os.path.basename(filename))
     key = f"{UPLOAD_PREFIX}{uuid.uuid4()}_{safe_name}"
 
     client = _s3_client()
+    
+    # Define explicit headers that the client should use when uploading
+    upload_headers = {
+        "Content-Type": contentType,
+    }
+    
     try:
         url = client.generate_presigned_url(
             "put_object",
-            Params={"Bucket": bucket, "Key": key},
+            Params={
+                "Bucket": bucket,
+                "Key": key,
+                "ContentType": contentType,
+            },
             ExpiresIn=UPLOAD_EXPIRES_SECONDS,
         )
     except Exception as e:  # pragma: no cover
@@ -376,6 +388,7 @@ def upload_url(
         bucket=bucket,
         key=key,
         expires_in=UPLOAD_EXPIRES_SECONDS,
+        headers=upload_headers,
     )
 
 @app.post("/upload-local")
