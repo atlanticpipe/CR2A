@@ -40,7 +40,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const dropzone = document.querySelector("#dropzone");
   const fileInput = document.querySelector("#file-input");
   const fileName = document.querySelector("#file-name");
-  const llmToggle = document.querySelector("#llm_toggle");
   const timelineEl = document.querySelector("#timeline");
   const validationStatus = document.querySelector("#validation-status");
   const exportStatus = document.querySelector("#export-status");
@@ -51,7 +50,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const uploadProgressBar = document.querySelector("#upload-progress-bar");
   const uploadProgressText = document.querySelector("#upload-progress-text");
   const uploadMessage = document.querySelector("#upload-message");
-  let llmEnabled = llmToggle ? llmToggle.checked : true; // Track user preference for LLM refinement.
 
   // Provide demo output for mock mode and initial render.
   const sampleResult = {
@@ -67,11 +65,6 @@ document.addEventListener("DOMContentLoaded", () => {
       llm_refinement: "on",
     },
   };
-
-  llmToggle?.addEventListener("change", (e) => {
-    // Mirror toggle state into submission payload flag.
-    llmEnabled = e.target.checked;
-  });
 
   const handleFileSelect = (file) => {
     // Enforce local size guard and surface the selected filename.
@@ -212,18 +205,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 2000);
   };
 
-  const submitToApi = async (payload) => {
-    // Submit to backend when configured; render minimal two-step timeline.
+  const submitToApi = async (key) => {
+    // Submit uploaded object key to backend; render minimal two-step timeline.
     renderTimeline([
       { title: "Queued", meta: "Submitting to API…", active: true },
       { title: "Processing", meta: "Waiting for backend response…", active: false },
     ]);
     try {
       const apiBase = requireApiBase();
-      const resp = await fetch(`${apiBase}/analysis`, {
+      const resp = await fetch(`${apiBase}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ key }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
@@ -258,11 +251,8 @@ document.addEventListener("DOMContentLoaded", () => {
       file.type || "application/octet-stream",
       file.size,
     );
-    const targetUrl = uploadUrl?.startsWith("http")
-      ? uploadUrl
-      : `${requireApiBase()}${uploadUrl}`;
 
-    const resp = await fetch(targetUrl, {
+    const resp = await fetch(uploadUrl, {
       method: "PUT",
       headers: {
         "Content-Type": file.type || "application/octet-stream",
@@ -272,13 +262,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
     setUploadProgress(100);
-    return { location: key || targetUrl.split("?")[0] };
+    return { key };
   };
 
   form?.addEventListener("submit", (e) => {
     // Main submit handler driving upload + API submission or mock fallback.
     e.preventDefault();
-    const formData = new FormData(form);
     const file = fileInput?.files?.[0] || null;
     const mb = file ? file.size / 1024 / 1024 : 0;
 
@@ -293,21 +282,14 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const payload = {
-      contract_id: formData.get("contract_id") || "",
-      contract_uri: null,
-      llm_enabled: llmEnabled,
-    };
-
     const doSubmit = async () => {
       try {
         if (file) {
           setUploadMessage("Uploading…");
           const res = await uploadFile(file);
           setUploadMessage("Upload complete.");
-          payload.contract_uri = res.location;
+          await submitToApi(res.key);
         }
-        submitToApi(payload);
       } catch (err) {
         setUploadMessage(String(err), true);
         setOutputs({
