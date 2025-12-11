@@ -14,9 +14,6 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-from mangum import Asgi
-
-handler = Asgi(app)
 
 from orchestrator.analyzer import analyze_to_json
 from orchestrator.openai_client import OpenAIClientError, refine_cr2a
@@ -34,7 +31,7 @@ MAX_FILE_MB = float(os.getenv("MAX_FILE_MB", "500"))
 MAX_FILE_BYTES = int(MAX_FILE_MB * 1024 * 1024)
 UPLOAD_EXPIRES_SECONDS = int(os.getenv("UPLOAD_EXPIRES_SECONDS", "3600"))
 UPLOAD_PREFIX = os.getenv("UPLOAD_PREFIX", "upload/")
-OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "output/)
+OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "cr2a-output")
 OUTPUT_PREFIX = os.getenv("OUTPUT_PREFIX", "runs/")
 OUTPUT_EXPIRES_SECONDS = int(os.getenv("OUTPUT_EXPIRES_SECONDS", "86400"))
 RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
@@ -544,3 +541,7 @@ def download_json(run_id: str):
     key = _output_key(run_id, "filled_template.json")
     url = _presign_output_url(key)
     return RedirectResponse(url=url, status_code=307)
+
+from mangum import Asgi
+
+handler = Asgi(app)
