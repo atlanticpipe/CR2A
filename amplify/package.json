@@ -1,9 +1,0 @@
-{
-  "name": "cr2a-amplify-backend",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "@aws-amplify/backend": "^0.13.5"
-  }
-}

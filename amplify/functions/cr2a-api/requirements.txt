@@ -1,1 +1,0 @@
-# Add Python dependencies for the Lambda handler; kept minimal to speed up packaging.
