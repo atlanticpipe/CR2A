@@ -14,6 +14,9 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+from mangum import Asgi
+
+handler = Asgi(app)
 
 from orchestrator.analyzer import analyze_to_json
 from orchestrator.openai_client import OpenAIClientError, refine_cr2a
@@ -30,14 +33,14 @@ except Exception:  # pragma: no cover
 MAX_FILE_MB = float(os.getenv("MAX_FILE_MB", "500"))
 MAX_FILE_BYTES = int(MAX_FILE_MB * 1024 * 1024)
 UPLOAD_EXPIRES_SECONDS = int(os.getenv("UPLOAD_EXPIRES_SECONDS", "3600"))
-UPLOAD_PREFIX = os.getenv("UPLOAD_PREFIX", "uploads/")
-OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET")
+UPLOAD_PREFIX = os.getenv("UPLOAD_PREFIX", "upload/")
+OUTPUT_BUCKET = os.getenv("OUTPUT_BUCKET", "output/)
 OUTPUT_PREFIX = os.getenv("OUTPUT_PREFIX", "runs/")
 OUTPUT_EXPIRES_SECONDS = int(os.getenv("OUTPUT_EXPIRES_SECONDS", "86400"))
 RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _VALID_BUCKET = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$")
-UPLOAD_BUCKET = os.getenv("UPLOAD_BUCKET", "cr2a-uploads")
+UPLOAD_BUCKET = os.getenv("UPLOAD_BUCKET", "cr2a-upload")
 AWS_REGION = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "us-east-1"
 S3 = boto3.client("s3", region_name=AWS_REGION) if boto3 else None
 
@@ -105,13 +108,13 @@ def _is_valid_s3_bucket(name: str) -> bool:
 
 def _load_upload_bucket() -> Optional[str]:
     # Normalize the configured upload bucket to avoid presign/runtime misconfigurations.
-    bucket = UPLOAD_BUCKET or "cr2a-uploads"
+    bucket = UPLOAD_BUCKET or "cr2a-upload"
     if not _is_valid_s3_bucket(bucket):
         # Fail fast if the pinned bucket ever violates AWS rules (defensive guard).
         raise _http_error(
             500,
             "ValidationError",
-            "Invalid S3 bucket 'cr2a-uploads'. Expected lowercase DNS-compatible name.",
+            "Invalid S3 bucket 'cr2a-upload'. Expected lowercase DNS-compatible name.",
         )
     return bucket
 
