@@ -162,10 +162,10 @@ def _normalize_to_schema(raw: Dict[str, Any], closing_line: str, policy_version:
         return {
             "Clause Language": block.get("clause_language", ""),
             "Clause Summary": block.get("clause_summary", ""),
-            "Risk Triggers": block.get("risk_triggers", ""),
+            "Risk Triggers Identified": block.get("risk_triggers", ""),
             "Flow-Down Obligations": block.get("flow_down_obligations", ""),
             "Redline Recommendations": block.get("redline_recommendations", ""),
-            "Harmful Language / Conflicts": block.get("harmful_language_conflicts", ""),
+            "Harmful Language / Policy Conflicts": block.get("harmful_language_conflicts", ""),
         }
 
     def _convert_items(items: List[Dict[str, Any]], section_label: str) -> List[Dict[str, Any]]:
@@ -177,15 +177,6 @@ def _normalize_to_schema(raw: Dict[str, Any], closing_line: str, policy_version:
                     "item_title": item.get("item_title") or f"{section_label} Item {idx}",
                     "clauses": [_convert_clause(b) for b in item.get("clauses") or []],
                     "closing_line": item.get("closing_line") or closing_line,
-                }
-            )
-        if not normalized:
-            normalized.append(
-                {
-                    "item_number": 1,
-                    "item_title": f"{section_label} Item",
-                    "clauses": [],
-                    "closing_line": closing_line,
                 }
             )
         return normalized
