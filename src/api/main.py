@@ -555,6 +555,5 @@ def download_json(run_id: str):
     url = _presign_output_url(key)
     return RedirectResponse(url=url, status_code=307)
 
-from mangum import Asgi
-
-handler = Asgi(app)
+from mangum import Mangum
+handler = Mangum(app, lifespan="off")
