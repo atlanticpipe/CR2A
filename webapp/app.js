@@ -39,6 +39,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const form = document.querySelector("#submission-form");
   const dropzone = document.querySelector("#dropzone");
   const fileInput = document.querySelector("#file-input");
+  const contractIdInput = document.querySelector('input[name="contract_id"]');
+  const llmToggle = document.querySelector("#llm_toggle");
   const fileName = document.querySelector("#file-name");
   const timelineEl = document.querySelector("#timeline");
   const validationStatus = document.querySelector("#validation-status");
@@ -205,8 +207,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 2000);
   };
 
-  const submitToApi = async (key) => {
-    // Submit uploaded object key to backend; render minimal two-step timeline.
+  const submitToApi = async (key, contractId, llmEnabled) => {
+    // Submit uploaded object key plus contract metadata to backend; render minimal two-step timeline.
     renderTimeline([
       { title: "Queued", meta: "Submitting to API…", active: true },
       { title: "Processing", meta: "Waiting for backend response…", active: false },
@@ -216,7 +218,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const resp = await fetch(`${apiBase}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key }),
+        body: JSON.stringify({ key, contract_id: contractId, llm_enabled: llmEnabled }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
@@ -269,7 +271,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // Main submit handler driving upload + API submission or mock fallback.
     e.preventDefault();
     const file = fileInput?.files?.[0] || null;
+    const contractId = contractIdInput?.value?.trim() || "";
+    const llmEnabled = !!llmToggle?.checked;
     const mb = file ? file.size / 1024 / 1024 : 0;
+
+    if (!contractId) {
+      setUploadMessage("Provide a contract ID before submitting.", true);
+      return;
+    }
 
     if (file && mb > MAX_FILE_MB) {
       setUploadMessage(`File is ${(mb).toFixed(2)} MB; limit is ${MAX_FILE_MB} MB.`, true);
@@ -288,7 +297,7 @@ document.addEventListener("DOMContentLoaded", () => {
           setUploadMessage("Uploading…");
           const res = await uploadFile(file);
           setUploadMessage("Upload complete.");
-          await submitToApi(res.key);
+          await submitToApi(res.key, contractId, llmEnabled);
         }
       } catch (err) {
         setUploadMessage(String(err), true);
