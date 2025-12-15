@@ -56,6 +56,7 @@ app.add_middleware(
 logger = logging.getLogger(__name__)
 
 class UploadUrlResponse(BaseModel):
+    uploadUrl: str  # Frontend expects camelCase uploadUrl for presigned PUT
     url: str
     upload_method: str = "PUT"
     fields: Optional[dict] = None
@@ -67,6 +68,7 @@ class UploadUrlResponse(BaseModel):
 class AnalysisRequestPayload(BaseModel):
     contract_id: str
     contract_uri: Optional[str] = None
+    key: Optional[str] = None
     llm_enabled: bool = True
 
 class AnalysisResponse(BaseModel):
@@ -235,6 +237,12 @@ def _resolve_contract_key(contract_uri: str) -> str:
         raise _http_error(400, "ValidationError", "contract_uri path is missing an object key.")
     return key
 
+
+def _contract_uri_from_key(key: str, bucket: str) -> str:
+    # Build a consistent S3 https URI from an object key for downstream downloads.
+    safe_key = quote(key)
+    return f"https://{bucket}.s3.{AWS_REGION}.amazonaws.com/{safe_key}"
+
 def _download_contract_to_path(contract_uri: str, dest_path: Path) -> Path:
     # Stream the contract from S3 onto disk to avoid double-buffering in memory.
     key = _resolve_contract_key(contract_uri)
@@ -340,6 +348,7 @@ def upload_url(
         # Graceful local-mode fallback so deployments without S3 can still accept uploads.
         key = f"{UPLOAD_PREFIX}{uuid.uuid4()}_{quote(os.path.basename(filename))}"
         return UploadUrlResponse(
+            uploadUrl="/upload-local",
             url="/upload-local",
             upload_method="POST",
             fields={"key": key},
@@ -373,6 +382,7 @@ def upload_url(
         raise HTTPException(status_code=500, detail=f"Presign failed: {e}")
 
     return UploadUrlResponse(
+        uploadUrl=url,
         url=url,
         upload_method="PUT",
         fields=None,
@@ -404,13 +414,18 @@ async def upload_local(file: UploadFile = File(...), key: str = Query(..., descr
 
     return {"location": f"file://{dest}"}
 
-@app.post("/analysis", response_model=AnalysisResponse)
-def analysis(payload: AnalysisRequestPayload):
-    if not payload.contract_uri:
-        raise _http_error(400, "ValidationError", "contract_uri is required to run analysis.")
+def _run_analysis(payload: AnalysisRequestPayload):
+    # Support either a direct contract URI or a previously uploaded key to streamline the UI flow.
+    contract_uri = payload.contract_uri
+    if not contract_uri and payload.key:
+        bucket = _load_upload_bucket()
+        contract_uri = _contract_uri_from_key(payload.key, bucket)
+
+    if not contract_uri:
+        raise _http_error(400, "ValidationError", "Provide contract_uri or upload key to run analysis.")
 
     run_id = f"run_{uuid.uuid4().hex[:12]}"
-    original_ext = Path(urlparse(str(payload.contract_uri)).path).suffix.lower()
+    original_ext = Path(urlparse(str(contract_uri)).path).suffix.lower()
     dest_name = f"input{original_ext}" if original_ext else "input.bin"
 
     llm_mode = "off"
@@ -421,7 +436,7 @@ def analysis(payload: AnalysisRequestPayload):
         with tempfile.TemporaryDirectory(dir=RUN_OUTPUT_ROOT) as tmpdir:
             run_dir = Path(tmpdir)
             input_path = run_dir / dest_name
-            downloaded = _download_contract_to_path(str(payload.contract_uri), input_path)
+            downloaded = _download_contract_to_path(str(contract_uri), input_path)
 
             inferred_ext = None
             target_path = downloaded
@@ -496,7 +511,7 @@ def analysis(payload: AnalysisRequestPayload):
             export_path = export_pdf_from_filled_json(
                 normalized,
                 output_pdf,
-                backend="docx",
+                backend="reportlab",
                 template_docx=REPO_ROOT / "templates" / "CR2A_Template.docx",
                 title="Contract Risk & Compliance Analysis",
             )
@@ -512,13 +527,13 @@ def analysis(payload: AnalysisRequestPayload):
     completed_at = datetime.now(timezone.utc)
     manifest = {
         "contract_id": payload.contract_id,
-        "contract_uri": payload.contract_uri,
+        "contract_uri": contract_uri,
         "llm_enabled": payload.llm_enabled,
         "policy_version": "schemas@v1.0",
         "ocr_mode": os.getenv("OCR_MODE", "auto"),
         "llm_refinement": llm_mode,
         "validation": {"ok": True, "findings": len(validation.findings)},
-        "export": {"pdf": artifact_refs["pdf_key"], "backend": "docx"},
+        "export": {"pdf": artifact_refs["pdf_key"], "backend": "reportlab"},
     }
 
     pdf_url = _presign_output_url(artifact_refs["pdf_key"])
@@ -533,6 +548,18 @@ def analysis(payload: AnalysisRequestPayload):
         filled_template_url=json_url,
         error=None,
     )
+
+
+@app.post("/analysis", response_model=AnalysisResponse)
+def analysis(payload: AnalysisRequestPayload):
+    # Primary analysis endpoint for API Gateway + CLI callers.
+    return _run_analysis(payload)
+
+
+@app.post("/analyze", response_model=AnalysisResponse)
+def analyze(payload: AnalysisRequestPayload):
+    # Frontend alias that accepts the same payload to avoid breaking deployed UI.
+    return _run_analysis(payload)
 
 @app.get("/runs/{run_id}/report")
 def download_report(run_id: str):
