@@ -505,7 +505,7 @@ def analysis(payload: AnalysisRequestPayload):
             export_path = export_pdf_from_filled_json(
                 normalized,
                 output_pdf,
-                backend="docx",
+                backend="reportlab",
                 template_docx=REPO_ROOT / "templates" / "CR2A_Template.docx",
                 title="Contract Risk & Compliance Analysis",
             )
@@ -527,7 +527,7 @@ def analysis(payload: AnalysisRequestPayload):
         "ocr_mode": os.getenv("OCR_MODE", "auto"),
         "llm_refinement": llm_mode,
         "validation": {"ok": True, "findings": len(validation.findings)},
-        "export": {"pdf": artifact_refs["pdf_key"], "backend": "docx"},
+        "export": {"pdf": artifact_refs["pdf_key"], "backend": "reportlab"},
     }
 
     pdf_url = _presign_output_url(artifact_refs["pdf_key"])

@@ -207,7 +207,7 @@ def export_pdf_from_filled_json(
     data: Dict[str, Any],
     output_pdf: Union[str, Path],
     *,
-    backend: str = "docx",  # <-- default to DOCX
+    backend: str = "reportlab",  # default to ReportLab to avoid OS-level conversion
     template_docx: Union[str, Path, None] = None,
     title: str = "Contract Risk & Compliance Analysis",
 ) -> Path:
@@ -216,7 +216,7 @@ def export_pdf_from_filled_json(
     backend="docx" uses python-docx (+ docx2pdf if available); backend="reportlab" uses ReportLab.
     """
     output_pdf = Path(output_pdf).expanduser().resolve()
-    backend = (backend or "docx").lower()
+    backend = (backend or "reportlab").lower()
     if backend == "docx":
         tpl = Path(template_docx) if template_docx else Path("")
         return _export_docx(data, tpl, output_pdf, title)
