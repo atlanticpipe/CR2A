@@ -574,4 +574,4 @@ def download_json(run_id: str):
     return RedirectResponse(url=url, status_code=307)
 
 from mangum import Mangum
-handler = Mangum(app, lifespan="off")
+handler = Mangum(app, lifespan="off", api_gateway_base_path="/prod")
