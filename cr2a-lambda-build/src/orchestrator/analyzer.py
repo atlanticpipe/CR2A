@@ -26,7 +26,7 @@ except Exception:
     pytesseract = None  # type: ignore
     Image = None  # type: ignore
 
-from orchestrator.mime_utils import infer_mime_type
+from .mime_utils import infer_mime_type
 
 logger = logging.getLogger(__name__)
 
