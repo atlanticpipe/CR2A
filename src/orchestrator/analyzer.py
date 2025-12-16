@@ -26,7 +26,7 @@ except Exception:
     pytesseract = None  # type: ignore
     Image = None  # type: ignore
 
-from orchestrator.mime_utils import infer_mime_type
+from src.orchestrator.mime_utils import infer_mime_type
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +261,7 @@ def _build_from_lines(lines: List[str], closing_line: str) -> Dict[str, Any]:
 
     payload["PROVENANCE"] = {"version": "1.0.0", "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")}
     return payload
+
 
 
 def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], ocr: str = "auto") -> Dict[str, Any]:
