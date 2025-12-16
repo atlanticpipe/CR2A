@@ -15,12 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from orchestrator.analyzer import analyze_to_json
-from orchestrator.openai_client import OpenAIClientError, refine_cr2a
-from orchestrator.pdf_export import export_pdf_from_filled_json
-from orchestrator.policy_loader import load_validation_rules
-from orchestrator.validator import validate_filled_template
-from orchestrator.mime_utils import infer_extension_from_content_type_or_magic, infer_mime_type
+from src.orchestrator.analyzer import analyze_to_json
+from src.orchestrator.openai_client import OpenAIClientError, refine_cr2a
+from src.orchestrator.pdf_export import export_pdf_from_filled_json
+from src.orchestrator.policy_loader import load_validation_rules
+from src.orchestrator.validator import validate_filled_template
+from src.orchestrator.mime_utils import infer_extension_from_content_type_or_magic, infer_mime_type
 
 try:
     import boto3
