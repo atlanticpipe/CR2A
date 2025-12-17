@@ -76,30 +76,23 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         "Do not add markdown or commentary; only emit valid JSON."
     )
 
-    url = f"{OPENAI_BASE}/v1/responses"
+    url = f"{OPENAI_BASE}/v1/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     org_id = os.getenv("OPENAI_ORG_ID")
     if org_id:
         headers["OpenAI-Organization"] = org_id
     body = {
         "model": model,
-        "input": [
-            {"role": "system", "content": [{"type": "text", "text": system_text}]},
+        "messages": [
+            {"role": "system", "content": system_text},
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Polish the JSON for clarity without changing its keys or nesting. Return JSON only.",
-                    },
-                    {"type": "text", "text": json.dumps(payload, ensure_ascii=False)},
-                ],
+                "content": f"Polish the JSON for clarity without changing its keys or nesting. Return JSON only.\n\n{json.dumps(payload, ensure_ascii=False)}"
             },
         ],
-        # text_format enforces JSON-only output per Responses API contract.
-        "text_format": {"type": "json"},
+        "response_format": {"type": "json_object"},  # This enforces JSON-only output
         "temperature": 0,
-        "max_output_tokens": 2000,
+        "max_tokens": 2000,
     }
 
     try:
