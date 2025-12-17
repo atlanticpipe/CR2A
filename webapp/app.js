@@ -24,9 +24,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const requireAuthHeader = () => {
     // Lambda authorizer guard: ensure Authorization header is always sent.
     if (!AUTHORIZATION) {
-      throw new Error(
-        "Authorization token is not set. Edit webapp/env.js or set window.CR2A_API_TOKEN to the required value.",
-      );
+      // For MVP: send a dummy token since authorizer allows all requests
+      return { Authorization: "Bearer mvp-token" };
     }
     return { Authorization: AUTHORIZATION };
   };
