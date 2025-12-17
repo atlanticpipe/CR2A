@@ -46,16 +46,26 @@ def _kv_table_reportlab(section_i: Dict[str, Any], Body) -> "Table":
 
 
 def _add_clause_block_reportlab(story: List[Any], block: Dict[str, Any], H3, Body) -> None:
+    # Accept both schema-normalized keys (with spaces) and analyzer keys (snake_case) so PDFs render data instead of blanks.
     fields = [
-        ("Clause Language", "clause_language"),
-        ("Clause Summary", "clause_summary"),
-        ("Risk Triggers", "risk_triggers"),
-        ("Flow-Down Obligations", "flow_down_obligations"),
-        ("Redline Recommendations", "redline_recommendations"),
-        ("Harmful Language / Conflicts", "harmful_language_conflicts"),
+        ("Clause Language", ["Clause Language", "clause_language"]),
+        ("Clause Summary", ["Clause Summary", "clause_summary"]),
+        ("Risk Triggers", ["Risk Triggers Identified", "risk_triggers"]),
+        ("Flow-Down Obligations", ["Flow-Down Obligations", "flow_down_obligations"]),
+        ("Redline Recommendations", ["Redline Recommendations", "redline_recommendations"]),
+        ("Harmful Language / Conflicts", ["Harmful Language / Policy Conflicts", "harmful_language_conflicts"]),
     ]
-    for label, key in fields:
-        val = block.get(key)
+
+    def _first_present(obj: Dict[str, Any], keys: List[str]) -> Any:
+        # Pick the first populated value to avoid empty paragraphs when the other shape is absent.
+        for k in keys:
+            val = obj.get(k)
+            if val:
+                return val
+        return None
+
+    for label, keys in fields:
+        val = _first_present(block, keys)
         if val:
             story.append(Paragraph(f"<b>{label}</b>", H3))
             story.append(Paragraph(str(val), Body))
