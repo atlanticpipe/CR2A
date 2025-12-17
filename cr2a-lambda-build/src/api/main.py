@@ -549,13 +549,7 @@ def _run_analysis(payload: AnalysisRequestPayload):
         error=None,
     )
 
-
-@app.post("/analysis", response_model=AnalysisResponse)
-def analysis(payload: AnalysisRequestPayload):
-    # Primary analysis endpoint for API Gateway + CLI callers.
-    return _run_analysis(payload)
-
-
+@app.get("/analyze", response_model=AnalysisResponse)
 @app.post("/analyze", response_model=AnalysisResponse)
 def analyze(payload: AnalysisRequestPayload):
     # Frontend alias that accepts the same payload to avoid breaking deployed UI.
