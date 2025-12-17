@@ -63,8 +63,12 @@ def get_secret_env_or_aws(env_name: str, secret_arn_env: str) -> Optional[str]:
         obj = json.loads(secret)
         for key in (env_name, "value", "api_key", "token"):
             if key in obj:
-                return str(obj[key])
+                secret = str(obj[key])
+                break
     except Exception:
         pass
 
+    # Cache the resolved secret locally so downstream libraries that rely on
+    # environment lookups (like openai-python) can reuse it without extra fetches.
+    os.environ[env_name] = secret
     return secret
