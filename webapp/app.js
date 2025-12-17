@@ -60,7 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const timelineEl = document.querySelector("#timeline");
   const validationStatus = document.querySelector("#validation-status");
   const exportStatus = document.querySelector("#export-status");
-  const analysisJson = document.querySelector("#analysis-json");
+  const downloadReportBtn = document.querySelector("#download-report");
   const runDemoBtn = document.querySelector("#run-demo");
   const docLinkBtn = document.querySelector("#doc-link");
   const uploadProgress = document.querySelector("#upload-progress");
@@ -70,10 +70,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Provide demo output for mock mode and initial render.
   const sampleResult = {
+    // Demo payload mirrors the backend response shape so UI wiring stays consistent.
     run_id: "run_demo_123",
     status: "completed",
     completed_at: new Date().toISOString(),
     llm_enabled: true,
+    download_url: "https://example.com/cr2a_export.pdf",
     manifest: {
       contract_id: "FDOT-Bridge-2024-18",
       validation: { ok: true, findings: 0 },
@@ -147,11 +149,37 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   };
 
+  const resolveDownloadUrl = (payload) => {
+    // Prefer explicit download_url; fall back to run_id-based route when available.
+    if (!payload) return "";
+    if (payload.download_url) return payload.download_url;
+    if (payload.downloadUrl) return payload.downloadUrl;
+    if (payload.run_id && API_BASE_URL) {
+      return `${requireApiBase()}/runs/${payload.run_id}/report`;
+    }
+    return "";
+  };
+
+  const setDownloadLink = (payload) => {
+    // Enable the report link only when a URL is ready.
+    if (!downloadReportBtn) return;
+    const url = resolveDownloadUrl(payload);
+    const ready = Boolean(url);
+    downloadReportBtn.setAttribute("aria-disabled", ready ? "false" : "true");
+    downloadReportBtn.classList.toggle("disabled", !ready);
+    downloadReportBtn.setAttribute("href", ready ? url : "#");
+    if (ready) {
+      downloadReportBtn.setAttribute("download", "cr2a_export.pdf");
+    } else {
+      downloadReportBtn.removeAttribute("download");
+    }
+  };
+
   const setOutputs = ({ validation, exportStatusText, payload }) => {
-    // Surface backend status and payload JSON in the preview panel.
+    // Surface backend status and activate download link when available.
     validationStatus.textContent = validation;
     exportStatus.textContent = exportStatusText;
-    analysisJson.textContent = JSON.stringify(payload, null, 2);
+    setDownloadLink(payload);
   };
 
   const setUploadProgress = (pct) => {
