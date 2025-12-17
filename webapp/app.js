@@ -258,10 +258,19 @@ document.addEventListener("DOMContentLoaded", () => {
     ]);
     try {
       const apiBase = requireApiBase();
+      if (!key) {
+        // Prevent empty payloads that would be stringified to undefined/null.
+        throw new Error("Upload key missing; retry upload.");
+      }
+      const payload = {
+        key,
+        contract_id: contractId || "", // backend expects a string; enforce empty string fallback.
+        llm_enabled: Boolean(llmEnabled),
+      };
       const resp = await fetch(`${apiBase}/analyze`, {
         method: "POST",
         headers: { ...requireAuthHeader(), "Content-Type": "application/json" },
-        body: JSON.stringify({ key, contract_id: contractId, llm_enabled: llmEnabled }),
+        body: JSON.stringify(payload),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
