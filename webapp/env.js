@@ -4,5 +4,6 @@
   const injected = typeof window !== "undefined" && window._env ? window._env : {};
   window._env = {
     API_BASE_URL: "https://u2lts5pu13.execute-api.us-east-1.amazonaws.com/prod",
+    API_AUTH_TOKEN: "", // Set to your Lambda Authorizer token (e.g., Bearer <jwt>)
   };
 })();
