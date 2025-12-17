@@ -274,6 +274,13 @@ document.addEventListener("DOMContentLoaded", () => {
         { title: "Queued", meta: "Submitted.", active: true },
         { title: "Processing", meta: "Backend returned response.", active: true },
       ]);
+      // Make the report download link clickable as soon as the backend provides a URL.
+      if (downloadReportBtn && data.download_url) {
+        downloadReportBtn.href = data.download_url;
+        downloadReportBtn.removeAttribute("disabled");
+        downloadReportBtn.style.pointerEvents = "auto";
+        downloadReportBtn.style.opacity = "1";
+      }
     } catch (err) {
       setOutputs({
         validation: "Failed",
