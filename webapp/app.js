@@ -6,7 +6,12 @@ document.addEventListener("DOMContentLoaded", () => {
     (typeof window !== "undefined" &&
       (window._env?.API_BASE_URL || window.CR2A_API_BASE)) ||
     "";
+  const configuredAuthToken =
+    (typeof window !== "undefined" &&
+      (window._env?.API_AUTH_TOKEN || window.CR2A_API_TOKEN)) ||
+    "";
   const API_BASE_URL = configuredApiBase.replace(/\/+$/, "");
+  const AUTHORIZATION = configuredAuthToken.trim();
   const requireApiBase = () => {
     // Fail fast if the API base is missing so uploads never target the wrong host.
     if (!API_BASE_URL) {
@@ -15,6 +20,15 @@ document.addEventListener("DOMContentLoaded", () => {
       );
     }
     return API_BASE_URL;
+  };
+  const requireAuthHeader = () => {
+    // Lambda authorizer guard: ensure Authorization header is always sent.
+    if (!AUTHORIZATION) {
+      throw new Error(
+        "Authorization token is not set. Edit webapp/env.js or set window.CR2A_API_TOKEN to the required value.",
+      );
+    }
+    return { Authorization: AUTHORIZATION };
   };
   const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
   const MAX_FILE_MB = 500; // client-side guard; matches CLI default
@@ -28,7 +42,9 @@ document.addEventListener("DOMContentLoaded", () => {
       size: String(size),
     });
 
-    const res = await fetch(`${apiBase}${UPLOAD_ENDPOINT}?${params.toString()}`);
+    const res = await fetch(`${apiBase}${UPLOAD_ENDPOINT}?${params.toString()}`, {
+      headers: requireAuthHeader(), // Propagate caller auth for Lambda authorizer.
+    });
     if (!res.ok) {
       throw new Error("Failed to get upload URL");
     }
@@ -217,7 +233,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const apiBase = requireApiBase();
       const resp = await fetch(`${apiBase}/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...requireAuthHeader(), "Content-Type": "application/json" },
         body: JSON.stringify({ key, contract_id: contractId, llm_enabled: llmEnabled }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
