@@ -124,7 +124,7 @@ def upload_url(
         )
 
     try:
-        result = generate_upload_url(filename, contentType, size)
+        result = generate_upload_url(filename, contentType)
         return UploadUrlResponse(**result)
     except HTTPException:
         raise
