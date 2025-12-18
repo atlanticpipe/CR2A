@@ -9,13 +9,6 @@
     "retry_on_failure": false,
     "strict_string_match_headers": true,
 
-    "mandatory_fields": {
-      "section_I_min_items": 8,
-      "section_II_to_VI_closing_line": "All applicable clauses for [Item #/Title] have been identified and analyzed.",
-      "overview_required": true,
-      "risk_table_required": true
-    },
-
     "section_order": ["I", "II", "III", "IV", "V", "VI"],
 
     "header_patterns": {
@@ -43,6 +36,12 @@
       "record_validation_steps": true,
       "record_provenance": true,
       "include_checksums": true
-    }
+    },
+
+    "closing_line_exact": "All applicable clauses for [Item #/Title] have been identified and analyzed.",
+    "section_I_fields_required": 8,
+    "bluf_enabled": true,
+    "collect_metrics": true,
+    "log_level": "INFO"
   }
 }

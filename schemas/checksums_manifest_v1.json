@@ -9,8 +9,8 @@
     },
     {
       "path": "schemas/clause_classification.json",
-      "sha256": "2f8c91bf0dc8c098265fda0c61bf294f270992b22f691b470c5bacb8c727545b",
-      "size_bytes": 3832
+      "sha256": "ed914407a818b3a6f56af0f2787278f7055c84d8",
+      "size_bytes": 3806
     },
     {
       "path": "schemas/rulebook_v1.yaml",
@@ -54,8 +54,8 @@
     },
     {
       "path": "schemas/clause_classification.json",
-      "sha256": "2f8c91bf0dc8c098265fda0c61bf294f270992b22f691b470c5bacb8c727545b",
-      "size_bytes": 3832
+      "sha256": "ed914407a818b3a6f56af0f2787278f7055c84d8",
+      "size_bytes": 3806
     },
     {
       "path": "schemas/rulebook_v1.yaml",
