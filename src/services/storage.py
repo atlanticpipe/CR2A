@@ -314,6 +314,7 @@ def generate_upload_url(filename: str, content_type: str = "application/octet-st
         raise HTTPException(status_code=500, detail=f"Presign failed: {e}")
 
     return {
+        "uploadUrl": url,
         "url": url,
         "bucket": bucket,
         "key": key,
