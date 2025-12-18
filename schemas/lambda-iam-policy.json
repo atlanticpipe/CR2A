@@ -9,7 +9,7 @@
     {
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:HeadObject"],
-      "Resource": "arn:aws:s3:::${UPLOAD_BUCKET}/*"
+      "Resource": "arn:aws:s3:::cr2a-upload"
     },
     {
       "Effect": "Allow",
