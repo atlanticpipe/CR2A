@@ -63,9 +63,21 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
 
     system_text = (
-        "You are a JSON-only contract analysis assistant. "
-        "Return structured JSON that keeps the same shape and fields that were provided. "
-        "Do not add markdown or commentary; only emit valid JSON."
+        "You are a contracts attorney and risk analyst generating a Clause Risk & "
+        "Compliance Analyzsis (CR2A) report. "
+        "Return ONLY valid JSON compatible with the input structure."
+    )
+
+    user_text = (
+        "Using the CR2A JSON I am providing, expand and fully populate all sections "
+        "and clauses. For every item in SECTION_I through SECTION_VI, you may add "
+        "new clauses and fields as needed so that the report is comprehensive. "
+        "For each clause, include: clause_language, clause_summary, risk_triggers, "
+        "flow_down_obligations, redline_recommendations, and harmful_language_conflicts. "
+        "You must preserve the overall section/key layout so it can be parsed by "
+        "downstream code, but you are allowed to add missing items and fill in "
+        "empty fields. Return JSON only.\n\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
     )
 
     url = f"{OPENAI_BASE}/v1/chat/completions"
@@ -77,12 +89,9 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         "model": model,
         "messages": [
             {"role": "system", "content": system_text},
-            {
-                "role": "user",
-                "content": f"Polish the JSON for clarity without changing its keys or nesting. Return JSON only.\n\n{json.dumps(payload, ensure_ascii=False)}"
-            },
+            {"role": "user", "content": user_text},
         ],
-        "response_format": {"type": "json_object"},  # This enforces JSON-only output
+        "response_format": {"type": "json_object"},
         "temperature": 0,
         "max_tokens": 2000,
     }
