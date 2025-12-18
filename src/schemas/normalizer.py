@@ -8,28 +8,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 def load_output_schema(repo_root: Path) -> Dict[str, Any]:
     """
     Load the output schema definition.
-    
     Args:
         repo_root: Repository root path
-        
     Returns:
         Output schema as a dictionary
     """
     schema_path = repo_root / "schemas" / "output_schemas.json"
     return json.loads(schema_path.read_text(encoding="utf-8"))
 
-
 def convert_clause(block: Dict[str, Any]) -> Dict[str, str]:
     """
     Align clause fields with schema-required labels.
-    
     Args:
         block: Raw clause data from analyzer
-        
     Returns:
         Normalized clause dictionary
     """
@@ -46,12 +40,10 @@ def convert_clause(block: Dict[str, Any]) -> Dict[str, str]:
 def convert_items(items: List[Dict[str, Any]], section_label: str, closing_line: str) -> List[Dict[str, Any]]:
     """
     Convert section items to normalized format.
-    
     Args:
         items: Raw item data from analyzer
         section_label: Section identifier (e.g., "II", "III")
         closing_line: Default closing line text
-        
     Returns:
         List of normalized item dictionaries
     """
@@ -67,7 +59,6 @@ def convert_items(items: List[Dict[str, Any]], section_label: str, closing_line:
         )
     return normalized
 
-
 def normalize_to_schema(
     raw: Dict[str, Any],
     closing_line: str,
@@ -75,19 +66,16 @@ def normalize_to_schema(
 ) -> Dict[str, Any]:
     """
     Map heuristic analyzer output into the stricter JSON schema shape expected by the template exporter.
-    
     This function:
     1. Normalizes SECTION_I header fields with fallback values
     2. Converts sections II-VI items to standardized format
     3. Preserves SECTION_VII as-is
     4. Creates SECTION_VIII structure
     5. Adds document metadata
-    
     Args:
         raw: Raw analysis output from analyzer
         closing_line: Standard closing line for sections II-VI
         policy_version: Optional policy version identifier
-        
     Returns:
         Normalized output conforming to output_schemas.json
     """

@@ -10,7 +10,6 @@ try:
 except Exception:  # pragma: no cover
     boto3 = None  # type: ignore
 
-
 @dataclass
 class AppConfig:
     aws_region: str
@@ -24,7 +23,6 @@ class AppConfig:
             ocr_mode=os.getenv("OCR_MODE", "auto"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         )
-
 
 def get_secret_env_or_aws(env_name: str, secret_arn_env: str) -> Optional[str]:
     """

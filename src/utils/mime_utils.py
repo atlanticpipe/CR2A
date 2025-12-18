@@ -1,5 +1,4 @@
 """Utility helpers for reliable MIME and extension detection."""
-
 from __future__ import annotations
 
 import importlib
@@ -9,7 +8,6 @@ from pathlib import Path
 from typing import Optional
 
 magic = importlib.import_module("magic") if importlib.util.find_spec("magic") else None
-
 
 def _detect_signature(path: Path) -> Optional[str]:
     """Inspect file signatures to classify PDFs and DOCX without extensions."""
@@ -27,7 +25,6 @@ def _detect_signature(path: Path) -> Optional[str]:
         except zipfile.BadZipFile:
             return None
     return None
-
 
 def infer_mime_type(file_path: str | Path) -> str:
     """Return a best-effort MIME type for the given file path."""
@@ -52,7 +49,6 @@ def infer_mime_type(file_path: str | Path) -> str:
         return mime_guess
 
     raise ValueError("Unable to determine MIME type from content or extension")
-
 
 def infer_extension_from_content_type_or_magic(file_path: str | Path) -> str:
     """Infer a safe extension from MIME type or raise if unsupported."""

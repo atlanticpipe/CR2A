@@ -26,18 +26,16 @@ except Exception:
     pytesseract = None  # type: ignore
     Image = None  # type: ignore
 
-from src.orchestrator.mime_utils import infer_mime_type
+from src.utils.mime_utils import infer_mime_type
 
 logger = logging.getLogger(__name__)
-
 
 def _read_json(path: Union[str, Path]) -> Dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
-
 def _get_policy_closing_line(root: Union[str, Path]) -> str:
     root = Path(root).expanduser().resolve()
-    rules_path = root / "contract-analysis-policy-bundle" / "policy" / "validation_rules_v1.json"
+    rules_path = root / "schemas" / "validation_rules.json"
     try:
         rules = _read_json(rules_path)
         val = rules.get("validation", rules)
@@ -67,7 +65,6 @@ def _docx_iter_paragraphs(docx_bytes: bytes) -> List[str]:
             lines.append(line)
     return lines
 
-
 def _pdf_text_pages_with_pymupdf(pdf_bytes: bytes) -> List[str]:
     if fitz is None:
         return []
@@ -77,7 +74,6 @@ def _pdf_text_pages_with_pymupdf(pdf_bytes: bytes) -> List[str]:
             txt = page.get_text("text") or ""
             pages.append(txt.strip())
     return pages
-
 
 def _pdf_ocr_with_textract(pdf_bytes: bytes) -> List[str]:
     if boto3 is None or fitz is None:
@@ -93,7 +89,6 @@ def _pdf_ocr_with_textract(pdf_bytes: bytes) -> List[str]:
             pages_text.append("\n".join(lines).strip())
     return pages_text
 
-
 def _pdf_ocr_with_tesseract(pdf_bytes: bytes) -> List[str]:
     if pytesseract is None or Image is None or fitz is None:
         return []
@@ -106,7 +101,6 @@ def _pdf_ocr_with_tesseract(pdf_bytes: bytes) -> List[str]:
             txt = pytesseract.image_to_string(img)
             pages_text.append(txt.strip())
     return pages_text
-
 
 def _pdf_extract_pages(pdf_bytes: bytes, ocr_mode: str = "auto") -> List[str]:
     # 1) Try native text first
@@ -144,7 +138,6 @@ def _pdf_extract_pages(pdf_bytes: bytes, ocr_mode: str = "auto") -> List[str]:
             return ["" for _ in doc]
     return [""]
 
-
 SECTION_I_FIELDS = [
     "Project Title:",
     "Solicitation No.:",
@@ -180,7 +173,6 @@ def _locate_sections(lines: List[str]) -> Dict[str, Tuple[int,int]]:
         spans[sec] = (start, end)
     return spans
 
-
 def _build_section_i(lines: List[str]) -> Dict[str, str]:
     res = {k: "Not present in contract." for k in SECTION_I_FIELDS}
     for i, ln in enumerate(lines):
@@ -191,7 +183,6 @@ def _build_section_i(lines: List[str]) -> Dict[str, str]:
                     val = lines[i+1].strip()
                 res[key] = val or "Not present in contract."
     return res
-
 
 def _parse_clause_blocks(region_lines: List[str]) -> List[Dict[str, Any]]:
     labels = {
@@ -232,7 +223,6 @@ def _parse_clause_blocks(region_lines: List[str]) -> List[Dict[str, Any]]:
         "provenance": {"source": "document", "method": "labels"}
     }]
 
-
 def _items_from_region(region_lines: List[str], title_fallback: str, closing_line: str) -> List[Dict[str, Any]]:
     title = next((ln for ln in region_lines if ln.strip()), title_fallback)[:200]
     return [{
@@ -241,7 +231,6 @@ def _items_from_region(region_lines: List[str], title_fallback: str, closing_lin
         "clauses": _parse_clause_blocks(region_lines),
         "closing_line": closing_line
     }]
-
 
 def _build_from_lines(lines: List[str], closing_line: str) -> Dict[str, Any]:
     spans = _locate_sections(lines)
@@ -261,8 +250,6 @@ def _build_from_lines(lines: List[str], closing_line: str) -> Dict[str, Any]:
 
     payload["PROVENANCE"] = {"version": "1.0.0", "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")}
     return payload
-
-
 
 def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], ocr: str = "auto") -> Dict[str, Any]:
     input_path = Path(input_path).expanduser().resolve()

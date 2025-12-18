@@ -1,13 +1,9 @@
 from __future__ import annotations
-
 import json
 import os
 from typing import Any, Dict, Optional
-
 import httpx
-
-from .config import get_secret_env_or_aws
-
+from src.core.config import get_secret_env_or_aws
 
 class OpenAIClientError(RuntimeError):
     """Typed error that carries an error category for HTTP mapping."""
@@ -19,12 +15,10 @@ class OpenAIClientError(RuntimeError):
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
 OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5")
 
-
 def _get_api_key() -> Optional[str]:
     # Resolve key from env or AWS Secrets Manager; keep secrets out of logs.
     key = get_secret_env_or_aws("OPENAI_API_KEY", "OPENAI_SECRET_ARN")
     return key
-
 
 def _extract_text(data: Dict[str, Any]) -> str:
     # Prefer Responses API shape; fall back to chat-style messages if present.
@@ -42,7 +36,6 @@ def _extract_text(data: Dict[str, Any]) -> str:
                 return content
     raise RuntimeError("OpenAI response missing text content")
 
-
 def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
     try:
         # Fast path when the model returned clean JSON.
@@ -55,13 +48,11 @@ def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
             return json.loads(raw_text[start : end + 1])
         raise
 
-
 def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Best-effort JSON refinement with OpenAI. If no key is present, raises.
     Keeps token usage low by prompting for structured JSON only.
     """
-
     api_key = _get_api_key()
     if not api_key:
         # Fail fast when no credentials are available so callers can skip refinement.

@@ -11,7 +11,6 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import quote, urlparse, unquote
-
 from fastapi import HTTPException
 
 try:
@@ -38,11 +37,9 @@ _VALID_BUCKET = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$")
 # Initialize S3 client
 S3 = boto3.client("s3", region_name=AWS_REGION) if boto3 else None
 
-
 def _http_error(status: int, category: str, message: str) -> HTTPException:
     """Standardized error envelope so the UI can surface actionable messages."""
     return HTTPException(status_code=status, detail={"category": category, "message": message})
-
 
 def get_s3_client():
     """Get the S3 client, raising an error if boto3 is not available."""
@@ -50,11 +47,9 @@ def get_s3_client():
         raise _http_error(500, "ConfigError", "boto3 not installed; S3 operations unavailable.")
     return S3
 
-
 def is_valid_s3_bucket(name: str) -> bool:
     """
     Enforce AWS-safe bucket names to avoid runtime presign failures.
-    
     AWS S3 bucket naming rules:
     - Must be 3-63 characters long
     - Can contain only lowercase letters, numbers, hyphens, and periods
@@ -74,7 +69,6 @@ def is_valid_s3_bucket(name: str) -> bool:
         return False
     return True
 
-
 def load_upload_bucket() -> str:
     """Get and validate the upload bucket name."""
     bucket = UPLOAD_BUCKET or "cr2a-upload"
@@ -86,7 +80,6 @@ def load_upload_bucket() -> str:
         )
     return bucket
 
-
 def load_output_bucket() -> str:
     """Get and validate the output bucket name."""
     bucket = (OUTPUT_BUCKET or "").strip()
@@ -96,15 +89,12 @@ def load_output_bucket() -> str:
         raise _http_error(500, "ValidationError", "Invalid S3 bucket for outputs; expected DNS-compatible name.")
     return bucket
 
-
 def build_output_key(run_id: str, filename: str) -> str:
     """
     Build a predictable S3 key path while preventing path traversal and unsafe characters.
-    
     Args:
         run_id: Run identifier (must be alphanumeric with ._- only)
         filename: Output filename
-        
     Returns:
         S3 key path
     """
@@ -114,22 +104,17 @@ def build_output_key(run_id: str, filename: str) -> str:
     parts = [part for part in (prefix, run_id, filename) if part]
     return "/".join(parts)
 
-
 def resolve_s3_key_from_uri(contract_uri: str) -> str:
     """
     Validate the contract URI and extract the S3 object key.
-    
     Supports both virtual-hosted-style and path-style S3 URLs:
     - https://bucket.s3.amazonaws.com/key
     - https://bucket.s3.region.amazonaws.com/key  
     - https://s3.region.amazonaws.com/bucket/key
-    
     Args:
         contract_uri: S3 URI to parse
-        
     Returns:
         S3 object key
-        
     Raises:
         HTTPException: If URI is invalid or doesn't match expected bucket
     """
@@ -169,33 +154,26 @@ def resolve_s3_key_from_uri(contract_uri: str) -> str:
         raise _http_error(400, "ValidationError", "contract_uri path is missing an object key.")
     return key
 
-
 def build_s3_uri(key: str, bucket: str) -> str:
     """
     Build a consistent S3 HTTPS URI from an object key.
-    
     Args:
         key: S3 object key
         bucket: S3 bucket name
-        
     Returns:
         Virtual-hosted-style S3 HTTPS URI
     """
     safe_key = quote(key)
     return f"https://{bucket}.s3.{AWS_REGION}.amazonaws.com/{safe_key}"
 
-
 def download_from_s3(contract_uri: str, dest_path: Path) -> Path:
     """
     Stream a contract from S3 to disk to avoid double-buffering in memory.
-    
     Args:
         contract_uri: S3 URI to download from
         dest_path: Local path to save the file
-        
     Returns:
         Path to downloaded file
-        
     Raises:
         HTTPException: If download fails or file exceeds size limit
     """
@@ -229,19 +207,15 @@ def download_from_s3(contract_uri: str, dest_path: Path) -> Path:
     body.close()
     return dest_path
 
-
 def upload_artifacts(run_id: str, filled: Dict[str, Any], pdf_path: Path) -> Dict[str, str]:
     """
     Persist analysis outputs to S3 for download via presigned URLs.
-    
     Args:
         run_id: Run identifier
         filled: Filled template JSON data
         pdf_path: Path to generated PDF
-        
     Returns:
         Dict with 'bucket', 'json_key', 'pdf_key'
-        
     Raises:
         HTTPException: If upload fails
     """
@@ -277,17 +251,13 @@ def upload_artifacts(run_id: str, filled: Dict[str, Any], pdf_path: Path) -> Dic
 
     return {"bucket": bucket, "json_key": json_key, "pdf_key": pdf_key}
 
-
 def generate_download_url(key: str) -> str:
     """
     Generate a short-lived presigned download URL for an S3 object.
-    
     Args:
         key: S3 object key
-        
     Returns:
         Presigned download URL
-        
     Raises:
         HTTPException: If object doesn't exist or presigning fails
     """
@@ -310,18 +280,14 @@ def generate_download_url(key: str) -> str:
     except Exception as exc:  # pragma: no cover
         raise _http_error(500, "ProcessingError", f"Failed to presign download: {exc}")
 
-
 def generate_upload_url(filename: str, content_type: str = "application/octet-stream") -> Dict[str, Any]:
     """
     Generate a presigned upload URL for direct client-to-S3 uploads.
-    
     Args:
         filename: Original filename
         content_type: MIME type
-        
     Returns:
         Dict with upload URL and metadata
-        
     Raises:
         HTTPException: If presigning fails
     """

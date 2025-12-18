@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Union
 
-# ---- Optional imports (lazy-friendly)
+# Optional imports
 try:
     # Only needed when backend="reportlab"
     from reportlab.lib import colors
@@ -14,9 +14,7 @@ try:
 except Exception:
     colors = LETTER = ParagraphStyle = getSampleStyleSheet = inch = SimpleDocTemplate = Paragraph = Spacer = Table = TableStyle = None  # type: ignore
 
-
-# ------------------------- ReportLab helpers ---------------------------
-
+# ReportLab helpers
 def _reportlab_styles():
     styles = getSampleStyleSheet()
     TitleStyle = ParagraphStyle("TitleStyle", parent=styles["Heading1"], spaceAfter=12)
@@ -25,7 +23,6 @@ def _reportlab_styles():
     Body = ParagraphStyle("Body", parent=styles["BodyText"], leading=14, spaceAfter=6)
     Small = ParagraphStyle("Small", parent=styles["BodyText"], fontSize=9, leading=12)
     return TitleStyle, H2, H3, Body, Small
-
 
 def _kv_table_reportlab(section_i: Dict[str, Any], Body) -> "Table":
     rows: List[List[Any]] = []
@@ -43,7 +40,6 @@ def _kv_table_reportlab(section_i: Dict[str, Any], Body) -> "Table":
         )
     )
     return t
-
 
 def _add_clause_block_reportlab(story: List[Any], block: Dict[str, Any], H3, Body) -> None:
     # Accept both schema-normalized keys (with spaces) and analyzer keys (snake_case) so PDFs render data instead of blanks.
@@ -70,7 +66,6 @@ def _add_clause_block_reportlab(story: List[Any], block: Dict[str, Any], H3, Bod
             story.append(Paragraph(f"<b>{label}</b>", H3))
             story.append(Paragraph(str(val), Body))
 
-
 def _section_items_reportlab(story: List[Any], section_name: str, items: Iterable[Dict[str, Any]], H2, H3, Body, Small) -> None:
     story.append(Paragraph(section_name, H2))
     empty = True
@@ -84,13 +79,11 @@ def _section_items_reportlab(story: List[Any], section_name: str, items: Iterabl
     if empty:
         story.append(Paragraph("No items found.", Small))
 
-
 def _footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica", 9)
     canvas.drawRightString(LETTER[0] - 0.5 * inch, 0.5 * inch, f"Page {doc.page}")
     canvas.restoreState()
-
 
 def _export_reportlab(data: Dict[str, Any], output_pdf: Path, title: str) -> Path:
     if SimpleDocTemplate is None:
@@ -141,9 +134,7 @@ def _export_reportlab(data: Dict[str, Any], output_pdf: Path, title: str) -> Pat
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return output_pdf
 
-
-# ---------------------------- DOCX backend -----------------------------
-
+# DOCX backend
 def _export_docx(data: Dict[str, Any], template_docx: Path, output_pdf: Path, title: str) -> Path:
     from docx import Document
     try:
@@ -210,9 +201,7 @@ def _export_docx(data: Dict[str, Any], template_docx: Path, output_pdf: Path, ti
         pass
     return out_docx
 
-
-# ------------------------------ Public API -----------------------------
-
+# Public API
 def export_pdf_from_filled_json(
     data: Dict[str, Any],
     output_pdf: Union[str, Path],

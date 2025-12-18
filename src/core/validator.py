@@ -9,9 +9,7 @@ from typing import Dict, Any, Iterable, List, Optional, Union
 from pathlib import Path
 import json
 
-
-# ----------------------------- JSON Schema ----------------------------- #
-
+# JSON Schema
 def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> None:
     """
     Validate 'data' against the provided JSON Schema (Draft-07).
@@ -29,9 +27,7 @@ def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> Non
             msg += f" (+{len(errors)-10} more)"
         raise ValueError(msg)
 
-
-# ----------------------------- Findings/Report ----------------------------- #
-
+# Findings/Report
 @dataclass
 class ValidationFinding:
     level: str  # "ERROR" | "WARN" | "INFO"
@@ -39,15 +35,12 @@ class ValidationFinding:
     message: str
     path: Optional[str] = None
 
-
 @dataclass
 class ValidationReport:
     ok: bool
     findings: List[ValidationFinding] = field(default_factory=list)
 
-
-# ----------------------------- Helpers ----------------------------- #
-
+# Helpers
 def _get_in(obj: Any, *path: Union[str, int]) -> Any:
     cur = obj
     for p in path:
@@ -56,7 +49,6 @@ def _get_in(obj: Any, *path: Union[str, int]) -> Any:
         else:
             return None
     return cur
-
 
 def _assert_closing_line(output_json: Dict[str, Any],
                          sections: Iterable[str],
@@ -108,7 +100,6 @@ def _assert_closing_line(output_json: Dict[str, Any],
             ))
     return findings
 
-
 def _assert_provenance(output_json: Dict[str, Any]) -> List[ValidationFinding]:
     prov = output_json.get("PROVENANCE")
     if prov is None:
@@ -123,9 +114,7 @@ def _assert_provenance(output_json: Dict[str, Any]) -> List[ValidationFinding]:
                                   message=f"PROVENANCE missing required fields: {', '.join(missing)}")]
     return []
 
-
-# ----------------------------- Policy Rules ----------------------------- #
-
+# Policy Rules
 def enforce_validation_rules(output_json: Dict[str, Any], validation_rules: Dict[str, Any]) -> None:
     """
     Enforce policy-level validation rules (beyond JSON Schema).
@@ -170,8 +159,7 @@ def enforce_validation_rules(output_json: Dict[str, Any], validation_rules: Dict
             msg += f" (+{len(errors)-10} more)"
         raise ValueError(msg)
 
-
-# ----------------------------- Public API ----------------------------- #
+# Public API
 
 def validate_filled_template(output_json: Dict[str, Any],
                              schema: Dict[str, Any],
