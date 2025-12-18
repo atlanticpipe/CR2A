@@ -100,10 +100,6 @@ def _http_error(status: int, category: str, message: str) -> HTTPException:
     """Standardized error envelope for consistent API responses."""
     return HTTPException(status_code=status, detail={"category": category, "message": message})
 
-def _is_truthy(value: Optional[str]) -> bool:
-    """Normalize common truthy env strings."""
-    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-
 # Endpoints
 @app.get("/health")
 def health():
@@ -214,11 +210,13 @@ def _run_analysis(payload: AnalysisRequestPayload):
             # Run heuristic analysis
             raw_json = analyze_to_json(downloaded, REPO_ROOT, ocr=os.getenv("OCR_MODE", "auto"))
 
-            # Optional LLM refinement
-            llm_mode = "on" if payload.llm_enabled and _is_truthy(os.getenv("LLM_REFINEMENT", "off")) else "off"
-            if llm_mode == "on":
+            # LLM refinement - always enabled when llm_enabled=True
+            if payload.llm_enabled:
+                llm_mode = "on"
                 try:
                     refined = refine_cr2a(raw_json)
+                    if isinstance(refined, dict) and refined:
+                        raw_json = refined
                 except OpenAIClientError as exc:
                     status_map = {
                         "ValidationError": 400,
@@ -228,9 +226,6 @@ def _run_analysis(payload: AnalysisRequestPayload):
                     }
                     status = status_map.get(exc.category, 500)
                     raise _http_error(status, exc.category, str(exc))
-
-                if isinstance(refined, dict) and refined:
-                    raw_json = refined
 
             # Normalize to schema
             rules = load_validation_rules(REPO_ROOT)
