@@ -48,6 +48,7 @@ def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
             return json.loads(raw_text[start : end + 1])
         raise
 
+
 def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Best-effort JSON refinement with OpenAI. If no key is present, raises.
