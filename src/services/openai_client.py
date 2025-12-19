@@ -22,7 +22,7 @@ class OpenAIClientError(RuntimeError):
         self.category = category
 
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
-OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5")
+OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5.2")
 
 def _get_api_key() -> Optional[str]:
     # Resolve key from env or AWS Secrets Manager; keep secrets out of logs.
@@ -246,6 +246,45 @@ def _canonicalize_llm_sections(refined: Dict[str, Any], default_text: str) -> Di
     return refined
 
 
+def _merge_item_update(
+    refined: Dict[str, Any],
+    sec_key: str,
+    new_item: Dict[str, Any],
+    default_prov: Dict[str, Any],
+) -> None:
+    # Merge refreshed clauses for a single item without dropping existing sections.
+    items = refined.get(sec_key) or []
+    merged: List[Dict[str, Any]] = []
+    updated = False
+
+    for item in items:
+        if item.get("item_number") == new_item.get("item_number") and item.get("item_title") == new_item.get("item_title"):
+            replacement = deepcopy(item)
+            clauses = new_item.get("clauses") or []
+            if clauses:
+                replacement["clauses"] = clauses
+            replacement["closing_line"] = new_item.get("closing_line", item.get("closing_line", ""))
+            for block in replacement.get("clauses", []):
+                block.setdefault("search_rationale", "")
+                block.setdefault("provenance", default_prov.copy())
+            merged.append(replacement)
+            updated = True
+        else:
+            merged.append(item)
+
+    if not updated and new_item:
+        fallback = deepcopy(new_item)
+        fallback.setdefault("item_title", "")
+        fallback.setdefault("item_number", "")
+        fallback.setdefault("clauses", [])
+        for block in fallback.get("clauses", []):
+            block.setdefault("search_rationale", "")
+            block.setdefault("provenance", default_prov.copy())
+        merged.append(fallback)
+
+    refined[sec_key] = merged
+
+
 def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Best-effort JSON refinement with OpenAI. If no key is present, raises.
@@ -343,40 +382,52 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         _validate_search_rationale(refined)
 
-        # Detect generic placeholders and retry with narrowed spans when available.
-        low_conf_spans: List[Dict[str, Any]] = []
+        retry_targets: List[Dict[str, Any]] = []
+        item_spans = payload.get("_item_spans", {}) or {}
+        section_text = payload.get("_section_text", {}) or {}
+
         for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
             sec_label = sec_key.split("_")[-1]
             for item in refined.get(sec_key, []) or []:
                 item_number = item.get("item_number", "")
                 span_key = f"SECTION_{sec_label}:{item_number}"
-                focus_span = payload.get("_item_spans", {}).get(span_key) or payload.get("_section_text", {}).get(sec_label, "")
-                for block in item.get("clauses", []) or []:
-                    if _is_generic_clause(block) and focus_span:
-                        low_conf_spans.append(
-                            {
-                                "section": sec_key,
-                                "item_number": item_number,
-                                "item_title": item.get("item_title", ""),
-                                "focus_span": focus_span,
-                            }
-                        )
-        if low_conf_spans:
-            retry_body = json.loads(json.dumps(base_body))
-            retry_body["input"] = (
+                focus_span = item_spans.get(span_key) or section_text.get(sec_label, "")
+                clauses = item.get("clauses") or []
+                needs_retry = (not clauses) or any(_is_generic_clause(block) for block in clauses)
+                if needs_retry and focus_span:
+                    retry_targets.append(
+                        {
+                            "section": sec_key,
+                            "item_number": item_number,
+                            "item_title": item.get("item_title", ""),
+                            "focus_span": focus_span,
+                        }
+                    )
+
+        for idx, target in enumerate(retry_targets, start=1):
+            logging.info("Retrying item %s %s (attempt %d)", target["section"], target["item_number"], idx)
+            narrowed_body = json.loads(json.dumps(base_body))
+            narrowed_body["input"] = (
                 f"{user_text}\n\n"
-                "One or more clauses were low-confidence placeholders. "
-                "Re-run ONLY for the provided focus_span targets: "
-                f"{json.dumps(low_conf_spans, ensure_ascii=False)}. "
-                "Use the exact focus_span text first; fill clause fields with specific language where possible. "
-                "Maintain search_rationale describing the phrases searched inside focus_span."
+                f"Retry ONLY for item {target['item_number']} ({target['item_title']}) in {target['section']}. "
+                "Use the provided focus_span as the primary evidence. "
+                f"focus_span:\n{target['focus_span']}\n\n"
+                "Return JSON with only the updated section and item, keeping field names exact. "
+                "Fill all clause fields with specific language from focus_span where possible and include search_rationale."
             )
-            refined = _call_openai(retry_body, headers, timeout)
-            for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
-                for item in refined.get(sec_key, []) or []:
-                    for block in item.get("clauses", []) or []:
-                        block.setdefault("search_rationale", "")
-                        block.setdefault("provenance", default_prov.copy())
+            try:
+                retry_refined = _call_openai(narrowed_body, headers, timeout)
+            except httpx.TimeoutException as exc:
+                raise OpenAIClientError("TimeoutError", f"OpenAI retry timed out for {target['section']} {target['item_number']}: {exc}") from exc
+            except httpx.RequestError as exc:
+                raise OpenAIClientError("NetworkError", f"OpenAI retry failed for {target['section']} {target['item_number']}: {exc}") from exc
+
+            for item in retry_refined.get(target["section"], []) or []:
+                for block in item.get("clauses", []) or []:
+                    block.setdefault("search_rationale", "")
+                    block.setdefault("provenance", default_prov.copy())
+                _merge_item_update(refined, target["section"], item, default_prov)
+
             _validate_search_rationale(refined)
 
         # Backfill any missing sections to keep schema alignment stable for downstream steps.
