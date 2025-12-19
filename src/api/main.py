@@ -68,6 +68,12 @@ app.add_middleware(
     allow_headers=["content-type", "authorization"],
 )
 
+LOG_LEVEL = os.getenv("CR2A_LOG_LEVEL", "INFO").upper()
+# Configure root logging once so API + OpenAI client emit debug traces when requested.
+logging.basicConfig(level=LOG_LEVEL, format="%(levelname)s %(name)s: %(message)s")
+logging.getLogger("src.api.main").setLevel(LOG_LEVEL)
+logging.getLogger("src.services.openai_client").setLevel(LOG_LEVEL)
+
 logger = logging.getLogger(__name__)
 
 # API Models
@@ -219,6 +225,11 @@ def _run_analysis(payload: AnalysisRequestPayload):
                     if isinstance(refined, dict) and refined:
                         raw_json = refined
                 except OpenAIClientError as exc:
+                    # Trace OpenAI failures with category/status so status mapping is visible in logs.
+                    logger.exception(
+                        "LLM refinement failed",
+                        extra={"contract_id": payload.contract_id, "category": exc.category, "message": str(exc)},
+                    )
                     status_map = {
                         "ValidationError": 400,
                         "TimeoutError": 504,
@@ -227,6 +238,16 @@ def _run_analysis(payload: AnalysisRequestPayload):
                     }
                     status = status_map.get(exc.category, 500)
                     raise _http_error(status, exc.category, str(exc))
+                except HTTPException:
+                    # Bubble up FastAPI errors untouched to preserve status code.
+                    raise
+                except Exception as exc:
+                    # Wrap unexpected errors so callers always receive a typed HTTP envelope.
+                    logger.exception(
+                        "Unexpected LLM refinement failure",
+                        extra={"contract_id": payload.contract_id, "category": "ProcessingError", "message": str(exc)},
+                    )
+                    raise _http_error(500, "ProcessingError", f"LLM refinement failed: {exc}") from exc
 
             # Normalize to schema
             rules = load_validation_rules(REPO_ROOT)
