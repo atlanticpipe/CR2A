@@ -253,8 +253,6 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     payload_for_llm = {
         "current_cr2a": seeded_current,
         "template_spec": CR2A_TEMPLATE_SPEC,
-        "current_cr2a": payload,
-        "template_spec": CR2A_TEMPLATE_SPEC,
         "contract_text": payload.get("_contract_text", ""),
         "section_text": payload.get("_section_text", {}),
         "item_spans": payload.get("_item_spans", {}),
