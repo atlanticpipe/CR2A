@@ -379,7 +379,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         "input": user_text,
         "instructions": system_text,
         "temperature": temperature,
-        "max_tokens": 250000,
+        "max_output_tokens": 250000,
         "text": {
             "format": {
                 "type": "json_object",
