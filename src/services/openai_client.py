@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, Optional
 import httpx
 from src.core.config import get_secret_env_or_aws
+from schemas.template_spec import CR2A_TEMPLATE_SPEC
 
 class OpenAIClientError(RuntimeError):
     """Typed error that carries an error category for HTTP mapping."""
@@ -64,20 +65,51 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     system_text = (
         "You are a contracts attorney and risk analyst generating a Clause Risk & "
-        "Compliance Analyzsis (CR2A) report. "
-        "Return ONLY valid JSON compatible with the input structure."
+        "Compliance Analysis (CR2A) report.\n\n"
+        "The CR2A JSON must conform to this structure:\n"
+        "- SECTION_I: a flat object with contract overview fields.\n"
+        "- SECTION_II through SECTION_VI: arrays of SectionItem objects.\n"
+        "- Each SectionItem has: item_number, item_title, clauses, closing_line.\n"
+        "- Each clauses entry is a ClauseBlock with exactly these fields:\n"
+        "  clause_language, clause_summary, risk_triggers, "
+        "flow_down_obligations, redline_recommendations, "
+        "harmful_language_conflicts.\n"
+        "Return ONLY valid JSON; no commentary or markdown."
     )
 
+    payload_for_llm = {
+    "current_cr2a": payload,
+    "template_spec": CR2A_TEMPLATE_SPEC,
+    }
+
     user_text = (
-        "Using the CR2A JSON I am providing, expand and fully populate all sections "
-        "and clauses. For every item in SECTION_I through SECTION_VI, you may add "
-        "new clauses and fields as needed so that the report is comprehensive. "
-        "For each clause, include: clause_language, clause_summary, risk_triggers, "
-        "flow_down_obligations, redline_recommendations, and harmful_language_conflicts. "
-        "You must preserve the overall section/key layout so it can be parsed by "
-        "downstream code, but you are allowed to add missing items and fill in "
-        "empty fields. Return JSON only.\n\n"
-        f"{json.dumps(payload, ensure_ascii=False)}"
+        "You are given a JSON object with two keys:\n"
+        "- 'current_cr2a': a partial CR2A analysis of a contract.\n"
+        "- 'template_spec': the complete list of required SectionItem templates "
+        "for SECTION_II through SECTION_VI.\n\n"
+        "Your task is to produce a FINAL CR2A JSON object that:\n"
+        "1) Preserves SECTION_I from current_cr2a, enriching fields only where the "
+        "contract clearly provides information.\n"
+        "2) For EACH SectionItem listed in template_spec for SECTION_II–SECTION_VI, "
+        "creates an element in that section's array with:\n"
+        "   - item_number and item_title exactly as in template_spec.\n"
+        "   - closing_line copied from template_spec for that section.\n"
+        "   - clauses: an array containing one or more ClauseBlock objects.\n"
+        "3) For EVERY ClauseBlock you create, you MUST fill all six fields:\n"
+        "   clause_language, clause_summary, risk_triggers, "
+        "flow_down_obligations, redline_recommendations, "
+        "harmful_language_conflicts.\n\n"
+        "Rules:\n"
+        "- Do NOT invent new SectionItem records or change item_title text.\n"
+        "- Do NOT omit any items that appear in template_spec; every item "
+        "must appear in the final JSON.\n"
+        "- If the contract is silent for an item, you MUST still create a single "
+        "ClauseBlock for that item and set all six fields to a clear statement "
+        "such as 'Not present in contract.' plus a brief risk explanation.\n"
+        "- You may add more than one ClauseBlock for an item if the contract "
+        "has multiple distinct clauses affecting that risk area.\n"
+        "- Only return the final CR2A JSON object. No explanations.\n\n"
+        f"{json.dumps(llm_input, ensure_ascii=False)}"
     )
 
     url = f"{OPENAI_BASE}/v1/chat/completions"
