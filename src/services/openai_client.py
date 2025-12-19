@@ -152,9 +152,11 @@ def _call_openai(body: Dict[str, Any], headers: Dict[str, str], timeout: float) 
         except httpx.HTTPStatusError as exc:
             # Surface actionable error details when the API rejects the request.
             detail = exc.response.text
+            status = exc.response.status.code
+            category = "ValidationError" if 400 <= status < 500 else "ProcessingError"
             raise OpenAIClientError(
-                "ProcessingError",
-                f"OpenAI request failed ({exc.response.status_code}): {detail}",
+                category,
+                f"OpenAI request failed ({status}): {detail}",
             ) from exc
         data = resp.json()
     content = _extract_text(data)
@@ -373,30 +375,15 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     org_id = os.getenv("OPENAI_ORG_ID")
     if org_id:
         headers["OpenAI-Organization"] = org_id
+    max_output_tokens = int(os.getenv("POENAI_MAX_OUTPUT_TOKENS", "16384"))
     base_body = {
         # Responses API payload requesting strict JSON output via the new text.format field.
         "model": model,
         "input": user_text,
         "instructions": system_text,
         "temperature": temperature,
-        "max_output_tokens": 250000,
-        "text": {
-            "format": {
-                "type": "json_object",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "SECTION_I": {"type": "object"},
-                        "SECTION_II": {"type": "array"},
-                        "SECTION_III": {"type": "array"},
-                        "SECTION_IV": {"type": "array"},
-                        "SECTION_V": {"type": "array"},
-                        "SECTION_VI": {"type": "array"}
-                    },
-                    "required": ["SECTION_I", "SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]
-                }
-            }
-        }
+        "max_output_tokens": max_output_tokens,
+        "text": {"format": {"type": "json_object"}},
     }
 
     try:
