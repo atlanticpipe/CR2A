@@ -11,9 +11,6 @@
     "SECTION_IV": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
     "SECTION_V": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
     "SECTION_VI": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
-    "SECTION_VII": { "type": "array", "items": { "$ref": "#/$defs/SupplementalRiskItem" } },
-    "SECTION_VIII": { "$ref": "#/$defs/SectionVIII" },
-    "OMISSION_CHECK": { "$ref": "#/$defs/OmissionCheck" },
     "doc_meta": {
       "type": "object",
       "additionalProperties": false,
@@ -31,8 +28,7 @@
     "SECTION_III",
     "SECTION_IV",
     "SECTION_V",
-    "SECTION_VI",
-    "SECTION_VIII"
+    "SECTION_VI"
   ],
   "$defs": {
     "ClauseBlock": {
@@ -78,16 +74,6 @@
       },
       "additionalProperties": false
     },
-    "SupplementalRiskItem": {
-      "type": "object",
-      "required": ["risk_title", "clauses", "sequence"],
-      "properties": {
-        "risk_title": { "type": "string" },
-        "clauses": { "type": "array", "items": { "$ref": "#/$defs/ClauseBlock" } },
-        "sequence": { "type": "string", "pattern": "^[0-9]+ of [0-9]+$" }
-      },
-      "additionalProperties": false
-    },
     "RiskSummaryRow": {
       "type": "object",
       "required": ["Risk Area", "Risk Summary", "Redline Recommendation Summary"],
@@ -95,15 +81,6 @@
         "Risk Area": { "type": "string" },
         "Risk Summary": { "type": "string" },
         "Redline Recommendation Summary": { "type": "string" }
-      },
-      "additionalProperties": false
-    },
-    "SectionVIII": {
-      "type": "object",
-      "required": ["rows", "general_risk_level"],
-      "properties": {
-        "rows": { "type": "array", "items": { "$ref": "#/$defs/RiskSummaryRow" } },
-        "general_risk_level": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -130,12 +107,6 @@
         "NOTES:": { "type": "string" }
       },
       "additionalProperties": false
-    },
-    "OmissionCheck": {
-      "oneOf": [
-        { "type": "string", "enum": ["No omissions or uncategorized risks identified."] },
-        { "type": "array", "items": { "type": "object", "required": ["missed_clause", "suggested_section", "clause_block"], "properties": { "missed_clause": { "type": "string" }, "suggested_section": { "type": "string" }, "clause_block": { "$ref": "#/$defs/ClauseBlock" } }, "additionalProperties": false } }
-      ]
     }
   }
 }
