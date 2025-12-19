@@ -25,7 +25,7 @@ class OpenAIClientError(RuntimeError):
         self.category = category
 
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
-OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5")
+OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5-thinking")
 
 def _get_api_key() -> Optional[str]:
     # Resolve key from env or AWS Secrets Manager; keep secrets out of logs.
@@ -139,7 +139,7 @@ def _validate_search_rationale(refined: Dict[str, Any]) -> None:
 def _call_openai(body: Dict[str, Any], headers: Dict[str, str], timeout: float) -> Dict[str, Any]:
     # Execute the OpenAI request with consistent error handling.
     with httpx.Client(timeout=timeout) as client:
-        resp = client.post(f"{OPENAI_BASE}/v1/chat/completions", headers=headers, json=body)
+        resp = client.post(f"{OPENAI_BASE}/v1/responses", headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
     content = _extract_text(data)
@@ -309,14 +309,12 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     if org_id:
         headers["OpenAI-Organization"] = org_id
     base_body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_text},
-            {"role": "user", "content": user_text},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0,
-        "max_tokens": 250000,
+        "model": "gpt-5",
+        "input": user_text,  # NOT "messages"
+        "instructions": system_text,  # NOT in messages array
+        "text": {
+            "format": {"type": "json_schema"}
+        }
     }
 
     try:
