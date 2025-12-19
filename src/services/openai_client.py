@@ -1,6 +1,15 @@
 from __future__ import annotations
 import json
 import os
+from copy import deepcopy
+from typing import Any, Dict, List, Optional
+import httpx
+from src.core.config import get_secret_env_or_aws
+from src.schemas.template_spec import (
+    CR2A_TEMPLATE_SPEC,
+    build_template_scaffold,
+    canonical_template_items,
+)
 from typing import Any, Dict, List, Optional
 import httpx
 from src.core.config import get_secret_env_or_aws
@@ -126,6 +135,98 @@ def _call_openai(body: Dict[str, Any], headers: Dict[str, str], timeout: float) 
     return _parse_json_payload(content)
 
 
+def _seed_current_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build a LLM-friendly payload that already contains every template item with empty clauses.
+    This ensures the model fills clauses instead of inventing or renaming items.
+    """
+    scaffold = build_template_scaffold(empty_clauses=True)
+    seeded = {
+        "SECTION_I": deepcopy(payload.get("SECTION_I", {})),  # Preserve overview fields verbatim.
+        **scaffold,
+    }
+    # Preserve other optional sections without letting them overwrite the canonical scaffold.
+    for optional_key in ["SECTION_VII", "SECTION_VIII", "OMISSION_CHECK", "doc_meta", "PROVENANCE"]:
+        if optional_key in payload:
+            seeded[optional_key] = deepcopy(payload[optional_key])
+    return seeded
+
+
+def _default_placeholder_clause(text: str) -> Dict[str, Any]:
+    """
+    Build a clause object using the required six fields so schema validation always passes.
+    """
+    return {
+        "clause_language": text,
+        "clause_summary": text,
+        "risk_triggers": text,
+        "flow_down_obligations": text,
+        "redline_recommendations": text,
+        "harmful_language_conflicts": text,
+        "provenance": {"source": "system", "page": 0, "span": ""},
+    }
+
+
+def _canonicalize_llm_sections(refined: Dict[str, Any], default_text: str) -> Dict[str, Any]:
+    """
+    Force SECTION_II–SECTION_VI to match the template spec exactly; reject renamed or missing items.
+    """
+    issues: List[str] = []
+    canonical_sections: Dict[str, List[Dict[str, Any]]] = {}
+
+    for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+        closing_line, template_items = canonical_template_items(sec_key)
+        incoming_items = refined.get(sec_key) or []
+        matched: List[bool] = [False] * len(incoming_items)
+        normalized_items: List[Dict[str, Any]] = []
+
+        for tmpl in template_items:
+            match_idx = next(
+                (
+                    idx
+                    for idx, itm in enumerate(incoming_items)
+                    if itm.get("item_number") == tmpl.get("item_number")
+                    and itm.get("item_title") == tmpl.get("item_title")
+                ),
+                None,
+            )
+
+            if match_idx is not None:
+                matched[match_idx] = True
+                item = deepcopy(incoming_items[match_idx])
+            else:
+                issues.append(f"{sec_key} missing item {tmpl.get('item_number')}: {tmpl.get('item_title')}")
+                item = {}
+
+            item["item_number"] = tmpl.get("item_number")
+            item["item_title"] = tmpl.get("item_title")
+            item["closing_line"] = closing_line
+
+            clauses = item.get("clauses") or []
+            if not clauses:
+                clauses = [_default_placeholder_clause(default_text)]
+            item["clauses"] = clauses
+            normalized_items.append(item)
+
+        extras = [
+            incoming_items[i]
+            for i, found in enumerate(matched)
+            if not found
+        ]
+        if extras:
+            extras_desc = ", ".join(
+                f"{ex.get('item_number', '?')}: {ex.get('item_title', 'Unnamed')}" for ex in extras
+            )
+            issues.append(f"{sec_key} has unexpected items not in template: {extras_desc}")
+
+        canonical_sections[sec_key] = normalized_items
+
+    refined.update(canonical_sections)
+    if issues:
+        raise OpenAIClientError("ValidationError", "; ".join(issues))
+    return refined
+
+
 def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Best-effort JSON refinement with OpenAI. If no key is present, raises.
@@ -148,7 +249,10 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         "Return ONLY valid JSON; no commentary or markdown."
     )
 
+    seeded_current = _seed_current_cr2a(payload)
     payload_for_llm = {
+        "current_cr2a": seeded_current,
+        "template_spec": CR2A_TEMPLATE_SPEC,
         "current_cr2a": payload,
         "template_spec": CR2A_TEMPLATE_SPEC,
         "contract_text": payload.get("_contract_text", ""),
