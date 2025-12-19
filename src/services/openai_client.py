@@ -339,43 +339,33 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     payload_for_llm = {
         "current_cr2a": seeded_current,
         "template_spec": CR2A_TEMPLATE_SPEC,
-        "contract_text": payload.get("_contract_text", ""),
-        "section_text": payload.get("_section_text", {}),
         "item_spans": payload.get("_item_spans", {}),
         "search_keywords": derived_keywords,
     }
 
     user_text = (
-        "You are given a JSON object with two keys:\n"
-        "- 'current_cr2a': a partial CR2A analysis of a contract.\n"
-        "- 'template_spec': the complete list of required SectionItem templates "
-        "for SECTION_II through SECTION_VI.\n\n"
-        "Your task is to produce a FINAL CR2A JSON object that:\n"
-        "1) Preserves SECTION_I from current_cr2a, enriching fields only where the "
-        "contract clearly provides information.\n"
-        "2) For EACH SectionItem listed in template_spec for SECTION_II–SECTION_VI, "
-        "creates an element in that section's array with:\n"
-        "   - item_number and item_title exactly as in template_spec.\n"
-        "   - closing_line copied from template_spec for that section.\n"
-        "   - clauses: an array containing one or more ClauseBlock objects.\n"
-        "3) For EVERY ClauseBlock you create, you MUST fill all six fields:\n"
-        "   clause_language, clause_summary, risk_triggers, "
-        "flow_down_obligations, redline_recommendations, "
-        "harmful_language_conflicts, plus a search_rationale string explaining where you looked.\n\n"
+        "You are given a CR2A template with pre-extracted clause evidence from a contract.\n\n"
+        "Your task: VERIFY and ENHANCE the extraction.\n\n"
+        "For EACH template item in current_cr2a (SECTION_II through VI):\n"
+        "1) Review the extracted clause text in item_spans for this specific item\n"
+        "2) Verify the extraction correctly addresses the template item\n"
+        "3) Enhance with additional relevant language if incomplete\n"
+        "4) Use search_keywords to guide additional searches if needed\n"
+        "5) For each clause, fill all six required fields:\n"
+        "   - clause_language: Exact language from the contract\n"
+        "   - clause_summary: Concise summary of the clause\n"
+        "   - risk_triggers: Specific risks identified\n"
+        "   - flow_down_obligations: Obligations flowing down\n"
+        "   - redline_recommendations: Suggested edits\n"
+        "   - harmful_language_conflicts: Conflicts with policy\n"
+        "   - search_rationale: Explain what you searched\n\n"
         "Rules:\n"
-        "- Do NOT invent new SectionItem records or change item_title text.\n"
-        "- Do NOT omit any items that appear in template_spec; every item "
-        "must appear in the final JSON.\n"
-        "- If the contract is silent for an item, you MUST still create a single "
-        "ClauseBlock for that item and set all six fields to a clear statement "
-        "such as 'Not present in contract.' plus a brief risk explanation AND a search_rationale that lists searched phrases and sections.\n"
-        "- You may add more than one ClauseBlock for an item if the contract "
-        "has multiple distinct clauses affecting that risk area.\n"
-        "- Per item: search the most relevant section_text using synonyms and the provided search_keywords; prefer matches in the provided section_text span before scanning the full contract_text.\n"
-        "- Only return the final CR2A JSON object. No explanations.\n\n"
-        "Output format requirements:\n"
-        "- Every clause block must include: clause_language, clause_summary, risk_triggers, flow_down_obligations, redline_recommendations, harmful_language_conflicts, search_rationale.\n"
-        "- search_rationale must cite the phrases and section_text keys inspected; 'Not present' is only allowed when no relevant phrases were found in any section_text.\n\n"
+        "- Do NOT invent new template items or change item titles\n"
+        "- Do NOT omit any items; every item must appear\n"
+        "- If item_spans is empty, set fields to 'Not present in contract.' with search_rationale\n"
+        "- Do NOT attempt raw extraction from unstructured text\n"
+        "- item_spans is pre-extracted evidence—use as primary source\n"
+        "- Return ONLY the enhanced CR2A JSON. No explanations.\n\n"
         f"{json.dumps(payload_for_llm, ensure_ascii=False)}"
     )
 
@@ -390,7 +380,23 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         "instructions": system_text,
         "temperature": temperature,
         "max_tokens": 250000,
-        "text": {"format": {"type": "json_object"}},  # text.format must be a structured object.
+        "text": {
+            "format": {
+                "type": "json_object",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "SECTION_I": {"type": "object"},
+                        "SECTION_II": {"type": "array"},
+                        "SECTION_III": {"type": "array"},
+                        "SECTION_IV": {"type": "array"},
+                        "SECTION_V": {"type": "array"},
+                        "SECTION_VI": {"type": "array"}
+                    },
+                    "required": ["SECTION_I", "SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]
+                }
+            }
+        }
     }
 
     try:
