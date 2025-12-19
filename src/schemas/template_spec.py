@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Tuple
 
 # Canonical CR2A template spec. Clauses are intentionally empty; they are filled by the analyzer/LLM.
+# Sections I-VI only: Overview, Administrative & Commercial, Technical & Performance, Legal Risk, Regulatory, and Data/Technology.
 CR2A_TEMPLATE_SPEC: Dict[str, Dict[str, Any]] = {
     "SECTION_II": {
         "closing_line": "All applicable clauses for Administrative & Commercial Terms have been identified and analyzed.",
