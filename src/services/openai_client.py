@@ -139,6 +139,13 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         content = _extract_text(data)
         refined = _parse_json_payload(content)
 
+        default_prov = {"source": "LLM", "page": 0, "span": ""}
+
+        for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+            for item in refined.get(sec_key, []) or []:
+                for block in item.get("clauses", []) or []:
+                    block.setdefault("provenance", default_prov.copy())
+
         # Backfill any missing sections to keep schema alignment stable for downstream steps.
         for k in ["SECTION_I", "SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
             if k not in refined:
