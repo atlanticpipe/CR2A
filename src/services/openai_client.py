@@ -23,6 +23,7 @@ class OpenAIClientError(RuntimeError):
 
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
 OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5.2")
+DEFAULT_PLACEHOLDER_TEXT = "Not present in contract."
 
 def _get_api_key() -> Optional[str]:
     # Resolve key from env or AWS Secrets Manager; keep secrets out of logs.
@@ -182,6 +183,7 @@ def _default_placeholder_clause(text: str) -> Dict[str, Any]:
         "flow_down_obligations": text,
         "redline_recommendations": text,
         "harmful_language_conflicts": text,
+        "search_rationale": text,
         "provenance": {"source": "system", "page": 0, "span": ""},
     }
 
@@ -214,7 +216,9 @@ def _canonicalize_llm_sections(refined: Dict[str, Any], default_text: str) -> Di
                 matched[match_idx] = True
                 item = deepcopy(incoming_items[match_idx])
             else:
-                issues.append(f"{sec_key} missing item {tmpl.get('item_number')}: {tmpl.get('item_title')}")
+                issues.append(
+                    f"{sec_key} missing item {tmpl.get('item_number')}: {tmpl.get('item_title')} — add the template item or accept the default placeholder."
+                )
                 item = {}
 
             item["item_number"] = tmpl.get("item_number")
@@ -236,7 +240,9 @@ def _canonicalize_llm_sections(refined: Dict[str, Any], default_text: str) -> Di
             extras_desc = ", ".join(
                 f"{ex.get('item_number', '?')}: {ex.get('item_title', 'Unnamed')}" for ex in extras
             )
-            issues.append(f"{sec_key} has unexpected items not in template: {extras_desc}")
+            issues.append(
+                f"{sec_key} has unexpected items not in template: {extras_desc} — remove these items to match the canonical template."
+            )
 
         canonical_sections[sec_key] = normalized_items
 
@@ -244,6 +250,21 @@ def _canonicalize_llm_sections(refined: Dict[str, Any], default_text: str) -> Di
     if issues:
         raise OpenAIClientError("ValidationError", "; ".join(issues))
     return refined
+
+
+def _ensure_clause_rationale(refined: Dict[str, Any]) -> None:
+    """
+    Fail fast when any clause is missing search_rationale; downstream validators assume it exists.
+    """
+    for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+        for item in refined.get(sec_key, []) or []:
+            for block in item.get("clauses", []) or []:
+                rationale = str(block.get("search_rationale", "")).strip()
+                if not rationale:
+                    raise OpenAIClientError(
+                        "ValidationError",
+                        f"{sec_key} item {item.get('item_number', '')} is missing search_rationale for a clause; supply a brief search trace.",
+                    )
 
 
 def _merge_item_update(
@@ -368,6 +389,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # Call the Responses API with a strict JSON-only contract to keep structure intact.
         refined = _call_openai(base_body, headers, timeout)
+        refined = _canonicalize_llm_sections(refined, DEFAULT_PLACEHOLDER_TEXT)
 
         logging.info(f"OpenAI response type: {type(refined)}")
         logging.info(f"OpenAI response keys: {refined.keys() if isinstance(refined, dict) else 'Not a dict'}")
@@ -381,6 +403,13 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
                     block.setdefault("provenance", default_prov.copy())
 
         _validate_search_rationale(refined)
+        _ensure_clause_rationale(refined)
+
+        # Preserve source metadata and SECTION_I verbatim for downstream validators/exporters.
+        refined["SECTION_I"] = deepcopy(payload.get("SECTION_I", {}))
+        for meta_key in ["_contract_text", "_section_text", "_item_spans"]:
+            if meta_key in payload:
+                refined[meta_key] = payload[meta_key]
 
         retry_targets: List[Dict[str, Any]] = []
         item_spans = payload.get("_item_spans", {}) or {}
@@ -417,6 +446,8 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
             try:
                 retry_refined = _call_openai(narrowed_body, headers, timeout)
+                retry_scaffolded = {**build_template_scaffold(empty_clauses=True), **retry_refined}
+                retry_refined = _canonicalize_llm_sections(retry_scaffolded, DEFAULT_PLACEHOLDER_TEXT)
             except httpx.TimeoutException as exc:
                 raise OpenAIClientError("TimeoutError", f"OpenAI retry timed out for {target['section']} {target['item_number']}: {exc}") from exc
             except httpx.RequestError as exc:
@@ -430,14 +461,22 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             _validate_search_rationale(refined)
 
-        # Backfill any missing sections to keep schema alignment stable for downstream steps.
-        for k in ["SECTION_I", "SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
-            if k not in refined:
-                refined[k] = payload.get(k, [] if k != "SECTION_I" else {})
+        refined = _canonicalize_llm_sections(refined, DEFAULT_PLACEHOLDER_TEXT)
+
         # Preserve source text hints for downstream processors.
+        refined["SECTION_I"] = deepcopy(payload.get("SECTION_I", {}))
         for meta_key in ["_contract_text", "_section_text", "_item_spans"]:
-            if meta_key in payload and meta_key not in refined:
+            if meta_key in payload:
                 refined[meta_key] = payload[meta_key]
+
+        for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+            for item in refined.get(sec_key, []) or []:
+                for block in item.get("clauses", []) or []:
+                    block.setdefault("search_rationale", "")
+                    block.setdefault("provenance", default_prov.copy())
+
+        _validate_search_rationale(refined)
+        _ensure_clause_rationale(refined)
 
         return refined
     except httpx.TimeoutException as exc:
