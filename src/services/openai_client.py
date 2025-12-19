@@ -4,7 +4,7 @@ import os
 from typing import Any, Dict, Optional
 import httpx
 from src.core.config import get_secret_env_or_aws
-from schemas.template_spec import CR2A_TEMPLATE_SPEC
+from src.schemas.template_spec import CR2A_TEMPLATE_SPEC
 
 class OpenAIClientError(RuntimeError):
     """Typed error that carries an error category for HTTP mapping."""

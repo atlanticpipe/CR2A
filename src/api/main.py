@@ -45,6 +45,7 @@ from src.services.storage import (
 # Schema management
 from src.schemas.policy_loader import load_validation_rules, load_output_schema
 from src.schemas.normalizer import normalize_to_schema
+from src.schemas.template_spec import CR2A_TEMPLATE_SPEC
 
 # Utils
 from src.utils.mime_utils import infer_extension_from_content_type_or_magic, infer_mime_type
