@@ -34,7 +34,7 @@
 
     "audit_logging": {
       "record_validation_steps": true,
-      "record_provenance": true,
+      "record_provenance": false,
       "include_checksums": true
     },
 
