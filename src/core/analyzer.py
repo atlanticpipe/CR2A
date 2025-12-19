@@ -5,7 +5,7 @@ import json
 import re
 import time
 import logging
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Optional
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -27,11 +27,25 @@ except Exception:
     Image = None  # type: ignore
 
 from src.utils.mime_utils import infer_mime_type
+from src.schemas.template_spec import CR2A_TEMPLATE_SPEC, canonical_template_items
 
 logger = logging.getLogger(__name__)
 
+class AnalyzerError(RuntimeError):
+    """Typed error for analyzer failures so callers can map categories."""
+
+    def __init__(self, category: str, message: str):
+        super().__init__(message)
+        self.category = category
+
 def _read_json(path: Union[str, Path]) -> Dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+# Load section map patterns so section detection stays deterministic.
+try:
+    _SECTION_MAP = _read_json(Path(__file__).resolve().parents[2] / "schemas" / "section_map.json")
+except Exception:
+    _SECTION_MAP = {"patterns": {}, "section_order": ["I", "II", "III", "IV", "V", "VI"]}
 
 def _get_policy_closing_line(root: Union[str, Path]) -> str:
     root = Path(root).expanduser().resolve()
@@ -158,18 +172,32 @@ _SECTION_HEADER_RX = {
     "VI": re.compile(r"^\s*VI\.\s*(Compliance|Legal)\b", re.I),
 }
 
-def _locate_sections(lines: List[str]) -> Dict[str, Tuple[int,int]]:
+def _locate_sections(lines: List[str]) -> Dict[str, Tuple[int, int]]:
+    """
+    Locate top-level section spans using regex patterns so downstream slicing stays stable.
+    """
+    pattern_overrides = _SECTION_MAP.get("patterns") or {}
+    order = [sec for sec in _SECTION_MAP.get("section_order", []) if sec in {"I", "II", "III", "IV", "V", "VI"}]
+    compiled: Dict[str, re.Pattern[str]] = {}
+    for sec, rx in _SECTION_HEADER_RX.items():
+        # Prefer data-driven patterns; fall back to static defaults.
+        if sec in pattern_overrides:
+            compiled[sec] = re.compile(pattern_overrides[sec], re.I)
+        else:
+            compiled[sec] = rx
+
     starts: Dict[str, int] = {}
     for i, ln in enumerate(lines):
-        for sec, rx in _SECTION_HEADER_RX.items():
+        for sec, rx in compiled.items():
             if sec not in starts and rx.search(ln):
                 starts[sec] = i
-    ordered = [(k, starts[k]) for k in ["I","II","III","IV","V","VI"] if k in starts]
-    spans: Dict[str, Tuple[int,int]] = {}
+
+    ordered = [(k, starts[k]) for k in order if k in starts]
+    spans: Dict[str, Tuple[int, int]] = {}
     for idx, (sec, start) in enumerate(ordered):
         end = len(lines)
         if idx + 1 < len(ordered):
-            end = ordered[idx+1][1]
+            end = ordered[idx + 1][1]
         spans[sec] = (start, end)
     return spans
 
@@ -224,19 +252,95 @@ def _parse_clause_blocks(region_lines: List[str], span_text: str) -> List[Dict[s
         "provenance": {"source": "document", "method": "labels", "span": span_text[:2000]}
     }]
 
-def _items_from_region(region_lines: List[str], title_fallback: str, closing_line: str, section_label: str) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
-    # Capture raw text span for downstream LLM targeting and search diagnostics.
-    span_text = "\n".join(region_lines).strip()
-    title = next((ln for ln in region_lines if ln.strip()), title_fallback)[:200]
-    item = {
-        "item_number": 1,
-        "item_title": title,
-        "clauses": _parse_clause_blocks(region_lines, span_text),
-        "closing_line": closing_line,
-        "source_span": span_text,
-        "section_label": section_label,
-    }
-    return [item], {f"SECTION_{section_label}:1": span_text}
+def _find_item_anchor_indices(region_lines: List[str], item_number: int, item_title: str) -> Optional[int]:
+    """
+    Return the earliest line index matching either the numbered heading or a title fragment.
+    """
+    tokens = re.findall(r"[A-Za-z][A-Za-z']+", item_title)
+    trimmed = tokens[:6]
+    title_pattern = re.compile(r".*".join(re.escape(tok) for tok in trimmed), re.I) if trimmed else None
+    candidates: List[int] = []
+    number_pat = re.compile(rf"^\s*{item_number}[\.\)]\s*", re.I)
+    for idx, line in enumerate(region_lines):
+        if number_pat.search(line):
+            candidates.append(idx)
+            continue
+        if title_pattern and title_pattern.search(line):
+            candidates.append(idx)
+    return min(candidates) if candidates else None
+
+
+def _focus_span_lines(span_lines: List[str]) -> List[str]:
+    """
+    Prefer clause headings or numbered list entries; fall back to nearby paragraphs.
+    """
+    heading_rx = re.compile(r"^(Clause Language|Clause Summary|Risk Trigger|Risk Triggers?|Flow[- ]?Down|Redline|Harmful)", re.I)
+    list_rx = re.compile(r"^\s*(\d+\.|\([a-z0-9]+\)|[a-z]\))", re.I)
+    for idx, line in enumerate(span_lines):
+        if heading_rx.search(line):
+            start = max(0, idx - 1)
+            end = min(len(span_lines), idx + 8)
+            return span_lines[start:end]
+    for idx, line in enumerate(span_lines):
+        if list_rx.search(line):
+            end = min(len(span_lines), idx + 8)
+            return span_lines[idx:end]
+    cleaned = [ln for ln in span_lines if ln.strip()]
+    return cleaned[:8] if cleaned else span_lines[:6]
+
+
+def _items_from_region(
+    region_lines: List[str],
+    section_label: str,
+    template_items: List[Dict[str, Any]],
+    default_closing_line: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """
+    Build deterministic items for a section using template ordering and focused spans.
+    """
+    item_spans: Dict[str, str] = {}
+    items: List[Dict[str, Any]] = []
+    anchor_map: Dict[int, int] = {}
+    for spec in template_items:
+        # Cache the earliest anchor so we can build non-overlapping spans.
+        idx = _find_item_anchor_indices(region_lines, int(spec.get("item_number", 0) or 0), spec.get("item_title", ""))
+        if idx is not None:
+            anchor_map[int(spec.get("item_number", 0) or 0)] = idx
+
+    sorted_anchors = sorted(anchor_map.items(), key=lambda kv: kv[1])
+    fallback_span = "\n".join(region_lines).strip()
+
+    for pos, spec in enumerate(template_items):
+        item_number = int(spec.get("item_number", 0) or 0)
+        item_title = spec.get("item_title", "")[:200]
+        start = anchor_map.get(item_number)
+        if start is None:
+            # Evenly distribute a fallback anchor when no heading is present.
+            start = int(len(region_lines) * pos / max(len(template_items), 1))
+        # End at the next anchor or the end of the region to keep spans non-overlapping.
+        later_anchors = [a for _, a in sorted_anchors if a > start]
+        end = later_anchors[0] if later_anchors else len(region_lines)
+        span_lines = region_lines[start:end] if region_lines else []
+        focus_lines = _focus_span_lines(span_lines)
+        span_text = "\n".join(focus_lines).strip()
+        if not span_text:
+            span_text = f"[Fallback] No focused span found for item {item_number} ({item_title}); use section context.\n{fallback_span}"
+        span_key = f"SECTION_{section_label}:{item_number}"
+        item_spans[span_key] = span_text
+        parse_lines = focus_lines or span_text.splitlines()
+        clauses = _parse_clause_blocks(parse_lines, span_text)
+        closing_line = spec.get("closing_line", "") or default_closing_line
+        items.append(
+            {
+                "item_number": item_number,
+                "item_title": item_title,
+                "clauses": clauses,
+                "closing_line": closing_line,
+                "source_span": span_text,
+                "section_label": section_label,
+            }
+        )
+    return items, item_spans
 
 def _build_from_lines(lines: List[str], closing_line: str) -> Dict[str, Any]:
     spans = _locate_sections(lines)
@@ -248,22 +352,41 @@ def _build_from_lines(lines: List[str], closing_line: str) -> Dict[str, Any]:
     else:
         payload["SECTION_I"] = {k: "Not present in contract." for k in SECTION_I_FIELDS}
 
-    for sec in ["II","III","IV","V","VI"]:
-        if sec in spans:
-            s, e = spans[sec]
-            region = lines[s+1:e]
-            section_text[sec] = "\n".join(lines[s:e]).strip()
-            items, spans_map = _items_from_region(region, f"{sec} item", closing_line, sec)
-            item_spans.update(spans_map)
-            payload[f"SECTION_{sec}"] = items
-        else:
-            payload[f"SECTION_{sec}"] = []
+    for sec in ["II", "III", "IV", "V", "VI"]:
+        sec_key = f"SECTION_{sec}"
+        section_default = "\n".join(lines[spans[sec][0]:spans[sec][1]]).strip() if sec in spans else ""
+        section_text[sec] = section_default or f"[Fallback] Section {sec} not detected; using empty span."
+        try:
+            template_closing, template_items = canonical_template_items(sec_key)
+        except KeyError:
+            template_closing = closing_line
+            template_items = CR2A_TEMPLATE_SPEC.get(sec_key, {}).get("items", [])
+        region = lines[spans[sec][0] + 1:spans[sec][1]] if sec in spans else []
+        items, spans_map = _items_from_region(region, sec, template_items, template_closing or closing_line)
+        item_spans.update(spans_map)
+        payload[sec_key] = items
 
     payload["PROVENANCE"] = {"version": "1.0.0", "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")}
     payload["_contract_text"] = "\n".join(lines).strip()
     payload["_section_text"] = section_text
     payload["_item_spans"] = item_spans
     return payload
+
+def _validate_item_spans(payload: Dict[str, Any]) -> None:
+    """
+    Ensure every template item has a focused span or an explicit fallback note.
+    """
+    spans = payload.get("_item_spans", {}) or {}
+    missing: List[str] = []
+    for sec_key, spec in CR2A_TEMPLATE_SPEC.items():
+        sec_label = sec_key.rsplit("_", 1)[-1]
+        for item in spec.get("items", []):
+            key = f"SECTION_{sec_label}:{item.get('item_number', '')}"
+            span_val = str(spans.get(key, "")).strip()
+            if not span_val:
+                missing.append(key)
+    if missing:
+        raise AnalyzerError("ValidationError", f"Missing focused spans for items: {', '.join(missing)}")
 
 def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], ocr: str = "auto") -> Dict[str, Any]:
     input_path = Path(input_path).expanduser().resolve()
@@ -282,7 +405,9 @@ def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], o
 
     if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or mime_type == "application/msword":
         lines = _docx_iter_paragraphs(input_path.read_bytes())
-        return _build_from_lines(lines, closing_line)
+        payload = _build_from_lines(lines, closing_line)
+        _validate_item_spans(payload)
+        return payload
 
     if mime_type == "application/pdf":
         pdf_bytes = input_path.read_bytes()
@@ -292,6 +417,8 @@ def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], o
             for ln in (ptxt or "").splitlines():
                 lines.append(ln.strip())
             lines.append("")
-        return _build_from_lines(lines, closing_line)
+        payload = _build_from_lines(lines, closing_line)
+        _validate_item_spans(payload)
+        return payload
 
-    raise ValueError(f"Unsupported input type: {mime_type}")
+    raise AnalyzerError("ValidationError", f"Unsupported input type: {mime_type}")

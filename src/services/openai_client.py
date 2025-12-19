@@ -85,18 +85,24 @@ def _load_clause_keywords() -> Dict[str, List[str]]:
 def _derive_item_keywords(template_spec: Dict[str, Any], clause_keywords: Dict[str, List[str]]) -> Dict[str, List[str]]:
     # Combine template headings with synonym lists so the LLM searches relevant terms per item.
     derived: Dict[str, List[str]] = {}
+    all_synonyms: List[str] = sorted(
+        {phrase.lower() for phrases in clause_keywords.values() for phrase in phrases}
+    )
     for sec_key, sec in (template_spec or {}).items():
         items = sec.get("items") or []
         sec_label = sec_key.rsplit("_", 1)[-1]
         for item in items:
             title = item.get("item_title", "")
             base_key = f"{sec_label}:{item.get('item_number', '')}"
-            tokens = re.findall(r"[A-Za-z][A-Za-z']+", title)
+            tokens = [tok.lower() for tok in re.findall(r"[A-Za-z][A-Za-z']+", title)]
             matches: List[str] = []
             for heading, phrases in clause_keywords.items():
-                if heading.lower() in title.lower():
-                    matches.extend(phrases)
-            combined = sorted({*(p.lower() for p in matches), *(t.lower() for t in tokens if t)}, key=lambda x: x)
+                heading_tokens = [t.lower() for t in re.findall(r"[A-Za-z][A-Za-z']+", heading)]
+                if heading.lower() in title.lower() or any(tok in heading_tokens for tok in tokens):
+                    matches.extend([p.lower() for p in phrases])
+            # Always return at least one synonym set so LLM searches stay guided.
+            synonyms = matches or all_synonyms
+            combined = sorted({*synonyms, *(t for t in tokens if t)}, key=lambda x: x)
             derived[base_key] = combined
     return derived
 
