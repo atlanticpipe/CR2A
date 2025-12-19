@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Union
+from typing import Any, Dict, Iterable, List, NamedTuple, Union
+
+logger = logging.getLogger(__name__)
 
 # Optional imports
 try:
@@ -134,6 +138,109 @@ def _export_reportlab(data: Dict[str, Any], output_pdf: Path, title: str) -> Pat
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return output_pdf
 
+
+def _resolve_fillable_template(map_path: Path, template_override: Union[str, Path, None]) -> Path:
+    # Resolve the fillable PDF template path, preferring an explicit override then the map hint.
+    map_dir = map_path.parent
+    template_hint = Path(template_override) if template_override else None
+    if template_hint is None:
+        data = json.loads(map_path.read_text(encoding="utf-8"))
+        template_hint = Path(data.get("template_path", ""))
+    if not template_hint:
+        raise FileNotFoundError("No fillable PDF template path provided in pdf_field_map.json or function args")
+    candidate = template_hint if template_hint.is_absolute() else (map_dir / template_hint)
+    if not candidate.exists():
+        raise FileNotFoundError(f"Fillable PDF template not found at {candidate}")
+    return candidate
+
+
+def _build_fillable_fields(data: Dict[str, Any], field_map: Dict[str, Any]) -> Dict[str, str]:
+    # Translate normalized JSON into flat PDF form field/value pairs using the provided mapping.
+    values: Dict[str, str] = {}
+
+    section_i_map = field_map.get("SECTION_I", {})
+    section_i_data = data.get("SECTION_I") or {}
+    for json_key, field_name in section_i_map.items():
+        if field_name:
+            values[field_name] = str(section_i_data.get(json_key, ""))
+
+    def _fill_section(section_key: str) -> None:
+        section_map = field_map.get(section_key) or {}
+        items = data.get(section_key) or []
+        for item_idx, item in enumerate(items, start=1):
+            title_field = section_map.get("item_title")
+            if title_field:
+                values[title_field.format(item_index=item_idx, section=section_key)] = str(item.get("item_title", ""))
+            closing_field = section_map.get("closing_line")
+            if closing_field and item.get("closing_line"):
+                values[closing_field.format(item_index=item_idx, section=section_key)] = str(item.get("closing_line"))
+
+            clause_map = section_map.get("clauses") or {}
+            for clause_idx, clause in enumerate(item.get("clauses") or [], start=1):
+                for label, field_template in clause_map.items():
+                    val = clause.get(label)
+                    if val is None:
+                        # Permit snake_case analyzer keys in case normalization is bypassed.
+                        val = clause.get(label.replace(" ", "_").lower())
+                    if val:
+                        field_name = field_template.format(
+                            section=section_key,
+                            item_index=item_idx,
+                            clause_index=clause_idx,
+                        )
+                        values[field_name] = str(val)
+
+    for sec in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+        _fill_section(sec)
+
+    return values
+
+
+def _export_fillable_pdf(
+    data: Dict[str, Any],
+    output_pdf: Path,
+    *,
+    field_map_path: Union[str, Path, None] = None,
+    template_pdf: Union[str, Path, None] = None,
+) -> Path:
+    # Populate a fillable PDF form using pypdf; falls back to caller for alternate rendering on failure.
+    try:
+        from pypdf import PdfReader, PdfWriter
+        from pypdf.generic import BooleanObject, NameObject
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError("pypdf is required for backend='fillable_pdf'") from exc
+
+    map_path = Path(field_map_path).expanduser().resolve() if field_map_path else Path(__file__).resolve().parents[2] / "templates" / "pdf_field_map.json"
+    if not map_path.exists():
+        raise FileNotFoundError(f"Field map not found: {map_path}")
+
+    try:
+        field_map = json.loads(map_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValueError(f"Invalid pdf_field_map.json: {exc}") from exc
+
+    template_path = _resolve_fillable_template(map_path, template_pdf)
+
+    field_values = _build_fillable_fields(data, field_map.get("fields", {}))
+    if not field_values:
+        raise ValueError("No field mappings resolved; pdf_field_map.json produced an empty payload")
+
+    reader = PdfReader(str(template_path))
+    writer = PdfWriter()
+    writer.clone_document_from_reader(reader)
+
+    for page in writer.pages:
+        writer.update_page_form_field_values(page, field_values)
+
+    # Hint to PDF viewers to render updated appearances so filled values are visible.
+    if "/AcroForm" in writer._root_object:
+        writer._root_object[NameObject("/AcroForm")][NameObject("/NeedAppearances")] = BooleanObject(True)
+
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+    with output_pdf.open("wb") as fh:
+        writer.write(fh)
+    return output_pdf
+
 # DOCX backend
 def _export_docx(data: Dict[str, Any], template_docx: Path, output_pdf: Path, title: str) -> Path:
     from docx import Document
@@ -214,9 +321,61 @@ def export_pdf_from_filled_json(
     Render a CR2A filled JSON into a PDF (or DOCX if conversion is unavailable).
     backend="docx" uses python-docx (+ docx2pdf if available); backend="reportlab" uses ReportLab.
     """
+    return render_report(
+        data,
+        output_pdf,
+        backend=backend,
+        template_docx=template_docx,
+        title=title,
+    ).path
+
+
+class RenderResult(NamedTuple):
+    path: Path
+    backend: str
+    fallback_reason: str | None
+
+
+def render_report(
+    data: Dict[str, Any],
+    output_pdf: Union[str, Path],
+    *,
+    backend: str = "reportlab",
+    template_docx: Union[str, Path, None] = None,
+    template_pdf: Union[str, Path, None] = None,
+    field_map_path: Union[str, Path, None] = None,
+    title: str = "Contract Risk & Compliance Analysis",
+) -> RenderResult:
+    """
+    Render normalized CR2A JSON with a pluggable backend.
+    - backend="reportlab" (default): paginated tables using ReportLab
+    - backend="docx": template-based DOCX converted to PDF when possible
+    - backend="fillable_pdf": populate a fillable PDF form using a mapping file
+    Gracefully falls back to ReportLab if the requested backend is unavailable.
+    """
     output_pdf = Path(output_pdf).expanduser().resolve()
-    backend = (backend or "reportlab").lower()
-    if backend == "docx":
+    backend_lc = (backend or "reportlab").lower()
+
+    if backend_lc == "docx":
         tpl = Path(template_docx) if template_docx else Path("")
-        return _export_docx(data, tpl, output_pdf, title)
-    return _export_reportlab(data, output_pdf, title)
+        return RenderResult(_export_docx(data, tpl, output_pdf, title), "docx", None)
+
+    if backend_lc == "fillable_pdf":
+        try:
+            return RenderResult(
+                _export_fillable_pdf(data, output_pdf, field_map_path=field_map_path, template_pdf=template_pdf),
+                "fillable_pdf",
+                None,
+            )
+        except Exception as exc:
+            logger.warning(
+                "fillable_pdf backend unavailable (%s); falling back to reportlab for %s",
+                exc,
+                output_pdf,
+            )
+            return RenderResult(_export_reportlab(data, output_pdf, title), "reportlab", str(exc))
+
+    # Default path is ReportLab to minimize external dependencies.
+    if backend_lc != "reportlab":
+        raise ValueError(f"Unsupported backend: {backend}")
+    return RenderResult(_export_reportlab(data, output_pdf, title), "reportlab", None)
