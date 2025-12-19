@@ -184,7 +184,7 @@ def _build_section_i(lines: List[str]) -> Dict[str, str]:
                 res[key] = val or "Not present in contract."
     return res
 
-def _parse_clause_blocks(region_lines: List[str]) -> List[Dict[str, Any]]:
+def _parse_clause_blocks(region_lines: List[str], span_text: str) -> List[Dict[str, Any]]:
     labels = {
         "clause_language": [r"^Clause Language:\s*(.*)$"],
         "clause_summary": [r"^Clause Summary:\s*(.*)$"],
@@ -204,6 +204,7 @@ def _parse_clause_blocks(region_lines: List[str]) -> List[Dict[str, Any]]:
                         collected[key].append(val)
                     break
     if not any(collected[k] for k in collected):
+        # Fall back to heuristic span capture when no structured labels are found.
         return [{
             "clause_language": " ".join(region_lines[:6])[:2000],
             "clause_summary": "",
@@ -211,7 +212,7 @@ def _parse_clause_blocks(region_lines: List[str]) -> List[Dict[str, Any]]:
             "flow_down_obligations": "",
             "redline_recommendations": "",
             "harmful_language_conflicts": "",
-            "provenance": {"source": "document", "method": "heuristic"}
+            "provenance": {"source": "document", "method": "heuristic", "span": span_text[:2000]}
         }]
     return [{
         "clause_language": (collected["clause_language"][0] if collected["clause_language"] else ""),
@@ -220,21 +221,28 @@ def _parse_clause_blocks(region_lines: List[str]) -> List[Dict[str, Any]]:
         "flow_down_obligations": (collected["flow_down_obligations"][0] if collected["flow_down_obligations"] else ""),
         "redline_recommendations": (collected["redline_recommendations"][0] if collected["redline_recommendations"] else ""),
         "harmful_language_conflicts": (collected["harmful_language_conflicts"][0] if collected["harmful_language_conflicts"] else ""),
-        "provenance": {"source": "document", "method": "labels"}
+        "provenance": {"source": "document", "method": "labels", "span": span_text[:2000]}
     }]
 
-def _items_from_region(region_lines: List[str], title_fallback: str, closing_line: str) -> List[Dict[str, Any]]:
+def _items_from_region(region_lines: List[str], title_fallback: str, closing_line: str, section_label: str) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    # Capture raw text span for downstream LLM targeting and search diagnostics.
+    span_text = "\n".join(region_lines).strip()
     title = next((ln for ln in region_lines if ln.strip()), title_fallback)[:200]
-    return [{
+    item = {
         "item_number": 1,
         "item_title": title,
-        "clauses": _parse_clause_blocks(region_lines),
-        "closing_line": closing_line
-    }]
+        "clauses": _parse_clause_blocks(region_lines, span_text),
+        "closing_line": closing_line,
+        "source_span": span_text,
+        "section_label": section_label,
+    }
+    return [item], {f"SECTION_{section_label}:1": span_text}
 
 def _build_from_lines(lines: List[str], closing_line: str) -> Dict[str, Any]:
     spans = _locate_sections(lines)
     payload: Dict[str, Any] = {}
+    section_text: Dict[str, str] = {}
+    item_spans: Dict[str, str] = {}
     if "I" in spans:
         s, e = spans["I"]; payload["SECTION_I"] = _build_section_i(lines[s:e])
     else:
@@ -244,11 +252,17 @@ def _build_from_lines(lines: List[str], closing_line: str) -> Dict[str, Any]:
         if sec in spans:
             s, e = spans[sec]
             region = lines[s+1:e]
-            payload[f"SECTION_{sec}"] = _items_from_region(region, f"{sec} item", closing_line)
+            section_text[sec] = "\n".join(lines[s:e]).strip()
+            items, spans_map = _items_from_region(region, f"{sec} item", closing_line, sec)
+            item_spans.update(spans_map)
+            payload[f"SECTION_{sec}"] = items
         else:
             payload[f"SECTION_{sec}"] = []
 
     payload["PROVENANCE"] = {"version": "1.0.0", "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")}
+    payload["_contract_text"] = "\n".join(lines).strip()
+    payload["_section_text"] = section_text
+    payload["_item_spans"] = item_spans
     return payload
 
 def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], ocr: str = "auto") -> Dict[str, Any]:
