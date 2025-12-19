@@ -1,7 +1,10 @@
 from __future__ import annotations
 import json
 import os
+import re
+import logging
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import httpx
 from src.core.config import get_secret_env_or_aws
@@ -10,12 +13,6 @@ from src.schemas.template_spec import (
     build_template_scaffold,
     canonical_template_items,
 )
-from typing import Any, Dict, List, Optional
-import httpx
-from src.core.config import get_secret_env_or_aws
-from src.schemas.template_spec import CR2A_TEMPLATE_SPEC
-from pathlib import Path
-import re
 
 class OpenAIClientError(RuntimeError):
     """Typed error that carries an error category for HTTP mapping."""
@@ -25,7 +22,7 @@ class OpenAIClientError(RuntimeError):
         self.category = category
 
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
-OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5-thinking")
+OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5")
 
 def _get_api_key() -> Optional[str]:
     # Resolve key from env or AWS Secrets Manager; keep secrets out of logs.
@@ -139,8 +136,16 @@ def _validate_search_rationale(refined: Dict[str, Any]) -> None:
 def _call_openai(body: Dict[str, Any], headers: Dict[str, str], timeout: float) -> Dict[str, Any]:
     # Execute the OpenAI request with consistent error handling.
     with httpx.Client(timeout=timeout) as client:
-        resp = client.post(f"{OPENAI_BASE}/v1/responses", headers=headers, json=body)
-        resp.raise_for_status()
+        try:
+            resp = client.post(f"{OPENAI_BASE}/v1/responses", headers=headers, json=body)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            # Surface actionable error details when the API rejects the request.
+            detail = exc.response.text
+            raise OpenAIClientError(
+                "ProcessingError",
+                f"OpenAI request failed ({exc.response.status_code}): {detail}",
+            ) from exc
         data = resp.json()
     content = _extract_text(data)
     return _parse_json_payload(content)
@@ -250,6 +255,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     model = os.getenv("OPENAI_MODEL", OPENAI_MODEL_DEFAULT)
     timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+    temperature = float(os.getenv("OPENAI_TEMPERATURE", "0"))
 
     clause_keywords = _load_clause_keywords()
     derived_keywords = _derive_item_keywords(CR2A_TEMPLATE_SPEC, clause_keywords)
@@ -309,19 +315,18 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     if org_id:
         headers["OpenAI-Organization"] = org_id
     base_body = {
-        "model": "gpt-5",
-        "input": user_text,  # NOT "messages"
-        "instructions": system_text,  # NOT in messages array
-        "text": {
-            "format": {"type": "json_schema"}
-        }
+        # Responses API payload requesting strict JSON output.
+        "model": model,
+        "input": user_text,
+        "instructions": system_text,
+        "temperature": temperature,
+        "response_format": {"type": "json_object"},
     }
 
     try:
         # Call the Responses API with a strict JSON-only contract to keep structure intact.
         refined = _call_openai(base_body, headers, timeout)
 
-        import logging
         logging.info(f"OpenAI response type: {type(refined)}")
         logging.info(f"OpenAI response keys: {refined.keys() if isinstance(refined, dict) else 'Not a dict'}")
 
@@ -355,17 +360,13 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
                         )
         if low_conf_spans:
             retry_body = json.loads(json.dumps(base_body))
-            retry_body["messages"].append(
-                {
-                    "role": "system",
-                    "content": (
-                        "One or more clauses were low-confidence placeholders. "
-                        "Re-run ONLY for the provided focus_span targets: "
-                        f"{json.dumps(low_conf_spans, ensure_ascii=False)}. "
-                        "Use the exact focus_span text first; fill clause fields with specific language where possible. "
-                        "Maintain search_rationale describing the phrases searched inside focus_span."
-                    ),
-                }
+            retry_body["input"] = (
+                f"{user_text}\n\n"
+                "One or more clauses were low-confidence placeholders. "
+                "Re-run ONLY for the provided focus_span targets: "
+                f"{json.dumps(low_conf_spans, ensure_ascii=False)}. "
+                "Use the exact focus_span text first; fill clause fields with specific language where possible. "
+                "Maintain search_rationale describing the phrases searched inside focus_span."
             )
             refined = _call_openai(retry_body, headers, timeout)
             for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
