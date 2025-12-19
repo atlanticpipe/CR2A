@@ -43,8 +43,7 @@
         "Risk Triggers Identified",
         "Flow-Down Obligations",
         "Redline Recommendations",
-        "Harmful Language / Policy Conflicts",
-        "provenance"
+        "Harmful Language / Policy Conflicts"
       ],
       "properties": {
         "Clause Language": { "type": "string" },
