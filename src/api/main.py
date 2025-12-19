@@ -228,7 +228,7 @@ def _run_analysis(payload: AnalysisRequestPayload):
                     # Trace OpenAI failures with category/status so status mapping is visible in logs.
                     logger.exception(
                         "LLM refinement failed",
-                        extra={"contract_id": payload.contract_id, "category": exc.category, "message": str(exc)},
+                        extra={"contract_id": payload.contract_id, "category": exc.category, "error_message": str(exc)},
                     )
                     status_map = {
                         "ValidationError": 400,
@@ -245,7 +245,7 @@ def _run_analysis(payload: AnalysisRequestPayload):
                     # Wrap unexpected errors so callers always receive a typed HTTP envelope.
                     logger.exception(
                         "Unexpected LLM refinement failure",
-                        extra={"contract_id": payload.contract_id, "category": "ProcessingError", "message": str(exc)},
+                        extra={"contract_id": payload.contract_id, "category": "ProcessingError", "error_message": str(exc)},
                     )
                     raise _http_error(500, "ProcessingError", f"LLM refinement failed: {exc}") from exc
 
