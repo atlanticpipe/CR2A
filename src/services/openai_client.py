@@ -35,8 +35,11 @@ def _extract_text(data: Dict[str, Any]) -> str:
         output = data.get("output") or []
         for block in output:
             for item in block.get("content", []):
-                if item.get("type") == "output_text" and item.get("text"):
-                    return str(item["text"])
+                item_type = item.get("type")
+                text_value = item.get("text")
+                # Accept both legacy output_text and new text content markers.
+                if item_type in {"output_text", "text"} and text_value:
+                    return str(text_value)
         choices = data.get("choices") or []
         if choices:
             msg = choices[0].get("message", {})
@@ -315,12 +318,12 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     if org_id:
         headers["OpenAI-Organization"] = org_id
     base_body = {
-        # Responses API payload requesting strict JSON output.
+        # Responses API payload requesting strict JSON output via the new text.format field.
         "model": model,
         "input": user_text,
         "instructions": system_text,
         "temperature": temperature,
-        "response_format": {"type": "json_object"},
+        "text": {"format": "json_object"},
     }
 
     try:
