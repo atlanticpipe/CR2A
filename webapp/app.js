@@ -150,14 +150,14 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const resolveDownloadUrl = (payload) => {
-    // Prefer explicit download_url; fall back to run_id-based route when available.
-    if (!payload) return "";
-    if (payload.download_url) return payload.download_url;
-    if (payload.downloadUrl) return payload.downloadUrl;
-    if (payload.run_id && API_BASE_URL) {
-      return `${requireApiBase()}/runs/${payload.run_id}/report`;
-    }
-    return "";
+    // Only enable downloads when an explicit artifact URL exists and no errors were reported.
+    if (!payload || payload.error) return "";
+    const explicitUrl =
+      payload.filled_template_url ||
+      payload.filledTemplateUrl ||
+      payload.download_url ||
+      payload.downloadUrl;
+    return explicitUrl || "";
   };
 
   const setDownloadLink = (payload) => {
@@ -195,6 +195,14 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!uploadMessage) return;
     uploadMessage.textContent = msg || "";
     uploadMessage.style.color = isError ? "var(--danger)" : "var(--muted)";
+  };
+
+  const setRunState = (running) => {
+    // Disable the LLM toggle while a submission is active to prevent race conditions.
+    if (llmToggle) {
+      llmToggle.disabled = running;
+      llmToggle.setAttribute("aria-disabled", running ? "true" : "false");
+    }
   };
 
   const resetUploadUi = () => {
@@ -265,15 +273,43 @@ document.addEventListener("DOMContentLoaded", () => {
       const payload = {
         key,
         contract_id: contractId || "", // backend expects a string; enforce empty string fallback.
-        llm_enabled: Boolean(llmEnabled),
+        llm_enabled: llmEnabled ?? true, // Always send explicit LLM flag; default to true.
       };
       const resp = await fetch(`${apiBase}/analyze`, {
         method: "POST",
         headers: { ...requireAuthHeader(), "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Parse backend error envelope so users see actionable guidance.
+        let apiMessage = `HTTP ${resp.status}`;
+        try {
+          const errorBody = await resp.json();
+          const detail = errorBody?.detail || errorBody;
+          const category = detail?.category || detail?.error_type || "Error";
+          const message = detail?.message || detail?.detail || detail?.error || apiMessage;
+          apiMessage = `${category}: ${message} — fix the issue then retry.`;
+        } catch {
+          apiMessage = `HTTP ${resp.status} — retry after fixing inputs.`;
+        }
+        throw new Error(apiMessage);
+      }
       const data = await resp.json();
+      if (data?.error) {
+        const category = data.error.category || "Error";
+        const message = data.error.message || "Request failed";
+        const exportMessage = `${category}: ${message} — fix inputs and retry.`;
+        setOutputs({
+          validation: category,
+          exportStatusText: exportMessage,
+          payload: data,
+        });
+        renderTimeline([
+          { title: "Queued", meta: "Submitted.", active: true },
+          { title: "Error", meta: exportMessage, active: true },
+        ]);
+        return data;
+      }
       setOutputs({
         validation: "See response",
         exportStatusText: data.status || "See response",
@@ -283,17 +319,10 @@ document.addEventListener("DOMContentLoaded", () => {
         { title: "Queued", meta: "Submitted.", active: true },
         { title: "Processing", meta: "Backend returned response.", active: true },
       ]);
-      // Make the report download link clickable as soon as the backend provides a URL.
-      if (downloadReportBtn && data.download_url) {
-        downloadReportBtn.href = data.download_url;
-        downloadReportBtn.removeAttribute("disabled");
-        downloadReportBtn.style.pointerEvents = "auto";
-        downloadReportBtn.style.opacity = "1";
-      }
     } catch (err) {
       setOutputs({
         validation: "Failed",
-        exportStatusText: "Failed",
+        exportStatusText: `${String(err)} — retry after resolving the issue.`,
         payload: { error: String(err) },
       });
       renderTimeline([
@@ -331,7 +360,7 @@ document.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
     const file = fileInput?.files?.[0] || null;
     const contractId = contractIdInput?.value?.trim() || "";
-    const llmEnabled = !!llmToggle?.checked;
+    const llmEnabled = llmToggle ? !!llmToggle.checked : true; // Default to true when toggle is absent.
     const mb = file ? file.size / 1024 / 1024 : 0;
 
     if (!contractId) {
@@ -350,6 +379,9 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    setRunState(true);
+    setDownloadLink(null); // Keep downloads disabled until the backend returns a valid artifact.
+
     const doSubmit = async () => {
       try {
         if (file) {
@@ -362,13 +394,15 @@ document.addEventListener("DOMContentLoaded", () => {
         setUploadMessage(String(err), true);
         setOutputs({
           validation: "Failed",
-          exportStatusText: "Failed",
+          exportStatusText: `${String(err)} — retry after resolving the issue.`,
           payload: { error: String(err) },
         });
         renderTimeline([
           { title: "Queued", meta: "Submission sent.", active: true },
           { title: "Error", meta: String(err), active: true },
         ]);
+      } finally {
+        setRunState(false);
       }
     };
 
