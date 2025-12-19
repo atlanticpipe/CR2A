@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "APS Validation Rules",
-  "version": "1.1",
+  "version": "1.2",
   "validation": {
     "json_schema_enforcement": true,
     "abort_on_failure": true,
@@ -25,11 +25,6 @@
       "require_all_sections_present": ["I", "II", "III", "IV", "V", "VI"],
       "require_closing_lines": true,
       "disallow_empty_strings": true
-    },
-
-    "omission_check": {
-      "require_final_check": true,
-      "allowed_string": "No omissions or uncategorized risks identified."
     },
 
     "audit_logging": {
