@@ -22,7 +22,7 @@ class OpenAIClientError(RuntimeError):
         self.category = category
 
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
-OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5")
+OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5.2")
 
 def _get_api_key() -> Optional[str]:
     # Resolve key from env or AWS Secrets Manager; keep secrets out of logs.
@@ -34,19 +34,23 @@ def _extract_text(data: Dict[str, Any]) -> str:
     if isinstance(data, dict):
         output = data.get("output") or []
         for block in output:
-            for item in block.get("content", []):
-                item_type = item.get("type")
-                text_value = item.get("text")
-                # Accept both legacy output_text and new text content markers.
-                if item_type in {"output_text", "text"} and text_value:
-                    return str(text_value)
+            if isinstance(block, dict):
+                content = block.get("content") or []
+                for item in content:
+                    if isinstance(item, dict):
+                        item_type = item.get("type")
+                        text_value = item.get("text")
+                        # Accept both legacy output_text and new text content markers.
+                        if item_type in {"output_text", "text"} and text_value:
+                            return str(text_value)
+        # Fallback for unexpected response structures
         choices = data.get("choices") or []
         if choices:
             msg = choices[0].get("message", {})
             content = msg.get("content")
             if isinstance(content, str):
                 return content
-    raise RuntimeError("OpenAI response missing text content")
+    raise RuntimeError(f"OpenAI response missing text content. Received: {json.dumps(data, default=str)[:200]}")
 
 def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
     try:
@@ -67,7 +71,8 @@ def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
                 # Try to fix common JSON issues
                 cleaned = raw_text[start : end + 1]
                 # Remove trailing commas before closing braces/brackets
-                cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+                cleaned = re.sub(r',(
+\s*[}\]])', r'\1', cleaned)
                 return json.loads(cleaned)
         raise OpenAIClientError("ProcessingError", f"Cannot parse OpenAI JSON response: {e.msg}")
 
@@ -137,19 +142,27 @@ def _validate_search_rationale(refined: Dict[str, Any]) -> None:
                     )
 
 def _call_openai(body: Dict[str, Any], headers: Dict[str, str], timeout: float) -> Dict[str, Any]:
-    # Execute the OpenAI request with consistent error handling.
+    # Execute the OpenAI Responses API request with consistent error handling.
     with httpx.Client(timeout=timeout) as client:
         try:
+            # Use the Responses API endpoint (not chat/completions)
             resp = client.post(f"{OPENAI_BASE}/v1/responses", headers=headers, json=body)
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
             # Surface actionable error details when the API rejects the request.
             detail = exc.response.text
+            status_code = exc.response.status_code
             raise OpenAIClientError(
                 "ProcessingError",
-                f"OpenAI request failed ({exc.response.status_code}): {detail}",
+                f"OpenAI Responses API request failed ({status_code}): {detail}",
             ) from exc
+        except httpx.TimeoutException as exc:
+            raise OpenAIClientError("TimeoutError", f"OpenAI request timed out after {timeout}s: {exc}") from exc
+        except httpx.RequestError as exc:
+            raise OpenAIClientError("NetworkError", f"OpenAI request network error: {exc}") from exc
+        
         data = resp.json()
+    
     content = _extract_text(data)
     return _parse_json_payload(content)
 
@@ -248,7 +261,8 @@ def _canonicalize_llm_sections(refined: Dict[str, Any], default_text: str) -> Di
 
 def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Best-effort JSON refinement with OpenAI. If no key is present, raises.
+    Best-effort JSON refinement with OpenAI GPT-5.2 using the Responses API.
+    If no API key is present, raises.
     Keeps token usage low by prompting for structured JSON only.
     """
     api_key = _get_api_key()
@@ -257,8 +271,9 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise OpenAIClientError("ValidationError", "Set OPENAI_API_KEY or OPENAI_SECRET_ARN to enable LLM refinement.")
 
     model = os.getenv("OPENAI_MODEL", OPENAI_MODEL_DEFAULT)
-    timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+    timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "120"))  # Increased from 60 for better reliability
     temperature = float(os.getenv("OPENAI_TEMPERATURE", "0"))
+    max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "16000"))  # Increased for complex output
 
     clause_keywords = _load_clause_keywords()
     derived_keywords = _derive_item_keywords(CR2A_TEMPLATE_SPEC, clause_keywords)
@@ -313,21 +328,42 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         f"{json.dumps(payload_for_llm, ensure_ascii=False)}"
     )
 
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
     org_id = os.getenv("OPENAI_ORG_ID")
     if org_id:
         headers["OpenAI-Organization"] = org_id
+    
+    # GPT-5.2 Responses API format
     base_body = {
-        # Responses API payload requesting strict JSON output via the new text.format field.
         "model": model,
         "input": user_text,
         "instructions": system_text,
         "temperature": temperature,
-        "text": {"format": {"type": "json_object"}},  # text.format must be a structured object.
+        "max_tokens": max_tokens,
+        "text": {
+            "format": {
+                "type": "json_object",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "SECTION_I": {"type": "object"},
+                        "SECTION_II": {"type": "array"},
+                        "SECTION_III": {"type": "array"},
+                        "SECTION_IV": {"type": "array"},
+                        "SECTION_V": {"type": "array"},
+                        "SECTION_VI": {"type": "array"},
+                    },
+                    "required": ["SECTION_I", "SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"],
+                },
+            }
+        },
     }
 
     try:
-        # Call the Responses API with a strict JSON-only contract to keep structure intact.
+        # Call the Responses API with structured JSON contract to keep structure intact.
         refined = _call_openai(base_body, headers, timeout)
 
         logging.info(f"OpenAI response type: {type(refined)}")
@@ -389,12 +425,6 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
                 refined[meta_key] = payload[meta_key]
 
         return refined
-    except httpx.TimeoutException as exc:
-        # Bubble up a concise timeout message so the caller can retry or bypass refinement.
-        raise OpenAIClientError("TimeoutError", f"OpenAI request timed out: {exc}")
-    except httpx.RequestError as exc:
-        # Network failures should not be silent; expose enough detail without leaking secrets.
-        raise OpenAIClientError("NetworkError", f"OpenAI request failed: {exc}")
     except OpenAIClientError:
         # Propagate typed errors unchanged for upstream mapping.
         raise
