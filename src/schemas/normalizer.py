@@ -69,9 +69,10 @@ def normalize_to_schema(
     This function:
     1. Normalizes SECTION_I header fields with fallback values
     2. Converts sections II-VI items to standardized format
-    3. Preserves SECTION_VII as-is
-    4. Creates SECTION_VIII structure
-    5. Adds document metadata
+    3. Adds document metadata
+    
+    Note: Sections VII (Supplemental Risks) and VIII (Final Summary) have been removed from the schema.
+    
     Args:
         raw: Raw analysis output from analyzer
         closing_line: Standard closing line for sections II-VI
@@ -79,7 +80,6 @@ def normalize_to_schema(
     Returns:
         Normalized output conforming to output_schemas.json
     """
-    # Section I: Header information
     section_i_keys = [
         "PROJECT TITLE:",
         "SOLICITATION NO.:",
@@ -95,37 +95,21 @@ def normalize_to_schema(
     section_i: Dict[str, str] = {}
     
     for key in section_i_keys:
-        # Case-insensitive lookup with sane fallback text so schema requirements are satisfied
         match = next(
             (source_i[k] for k in source_i if k.rstrip(":").lower() == key.rstrip(":").lower()),
             ""
         )
         section_i[key] = match or "Not present in contract."
 
-    # Build normalized structure
     normalized = {"SECTION_I": section_i}
     
-    # Sections II-VI: Items with clauses
     for sec in ["II", "III", "IV", "V", "VI"]:
         normalized[f"SECTION_{sec}"] = convert_items(
             raw.get(f"SECTION_{sec}") or [],
             sec,
             closing_line
         )
-
-    # Section VII: Summary points (preserved as-is)
-    normalized["SECTION_VII"] = raw.get("SECTION_VII", [])
     
-    # Section VIII: Risk matrix
-    normalized["SECTION_VIII"] = {
-        "rows": [],
-        "general_risk_level": section_i.get("GENERAL RISK LEVEL:", "Not present in contract."),
-    }
-    
-    # Omission check
-    normalized["OMISSION_CHECK"] = "No omissions or uncategorized risks identified."
-    
-    # Document metadata
     normalized["doc_meta"] = {
         "policy_version": policy_version or "schemas@v1.0",
         "created_at": datetime.now(timezone.utc).isoformat(),
