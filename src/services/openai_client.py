@@ -109,7 +109,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         "- You may add more than one ClauseBlock for an item if the contract "
         "has multiple distinct clauses affecting that risk area.\n"
         "- Only return the final CR2A JSON object. No explanations.\n\n"
-        f"{json.dumps(llm_input, ensure_ascii=False)}"
+        f"{json.dumps(payload_for_llm, ensure_ascii=False)}"
     )
 
     url = f"{OPENAI_BASE}/v1/chat/completions"
