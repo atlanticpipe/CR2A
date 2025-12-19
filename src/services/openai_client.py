@@ -52,13 +52,24 @@ def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
     try:
         # Fast path when the model returned clean JSON.
         return json.loads(raw_text)
-    except Exception:
-        # Best-effort salvage: slice the outermost object to avoid total failure.
+    except json.JSONDecodeError as e:
+        # Log the actual error for debugging
+        print(f"JSON parsing failed at line {e.lineno}, column {e.colno}: {e.msg}")
+        print(f"Problematic text near error: {raw_text[max(0, e.pos-100):e.pos+100]}")
+        
+        # Best-effort salvage: slice the outermost object
         start = raw_text.find("{")
         end = raw_text.rfind("}")
         if start != -1 and end > start:
-            return json.loads(raw_text[start : end + 1])
-        raise
+            try:
+                return json.loads(raw_text[start : end + 1])
+            except json.JSONDecodeError:
+                # Try to fix common JSON issues
+                cleaned = raw_text[start : end + 1]
+                # Remove trailing commas before closing braces/brackets
+                cleaned = re.sub(r',(\s*[}\]])', r'\1', cleaned)
+                return json.loads(cleaned)
+        raise OpenAIClientError("ProcessingError", f"Cannot parse OpenAI JSON response: {e.msg}")
 
 def _load_clause_keywords() -> Dict[str, List[str]]:
     # Load clause classification synonyms to guide section-level search prompts.
@@ -305,12 +316,16 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0,
-        "max_tokens": 2000,
+        "max_tokens": 250000,
     }
 
     try:
         # Call the Responses API with a strict JSON-only contract to keep structure intact.
         refined = _call_openai(base_body, headers, timeout)
+
+        import logging
+        logging.info(f"OpenAI response type: {type(refined)}")
+        logging.info(f"OpenAI response keys: {refined.keys() if isinstance(refined, dict) else 'Not a dict'}")
 
         default_prov = {"source": "LLM", "page": 0, "span": ""}
 
