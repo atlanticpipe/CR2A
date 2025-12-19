@@ -323,7 +323,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
         "input": user_text,
         "instructions": system_text,
         "temperature": temperature,
-        "text": {"format": "json_object"},
+        "text": {"format": {"type": "json_object"}},  # text.format must be a structured object.
     }
 
     try:
