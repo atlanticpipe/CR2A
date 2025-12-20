@@ -21,16 +21,8 @@
           <p class="app-name">CR2A</p>
         </div>
       </div>
-      <nav class="header-nav">
-        <ul>
-          <li><a href="#" class="active">Analyzer</a></li>
-          <li><a href="#">Documentation</a></li>
-          <li><a href="#">Support</a></li>
-        </ul>
-      </nav>
       <div class="header-actions">
         <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">🌙 Dark</button>
-        <button class="btn ghost" id="user-menu">Account</button>
       </div>
     </div>
   </header>
@@ -38,9 +30,7 @@
   <!-- ===== BREADCRUMB ===== -->
   <div class="breadcrumb-container">
     <div class="breadcrumb">
-      <span class="breadcrumb-item">Dashboard</span>
-      <span class="breadcrumb-separator">›</span>
-      <span class="breadcrumb-item active">Contract Analyzer</span>
+      <span class="breadcrumb-item">Analyzer</span>
     </div>
   </div>
 
@@ -55,10 +45,6 @@
           <p class="lede">
             Upload a contract and analyze potential risks and compliance issues. Streamlined intake for FDOT and internal contracts with executive-ready outputs.
           </p>
-          <div class="cta-group">
-            <button id="doc-link" class="btn ghost">View policy bundle</button>
-            <button class="btn ghost">Learn more</button>
-          </div>
         </div>
       </div>
 
@@ -88,24 +74,6 @@
             />
             <p class="field-help" id="contract-id-help">A unique identifier for tracking</p>
             <p class="field-error">Please enter a valid contract ID</p>
-          </div>
-
-          <!-- AI Refinement Field -->
-          <div class="field">
-            <label>
-              <span>
-                Enable AI Refinement
-                <div class="tooltip-container">
-                  <span style="color: var(--accent); cursor: help; font-weight: 600;">?</span>
-                  <span class="tooltip-text">Uses advanced LLM models for deeper analysis, risk scoring, and detailed insights. Improves accuracy and provides executive-ready summaries.</span>
-                </div>
-              </span>
-            </label>
-            <div class="switch">
-              <input type="checkbox" name="llm_enabled" id="llm_toggle" checked />
-              <label for="llm_toggle"></label>
-            </div>
-            <p class="field-help">Recommended for comprehensive analysis</p>
           </div>
 
           <!-- Contract File Field -->
@@ -227,7 +195,7 @@
 
     <!-- ===== FOOTER ===== -->
     <footer class="footer">
-      <p>&copy; 2024 Atlantic Pipe Services. CR2A Contract Analysis Platform. <a href="#">Privacy</a> · <a href="#">Support</a> · <a href="#">Documentation</a></p>
+      <p>&copy; 2024 Atlantic Pipe Services. CR2A Contract Analysis Platform.</p>
     </footer>
   </div>
 
