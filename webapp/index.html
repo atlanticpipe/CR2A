@@ -29,6 +29,7 @@
         </ul>
       </nav>
       <div class="header-actions">
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">🌙 Dark</button>
         <button class="btn ghost" id="user-menu">Account</button>
       </div>
     </div>
@@ -70,33 +71,62 @@
           </div>
           <span class="pill">Ready to begin</span>
         </div>
-        <form id="submission-form">
-          <label class="field">
-            <span>Contract ID</span>
-            <input type="text" name="contract_id" placeholder="e.g., FDOT-Bridge-2024-18" required />
-          </label>
+        <form id="submission-form" novalidate>
+          <!-- Contract ID Field -->
+          <div class="field">
+            <label for="contract-id">
+              Contract ID
+              <span class="required" aria-label="required">*</span>
+            </label>
+            <input 
+              type="text" 
+              id="contract-id"
+              name="contract_id" 
+              placeholder="e.g., FDOT-Bridge-2024-18" 
+              required
+              aria-describedby="contract-id-help"
+            />
+            <p class="field-help" id="contract-id-help">A unique identifier for tracking</p>
+            <p class="field-error">Please enter a valid contract ID</p>
+          </div>
 
-          <label class="field">
-            <span>Enable AI Refinement</span>
+          <!-- AI Refinement Field -->
+          <div class="field">
+            <label>
+              <span>
+                Enable AI Refinement
+                <div class="tooltip-container">
+                  <span style="color: var(--accent); cursor: help; font-weight: 600;">?</span>
+                  <span class="tooltip-text">Uses advanced LLM models for deeper analysis, risk scoring, and detailed insights. Improves accuracy and provides executive-ready summaries.</span>
+                </div>
+              </span>
+            </label>
             <div class="switch">
               <input type="checkbox" name="llm_enabled" id="llm_toggle" checked />
               <label for="llm_toggle"></label>
             </div>
-            <p class="helper">Uses LLM for deeper analysis and insights</p>
-          </label>
+            <p class="field-help">Recommended for comprehensive analysis</p>
+          </div>
 
-          <label class="field">
-            <span>Contract File</span>
-            <label class="dropzone" id="dropzone">
-              <input type="file" id="file-input" accept=".pdf,.doc,.docx,.txt" />
+          <!-- Contract File Field -->
+          <div class="field">
+            <label for="file-input">
+              Contract File
+              <span class="required" aria-label="required">*</span>
+            </label>
+            <label class="dropzone" id="dropzone" aria-describedby="file-help">
+              <input type="file" id="file-input" name="contract_file" accept=".pdf,.doc,.docx,.txt" required />
               <div>
                 <p class="drop-title">📄 Drop contract or click to browse</p>
-                <p class="drop-sub">PDF / DOCX up to 500 MB</p>
+                <p class="drop-sub">PDF, DOCX, or TXT files up to 500 MB</p>
                 <div id="file-name" class="file-name">No file selected</div>
               </div>
             </label>
-          </label>
+            <p class="field-help" id="file-help">Supported formats: PDF, DOCX, TXT. File will be analyzed and stored securely.</p>
+            <p class="field-error">Please select a valid contract file</p>
+          </div>
 
+          <!-- Upload Progress -->
           <div class="upload-status">
             <div class="progress" id="upload-progress" hidden>
               <div class="progress-bar" id="upload-progress-bar"></div>
@@ -105,7 +135,8 @@
             <p id="upload-message" class="meta"></p>
           </div>
 
-          <button type="submit" class="btn primary full">Analyze Contract</button>
+          <!-- Submit Button -->
+          <button type="submit" class="btn primary full" id="submit-btn">Analyze Contract</button>
         </form>
       </div>
     </section>
@@ -144,19 +175,21 @@
           </div>
           <div class="output">
             <div class="output-row">
-              <span class="output-label">Validation Status</span>
-              <span class="output-value" id="validation-status">Pending</span>
+              <span class="output-label">Analysis Status</span>
+              <span class="output-value" id="validation-status">
+                <span>Pending</span>
+              </span>
             </div>
             <div class="output-row">
               <span class="output-label">Risk Level</span>
               <span class="output-value" id="risk-level">—</span>
             </div>
             <div class="output-row">
-              <span class="output-label">Findings</span>
+              <span class="output-label">Findings Found</span>
               <span class="output-value" id="findings-count">0</span>
             </div>
             <div class="output-row">
-              <span class="output-label">Export Status</span>
+              <span class="output-label">Report Status</span>
               <span class="output-value" id="export-status">Pending</span>
             </div>
             <div class="output-row output-action">
@@ -175,7 +208,7 @@
               <li>Risk identification and scoring</li>
               <li>Compliance validation</li>
               <li>Executive summaries</li>
-              <li>PDF export ready</li>
+              <li>Secure PDF export</li>
             </ul>
           </div>
           <div class="insight">
@@ -194,12 +227,75 @@
 
     <!-- ===== FOOTER ===== -->
     <footer class="footer">
-      <p>&copy; 2024 Atlantic Pipe Services. CR2A Contract Analysis Platform. <a href="#">Privacy</a> · <a href="#">Support</a></p>
+      <p>&copy; 2024 Atlantic Pipe Services. CR2A Contract Analysis Platform. <a href="#">Privacy</a> · <a href="#">Support</a> · <a href="#">Documentation</a></p>
     </footer>
   </div>
+
+  <!-- ===== NOTIFICATION CONTAINER ===== -->
+  <div id="notifications"></div>
 
   <!-- ===== SCRIPTS ===== -->
   <script src="./env.js"></script>
   <script type="module" src="./app.js"></script>
+  
+  <!-- ===== DARK MODE & UTILITY SCRIPT ===== -->
+  <script>
+    // Dark Mode Toggle
+    const themeToggle = document.getElementById('theme-toggle');
+    const htmlElement = document.documentElement;
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    
+    // Initialize theme from localStorage or system preference
+    const savedTheme = localStorage.getItem('theme') || (prefersDark ? 'dark' : 'light');
+    if (savedTheme === 'dark') {
+      htmlElement.setAttribute('data-theme', 'dark');
+      themeToggle.textContent = '☀️ Light';
+    }
+    
+    themeToggle.addEventListener('click', () => {
+      const currentTheme = htmlElement.getAttribute('data-theme');
+      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      htmlElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      themeToggle.textContent = newTheme === 'dark' ? '☀️ Light' : '🌙 Dark';
+    });
+
+    // Form Validation
+    const form = document.getElementById('submission-form');
+    const formInputs = form.querySelectorAll('input[required], textarea[required]');
+    
+    formInputs.forEach(input => {
+      input.addEventListener('blur', validateField);
+      input.addEventListener('change', validateField);
+    });
+    
+    function validateField(e) {
+      const field = e.target.closest('.field');
+      const isValid = e.target.checkValidity();
+      
+      if (isValid) {
+        field.classList.remove('error');
+      } else if (e.target.value) {
+        field.classList.add('error');
+      }
+    }
+
+    // Notification System
+    function showNotification(message, type = 'info') {
+      const container = document.getElementById('notifications');
+      const notification = document.createElement('div');
+      notification.className = `notification ${type}`;
+      notification.textContent = message;
+      notification.setAttribute('role', 'alert');
+      container.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.remove();
+      }, 4000);
+    }
+
+    // Export notification helper to window for app.js
+    window.showNotification = showNotification;
+  </script>
 </body>
 </html>
