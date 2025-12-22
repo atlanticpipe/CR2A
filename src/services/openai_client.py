@@ -5,7 +5,7 @@ import re
 import logging
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 import httpx
 from src.core.config import get_secret_env_or_aws
 from src.schemas.template_spec import (
@@ -30,23 +30,26 @@ def _get_api_key() -> Optional[str]:
     key = get_secret_env_or_aws("OPENAI_API_KEY", "OPENAI_SECRET_ARN")
     return key
 
-def _extract_text(data: Dict[str, Any]) -> str:
+def _extract_text(data: Any) -> str:
+    """Extract text from OpenAI response, handling multiple API formats."""
     # Prefer Responses API shape; fall back to chat-style messages if present.
     if isinstance(data, dict):
-        output = data.get("output") or []
+        output = cast(List[Any], data.get("output") or [])  # type: ignore[misc]
         for block in output:
-            for item in block.get("content", []):
-                item_type = item.get("type")
-                text_value = item.get("text")
+            for item in block.get("content", []):  # type: ignore[misc]
+                item_type = item.get("type")  # type: ignore[misc]
+                text_value = item.get("text")  # type: ignore[misc]
                 # Accept both legacy output_text and new text content markers.
                 if item_type in {"output_text", "text"} and text_value:
                     return str(text_value)
-        choices = data.get("choices") or []
+        
+        choices = cast(List[Any], data.get("choices") or [])  # type: ignore[misc]
         if choices:
-            msg = choices[0].get("message", {})
-            content = msg.get("content")
+            msg = choices[0].get("message", {})  # type: ignore[misc]
+            content = msg.get("content")  # type: ignore[misc]
             if isinstance(content, str):
                 return content
+    
     raise RuntimeError("OpenAI response missing text content")
 
 def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
@@ -73,23 +76,24 @@ def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
         raise OpenAIClientError("ProcessingError", f"Cannot parse OpenAI JSON response: {e.msg}")
 
 def _load_clause_keywords() -> Dict[str, List[str]]:
-    # Load clause classification synonyms to guide section-level search prompts.
+    """Load clause classification synonyms to guide section-level search prompts."""
     try:
         root = Path(__file__).resolve().parents[2]
-        data = json.loads((root / "schemas" / "clause_classification.json").read_text(encoding="utf-8"))
-        section_fit = data.get("section_fit") or {}
-        return {k: [str(x) for x in v] for k, v in section_fit.items() if isinstance(v, list)}
+        data: Dict[str, Any] = json.loads((root / "schemas" / "clause_classification.json").read_text(encoding="utf-8"))
+        section_fit: Dict[str, Any] = data.get("section_fit") or {}
+        return {k: [str(x) for x in v] for k, v in section_fit.items() if isinstance(v, list)}  # type: ignore[misc]
     except Exception:
         return {}
 
 def _derive_item_keywords(template_spec: Dict[str, Any], clause_keywords: Dict[str, List[str]]) -> Dict[str, List[str]]:
-    # Combine template headings with synonym lists so the LLM searches relevant terms per item.
+    """Combine template headings with synonym lists so the LLM searches relevant terms per item."""
     derived: Dict[str, List[str]] = {}
     all_synonyms: List[str] = sorted(
         {phrase.lower() for phrases in clause_keywords.values() for phrase in phrases}
     )
+
     for sec_key, sec in (template_spec or {}).items():
-        items = sec.get("items") or []
+        items: List[Any] = sec.get("items") or []
         sec_label = sec_key.rsplit("_", 1)[-1]
         for item in items:
             title = item.get("item_title", "")
@@ -121,10 +125,12 @@ def _is_generic_clause(block: Dict[str, Any]) -> bool:
     return all(f in generic_markers for f in normalized)
 
 def _validate_search_rationale(refined: Dict[str, Any]) -> None:
-    # Enforce that any "Not present" language is backed by search_rationale.
+    """Enforce that any "Not present" language is backed by search_rationale."""
     for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
-        for item in refined.get(sec_key, []) or []:
-            for block in item.get("clauses", []) or []:
+        items: List[Any] = refined.get(sec_key, []) or []
+        for item in items:
+            blocks: List[Any] = item.get("clauses", []) or []
+            for block in blocks:
                 rationale = str(block.get("search_rationale", "")).strip()
                 any_not_present = any(
                     "not present" in str(block.get(field, "")).lower()
@@ -144,11 +150,11 @@ def _validate_search_rationale(refined: Dict[str, Any]) -> None:
                     )
 
 def _call_openai(body: Dict[str, Any], headers: Dict[str, str], timeout: float) -> Dict[str, Any]:
-    # Execute the OpenAI request with consistent error handling.
-    with httpx.Client(timeout=timeout) as client:
+    """Execute the OpenAI request with consistent error handling."""
+    with httpx.Client(timeout=timeout) as client:  # type: ignore[misc]
         try:
-            resp = client.post(f"{OPENAI_BASE}/v1/responses", headers=headers, json=body)
-            resp.raise_for_status()
+            resp = client.post(f"{OPENAI_BASE}/v1/responses", headers=headers, json=body)  # type: ignore[misc]
+            resp.raise_for_status()  # type: ignore[misc]
         except httpx.HTTPStatusError as exc:
             # Surface actionable error details when the API rejects the request.
             detail = exc.response.text

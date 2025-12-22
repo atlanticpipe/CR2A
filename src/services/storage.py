@@ -1,6 +1,3 @@
-"""
-S3 storage operations for contract uploads and analysis outputs.
-"""
 from __future__ import annotations
 
 import json
@@ -11,11 +8,20 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import quote, urlparse, unquote
-from fastapi import HTTPException
+
+try:
+    from fastapi import HTTPException
+except ImportError:
+    # Fallback for environments without FastAPI
+    class HTTPException(Exception):  # type: ignore
+        def __init__(self, status_code: int, detail: Any) -> None:
+            self.status_code = status_code
+            self.detail = detail
+            super().__init__(detail)
 
 try:
     import boto3
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     boto3 = None  # type: ignore
 
 logger = logging.getLogger(__name__)
@@ -35,7 +41,7 @@ AWS_REGION = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "us-e
 _VALID_BUCKET = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$")
 
 # Initialize S3 client
-S3 = boto3.client("s3", region_name=AWS_REGION) if boto3 else None
+S3: Optional[Any] = boto3.client("s3", region_name=AWS_REGION) if boto3 else None
 
 def _http_error(status: int, category: str, message: str) -> HTTPException:
     """Standardized error envelope so the UI can surface actionable messages."""
@@ -169,17 +175,24 @@ def build_s3_uri(key: str, bucket: str) -> str:
 def download_from_s3(contract_uri: str, dest_path: Path) -> Path:
     """
     Stream a contract from S3 to disk to avoid double-buffering in memory.
+
     Args:
         contract_uri: S3 URI to download from
         dest_path: Local path to save the file
+
     Returns:
         Path to downloaded file
+
     Raises:
         HTTPException: If download fails or file exceeds size limit
     """
     key = resolve_s3_key_from_uri(contract_uri)
+    
+    # Type guard: ensure S3 client is available
+    client = get_s3_client()  # This already raises if S3 is None
+    
     try:
-        obj = S3.get_object(Bucket=UPLOAD_BUCKET, Key=key)
+        obj = client.get_object(Bucket=UPLOAD_BUCKET, Key=key)
     except Exception as exc:
         logger.exception("Failed to download contract from S3", extra={"bucket": UPLOAD_BUCKET, "key": key})
         raise _http_error(502, "NetworkError", f"Download failed: {exc}")
@@ -203,8 +216,8 @@ def download_from_s3(contract_uri: str, dest_path: Path) -> Path:
             if written > MAX_FILE_BYTES:
                 raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
             fh.write(chunk)
-
     body.close()
+
     return dest_path
 
 def upload_artifacts(run_id: str, filled: Dict[str, Any], pdf_path: Path) -> Dict[str, str]:
