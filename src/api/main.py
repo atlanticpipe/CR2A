@@ -329,7 +329,12 @@ async def analyze(file: UploadFile):
     
     # Upload file to S3
     s3_key = f"jobs/{job_id}/{file.filename}"
-    s3_client.upload_fileobj(file.file, 'cr2a-upload', s3_key)
+    file_content = await file.read()
+    s3_client.put_object(
+        Bucket='cr2a-upload',
+        Key=s3_key,
+        Body=file_content
+    )
     
     # Store job metadata in DynamoDB
     jobs_table.put_item(Item={
