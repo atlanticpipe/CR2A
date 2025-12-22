@@ -5,6 +5,9 @@ import os
 import tempfile
 import uuid
 import logging
+import boto3
+import uuid
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -49,6 +52,12 @@ from src.schemas.template_spec import CR2A_TEMPLATE_SPEC
 
 # Utils
 from src.utils.mime_utils import infer_extension_from_content_type_or_magic, infer_mime_type
+
+# Initialize AWS clients
+s3_client = boto3.client('s3')
+lambda_client = boto3.client('lambda')
+dynamodb = boto3.resource('dynamodb')
+jobs_table = dynamodb.Table('cr2a-jobs')
 
 # Environment config
 RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
@@ -313,10 +322,32 @@ def _run_analysis(payload: AnalysisRequestPayload):
         error=None,
     )
 
-@app.post("/analyze", response_model=AnalysisResponse)
-def analyze(payload: AnalysisRequestPayload):
-    """Run contract analysis."""
-    return _run_analysis(payload)
+@app.post("/analyze")
+async def analyze(file: UploadFile):
+    # Generate job ID
+    job_id = str(uuid.uuid4())
+    
+    # Upload file to S3
+    s3_key = f"jobs/{job_id}/{file.filename}"
+    s3_client.upload_fileobj(file.file, 'cr2a-upload', s3_key)
+    
+    # Store job metadata in DynamoDB
+    jobs_table.put_item(Item={
+        'job_id': job_id,
+        'status': 'queued',
+        'created_at': datetime.now().isoformat(),
+        'file_key': s3_key
+    })
+    
+    # Trigger async processing (Lambda or SQS)
+    lambda_client.invoke(
+        FunctionName='cr2a-analyzer-worker',
+        InvocationType='Event',  # Async
+        Payload=json.dumps({'job_id': job_id, 's3_key': s3_key})
+    )
+    
+    # Return immediately
+    return {"job_id": job_id, "status": "queued"}
 
 @app.get("/runs/{run_id}/report")
 def download_report(run_id: str):
