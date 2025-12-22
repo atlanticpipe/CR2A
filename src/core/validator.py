@@ -2,12 +2,9 @@
 # Validation helpers: JSON Schema + policy-rule enforcement.
 # Every function is import-safe (no code runs at import time).
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from jsonschema import Draft7Validator
-from typing import Dict, Any, Iterable, List, Optional, Union
-from pathlib import Path
-import json
+from typing import Dict, Any, Iterable, List, Optional, cast
 
 # JSON Schema
 def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> None:
@@ -16,12 +13,14 @@ def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> Non
     Raises ValueError with a compact message on any violation.
     """
     v = Draft7Validator(schema)
-    errors = sorted(v.iter_errors(data), key=lambda e: list(e.path))
+    errors = sorted(v.iter_errors(data), key=lambda e: list(e.path))  # type: ignore[arg-type]
+    
     if errors:
         parts: List[str] = []
         for e in errors[:10]:
-            loc = ".".join(str(x) for x in e.path) or "<root>"
+            loc = ".".join(str(x) for x in e.path) or ""
             parts.append(f"{loc}: {e.message}")
+        
         msg = "JSON schema validation failed: " + "; ".join(parts)
         if len(errors) > 10:
             msg += f" (+{len(errors)-10} more)"
@@ -38,18 +37,9 @@ class ValidationFinding:
 @dataclass
 class ValidationReport:
     ok: bool
-    findings: List[ValidationFinding] = field(default_factory=list)
+    findings: List[ValidationFinding] = field(default_factory=lambda: [])
 
 # Helpers
-def _get_in(obj: Any, *path: Union[str, int]) -> Any:
-    cur = obj
-    for p in path:
-        if isinstance(cur, dict) and p in cur:
-            cur = cur[p]
-        else:
-            return None
-    return cur
-
 def _assert_closing_line(output_json: Dict[str, Any],
                          sections: Iterable[str],
                          expected: str) -> List[ValidationFinding]:
@@ -66,7 +56,7 @@ def _assert_closing_line(output_json: Dict[str, Any],
             continue
         # Sections II–VI are arrays of items in the schema; validate per-item closing_line
         if isinstance(node, list):
-            for idx, item in enumerate(node):
+            for idx, item in enumerate(cast(List[Any], node)):
                 if not isinstance(item, dict):
                     findings.append(ValidationFinding(
                         level="ERROR",
@@ -75,7 +65,8 @@ def _assert_closing_line(output_json: Dict[str, Any],
                     ))
                     continue
                 if expected:
-                    closing = item.get("closing_line")
+                    item_dict = cast(Dict[str, Any], item)
+                    closing = item_dict.get("closing_line")
                     if closing != expected:
                         findings.append(ValidationFinding(
                             level="ERROR",
@@ -85,7 +76,8 @@ def _assert_closing_line(output_json: Dict[str, Any],
         elif isinstance(node, dict):
             # Some schemas might allow a single object; check its closing_line
             if expected:
-                closing = node.get("closing_line")
+                item_dict = cast(Dict[str, Any], node)
+                closing = item_dict.get("closing_line")
                 if closing != expected:
                     findings.append(ValidationFinding(
                         level="ERROR",
@@ -126,7 +118,8 @@ def enforce_validation_rules(output_json: Dict[str, Any], validation_rules: Dict
     findings: List[ValidationFinding] = []
 
     val = validation_rules if "mandatory_fields" in validation_rules else validation_rules.get("validation", {})
-    mandatory = val.get("mandatory_fields", {}) if isinstance(val, dict) else {}
+    val_dict = cast(Dict[str, Any], val) if isinstance(val, dict) else {}
+    mandatory: Dict[str, Any] = cast(Dict[str, Any], val_dict.get("mandatory_fields", {})) if val_dict else {}
 
     # 1) SECTION I: minimum number of fields
     min_items = mandatory.get("section_I_min_items")
@@ -135,11 +128,12 @@ def enforce_validation_rules(output_json: Dict[str, Any], validation_rules: Dict
         if not isinstance(section_I, dict):
             findings.append(ValidationFinding(level="ERROR", code="SECTION_I", message="SECTION_I must be an object."))
         else:
-            if len(section_I.keys()) < int(min_items):
+            section_I_dict = cast(Dict[str, Any], section_I)  # ← Cast here
+            if len(section_I_dict.keys()) < int(min_items):
                 findings.append(ValidationFinding(
                     level="ERROR",
                     code="SECTION_I_MIN_ITEMS",
-                    message=f"SECTION_I must contain at least {int(min_items)} fields (found {len(section_I.keys())})."
+                    message=f"SECTION_I must contain at least {int(min_items)} fields (found {len(section_I_dict.keys())})."
                 ))
 
     # 2) SECTION II–VI: closing line must match policy string (only if still required in your policy)
@@ -150,8 +144,8 @@ def enforce_validation_rules(output_json: Dict[str, Any], validation_rules: Dict
     # 3) Optional provenance check (if provided in output)
     findings.extend(_assert_provenance(output_json))
 
-    abort_on_failure = bool(val.get("abort_on_failure", True))
-    fail_fast = bool(val.get("fail_fast", True))
+    abort_on_failure = bool(val_dict.get("abort_on_failure", True))
+    fail_fast = bool(val_dict.get("fail_fast", True))
     errors = [f for f in findings if f.level == "ERROR"]
     if errors and (abort_on_failure or fail_fast):
         msg = "; ".join(f"{f.code}: {f.message}" for f in errors[:10])
