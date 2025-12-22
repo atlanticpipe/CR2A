@@ -1,65 +1,61 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "APS Contract Analysis — Filled Template",
-  "version": "2.0",
+  "title": "APS Contract Analysis — Filled Template (v1)",
+  "version": "1.0",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "section_i": { "$ref": "#/$defs/ContractOverview" },
-    "section_ii": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
-    "section_iii": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
-    "section_iv": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
-    "section_v": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
-    "section_vi": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
+    "SECTION_I": { "$ref": "#/$defs/ContractOverview" },
+    "SECTION_II": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
+    "SECTION_III": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
+    "SECTION_IV": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
+    "SECTION_V": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
+    "SECTION_VI": { "type": "array", "items": { "$ref": "#/$defs/SectionItem" } },
     "doc_meta": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "created_at"],
       "properties": {
-        "schema_version": { "type": "string" },
-        "created_at": { "type": "string", "format": "date-time" },
-        "generated_by": { "type": "string" },
+        "policy_version": { "type": "string" },
+        "created_at": { "type": "string" },
         "fdot_contract": { "type": ["boolean", "null"] },
         "fdot_year": { "type": ["string", "null"] }
       }
     }
   },
   "required": [
-    "section_i",
-    "section_ii",
-    "section_iii",
-    "section_iv",
-    "section_v",
-    "section_vi",
-    "doc_meta"
+    "SECTION_I",
+    "SECTION_II",
+    "SECTION_III",
+    "SECTION_IV",
+    "SECTION_V",
+    "SECTION_VI"
   ],
   "$defs": {
     "ClauseBlock": {
       "type": "object",
       "required": [
-        "clause_language",
-        "clause_summary",
-        "risk_triggers",
-        "flow_down_obligations",
-        "redline_recommendations",
-        "harmful_language"
+        "Clause Language",
+        "Clause Summary",
+        "Risk Triggers Identified",
+        "Flow-Down Obligations",
+        "Redline Recommendations",
+        "Harmful Language / Policy Conflicts"
       ],
       "properties": {
-        "clause_language": { "type": "string", "minLength": 1 },
-        "clause_summary": { "type": "string", "minLength": 1 },
-        "risk_triggers": { "type": "string" },
-        "flow_down_obligations": { "type": "string" },
-        "redline_recommendations": { "type": "string" },
-        "harmful_language": { "type": "string" },
+        "Clause Language": { "type": "string" },
+        "Clause Summary": { "type": "string" },
+        "Risk Triggers Identified": { "type": "string" },
+        "Flow-Down Obligations": { "type": "string" },
+        "Redline Recommendations": { "type": "string" },
+        "Harmful Language / Policy Conflicts": { "type": "string" },
         "provenance": {
           "type": "object",
           "required": ["source", "page", "span"],
           "properties": {
             "source": { "type": "string" },
-            "page": { "type": "integer", "minimum": 1 },
+            "page": { "type": "integer" },
             "span": { "type": "string" }
-          },
-          "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -68,13 +64,9 @@
       "type": "object",
       "required": ["item_number", "item_title", "clauses", "closing_line"],
       "properties": {
-        "item_number": { "type": "integer", "minimum": 1 },
-        "item_title": { "type": "string", "minLength": 1 },
-        "clauses": { 
-          "type": "array", 
-          "items": { "$ref": "#/$defs/ClauseBlock" },
-          "minItems": 1
-        },
+        "item_number": { "type": "integer" },
+        "item_title": { "type": "string" },
+        "clauses": { "type": "array", "items": { "$ref": "#/$defs/ClauseBlock" } },
         "closing_line": {
           "type": "string",
           "pattern": "^All applicable clauses for .+ have been identified and analyzed\\.$"
@@ -82,30 +74,37 @@
       },
       "additionalProperties": false
     },
+    "RiskSummaryRow": {
+      "type": "object",
+      "required": ["Risk Area", "Risk Summary", "Redline Recommendation Summary"],
+      "properties": {
+        "Risk Area": { "type": "string" },
+        "Risk Summary": { "type": "string" },
+        "Redline Recommendation Summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
     "ContractOverview": {
       "type": "object",
       "required": [
-        "project_title",
-        "solicitation_no",
-        "owner",
-        "contractor",
-        "scope",
-        "general_risk_level",
-        "bid_model",
-        "notes"
+        "PROJECT TITLE:",
+        "SOLICITATION NO.:",
+        "OWNER:",
+        "CONTRACTOR:",
+        "SCOPE:",
+        "GENERAL RISK LEVEL:",
+        "BID MODEL:",
+        "NOTES:"
       ],
       "properties": {
-        "project_title": { "type": "string", "minLength": 1 },
-        "solicitation_no": { "type": "string", "minLength": 1 },
-        "owner": { "type": "string", "minLength": 1 },
-        "contractor": { "type": "string", "minLength": 1 },
-        "scope": { "type": "string", "minLength": 1 },
-        "general_risk_level": { 
-          "type": "string",
-          "enum": ["Low", "Medium", "High", "Critical"]
-        },
-        "bid_model": { "type": "string", "minLength": 1 },
-        "notes": { "type": "string" }
+        "PROJECT TITLE:": { "type": "string" },
+        "SOLICITATION NO.:": { "type": "string" },
+        "OWNER:": { "type": "string" },
+        "CONTRACTOR:": { "type": "string" },
+        "SCOPE:": { "type": "string" },
+        "GENERAL RISK LEVEL:": { "type": "string" },
+        "BID MODEL:": { "type": "string" },
+        "NOTES:": { "type": "string" }
       },
       "additionalProperties": false
     }

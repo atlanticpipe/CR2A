@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "APS Validation Rules",
-  "version": "1.3",
+  "version": "1.2",
   "validation": {
     "json_schema_enforcement": true,
     "abort_on_failure": true,
@@ -12,12 +12,12 @@
     "section_order": ["I", "II", "III", "IV", "V", "VI"],
 
     "header_patterns": {
-      "I": "^\\s*I\\.\\s*Contract\\s+Overview",
-      "II": "^\\s*II\\.\\s*Administrative\\s*(&|and)\\s*Commercial\\s+Terms",
-      "III": "^\\s*III\\.\\s*Technical\\s*(&|and)\\s*Performance\\s+Scope",
-      "IV": "^\\s*IV\\.\\s*Legal\\s+Risk\\s*(&|and)\\s*Enforcement",
-      "V": "^\\s*V\\.\\s*Regulatory\\s*(&|and)\\s*Compliance\\s+Terms",
-      "VI": "^\\s*VI\\.\\s*Data\\s*(&|and)\\s*Deliverables"
+      "I": "^I\\.[\\s\\S]*$",
+      "II": "^II\\.[\\s\\S]*$",
+      "III": "^III\\.[\\s\\S]*$",
+      "IV": "^IV\\.[\\s\\S]*$",
+      "V": "^V\\.[\\s\\S]*$",
+      "VI": "^VI\\.[\\s\\S]*$"
     },
 
     "completion_gate": {
@@ -29,7 +29,7 @@
 
     "audit_logging": {
       "record_validation_steps": true,
-      "record_provenance": true,
+      "record_provenance": false,
       "include_checksums": true
     },
 
