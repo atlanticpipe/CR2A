@@ -156,40 +156,76 @@ def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
     completed_steps = []
     current_step = None
     step_status = None
+    execution_started = False
     
     # Parse Step Functions execution history events
     # Events include: ExecutionStarted, TaskStateEntered, TaskSucceeded, TaskFailed, etc.
     for event in events:
         event_type = event.get('type', '')
         
-        # Capture task state transitions
-        if event_type == 'TaskStateEntered':
+        # Track execution start
+        if event_type == 'ExecutionStarted':
+            execution_started = True
+        
+        # Capture task state transitions - extract name from stateEnteredEventDetails
+        elif event_type == 'TaskStateEntered':
             details = event.get('stateEnteredEventDetails', {})
-            resource = details.get('name', '')
-            if resource and resource not in completed_steps:
-                current_step = resource
-                step_status = 'running'
+            # Try multiple ways to get the task name
+            resource = details.get('name') or details.get('resource') or details.get('stateArn', '')
+            if resource:
+                # Extract state name from ARN if needed
+                if ':' in str(resource):
+                    resource = str(resource).split(':')[-1]
+                if resource and resource not in completed_steps:
+                    current_step = resource
+                    step_status = 'running'
         
         # Track successful task completions
         elif event_type == 'TaskSucceeded':
             details = event.get('stateEnteredEventDetails', {})
-            resource = details.get('name', '')
-            if resource and resource not in completed_steps:
-                completed_steps.append(resource)
-                current_step = resource
-                step_status = 'completed'
+            resource = details.get('name') or details.get('resource') or details.get('stateArn', '')
+            if resource:
+                # Extract state name from ARN if needed
+                if ':' in str(resource):
+                    resource = str(resource).split(':')[-1]
+                if resource and resource not in completed_steps:
+                    completed_steps.append(resource)
+                    step_status = 'completed'
         
         # Capture task failures
         elif event_type == 'TaskFailed':
             details = event.get('stateEnteredEventDetails', {})
-            resource = details.get('name', '')
-            current_step = resource or current_step
+            resource = details.get('name') or details.get('resource') or details.get('stateArn', '')
+            if resource:
+                if ':' in str(resource):
+                    resource = str(resource).split(':')[-1]
+                current_step = resource or current_step
             step_status = 'failed'
+        
+        # Capture lambda function failures
+        elif event_type == 'LambdaFunctionScheduleFailed' or event_type == 'LambdaFunctionFailed':
+            step_status = 'failed'
+            current_step = 'Lambda Execution'
     
     # Calculate progress percentage
     steps_completed = len(completed_steps)
     total_steps = len(EXPECTED_STEPS)
     progress_percent = int((steps_completed / total_steps) * 100) if total_steps > 0 else 0
+    
+    # If execution started but no steps tracked yet, show initial progress
+    if execution_started and not current_step:
+        current_step = 'Starting analysis...'
+        step_status = 'pending'
+    
+    logger.debug(
+        "Parsed execution progress",
+        extra={
+            "completed_steps": completed_steps,
+            "current_step": current_step,
+            "progress_percent": progress_percent,
+            "step_status": step_status,
+        }
+    )
     
     return {
         'current_step': current_step or 'Starting...',
@@ -555,6 +591,17 @@ async def get_job_status(job_id: str):
                 # Parse execution events to determine current step
                 progress_info = _parse_execution_progress(history['events'])
                 job.update(progress_info)
+                
+                # Log progress for debugging
+                logger.info(
+                    "Job status check",
+                    extra={
+                        "job_id": job_id,
+                        "sf_status": sf_status,
+                        "progress_percent": progress_info.get('progress_percent'),
+                        "current_step": progress_info.get('current_step'),
+                    }
+                )
                 
                 # If execution is complete, capture output
                 if sf_status == 'SUCCEEDED':
