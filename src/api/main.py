@@ -127,11 +127,7 @@ def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
     """
     Extract progress information from Step Functions execution history.
     
-    Parses Step Functions events to determine:
-    - Current step executing
-    - Number of steps completed
-    - Progress percentage
-    - Step status (running, completed, failed)
+    Maps Lambda function names to user-friendly step names and calculates progress.
     
     Args:
         events: List of execution events from Step Functions history
@@ -140,26 +136,29 @@ def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
         Dict with: current_step, steps_completed, total_steps, progress_percent, step_status
     """
     
-    # Define expected steps in analysis workflow (in order)
+    # Map Lambda function names to user-friendly step names
+    # These correspond to the state machine definition in worker/step_functions_state_machine.json
+    STEP_MAPPING = {
+        'cr2a-get-metadata': 'Extracting Metadata',
+        'cr2a-calculate-chunks': 'Calculating Chunks',
+        'cr2a-analyzer-worker': 'Analyzing Content',
+        'cr2a-aggregate-results': 'Aggregating Results',
+    }
+    
+    # Expected step order in the workflow
     EXPECTED_STEPS = [
-        'Download Contract',
-        'File Type Detection',
-        'OCR & Text Extraction',
-        'Heuristic Analysis',
-        'LLM Refinement',
-        'Schema Normalization',
-        'Validation',
-        'PDF Export',
-        'Upload Results',
+        'Extracting Metadata',
+        'Calculating Chunks',
+        'Analyzing Content',
+        'Aggregating Results',
     ]
     
-    completed_steps = []
+    completed_steps = set()
     current_step = None
     step_status = None
     execution_started = False
     
     # Parse Step Functions execution history events
-    # Events include: ExecutionStarted, TaskStateEntered, TaskSucceeded, TaskFailed, etc.
     for event in events:
         event_type = event.get('type', '')
         
@@ -167,47 +166,52 @@ def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
         if event_type == 'ExecutionStarted':
             execution_started = True
         
-        # Capture task state transitions - extract name from stateEnteredEventDetails
+        # Capture task state entered
         elif event_type == 'TaskStateEntered':
             details = event.get('stateEnteredEventDetails', {})
-            # Try multiple ways to get the task name
-            resource = details.get('name') or details.get('resource') or details.get('stateArn', '')
+            # The resource field contains the Lambda ARN
+            resource = details.get('resource', '')
             if resource:
-                # Extract state name from ARN if needed
-                if ':' in str(resource):
-                    resource = str(resource).split(':')[-1]
-                if resource and resource not in completed_steps:
-                    current_step = resource
-                    step_status = 'running'
+                # Extract function name from ARN
+                # arn:aws:lambda:region:account:function:name -> name
+                func_name = resource.split(':')[-1] if ':' in resource else resource
+                # Map to user-friendly name
+                user_step = STEP_MAPPING.get(func_name, func_name)
+                current_step = user_step
+                step_status = 'running'
         
-        # Track successful task completions
+        # Track successful Lambda completions
         elif event_type == 'TaskSucceeded':
             details = event.get('stateEnteredEventDetails', {})
-            resource = details.get('name') or details.get('resource') or details.get('stateArn', '')
+            resource = details.get('resource', '')
             if resource:
-                # Extract state name from ARN if needed
-                if ':' in str(resource):
-                    resource = str(resource).split(':')[-1]
-                if resource and resource not in completed_steps:
-                    completed_steps.append(resource)
-                    step_status = 'completed'
+                func_name = resource.split(':')[-1] if ':' in resource else resource
+                user_step = STEP_MAPPING.get(func_name, func_name)
+                completed_steps.add(user_step)
+                current_step = user_step
+                step_status = 'completed'
         
-        # Capture task failures
+        # Capture Lambda failures
         elif event_type == 'TaskFailed':
             details = event.get('stateEnteredEventDetails', {})
-            resource = details.get('name') or details.get('resource') or details.get('stateArn', '')
+            resource = details.get('resource', '')
             if resource:
-                if ':' in str(resource):
-                    resource = str(resource).split(':')[-1]
-                current_step = resource or current_step
+                func_name = resource.split(':')[-1] if ':' in resource else resource
+                user_step = STEP_MAPPING.get(func_name, func_name)
+                current_step = user_step
             step_status = 'failed'
         
-        # Capture lambda function failures
-        elif event_type == 'LambdaFunctionScheduleFailed' or event_type == 'LambdaFunctionFailed':
+        # Also track LambdaFunctionFailed events which have different event structure
+        elif event_type == 'LambdaFunctionFailed' or event_type == 'LambdaFunctionScheduleFailed':
             step_status = 'failed'
-            current_step = 'Lambda Execution'
+            if 'stateEnteredEventDetails' in event:
+                details = event.get('stateEnteredEventDetails', {})
+                resource = details.get('resource', '')
+                if resource:
+                    func_name = resource.split(':')[-1] if ':' in resource else resource
+                    current_step = STEP_MAPPING.get(func_name, func_name)
     
-    # Calculate progress percentage
+    # Calculate progress percentage based on completed steps
     steps_completed = len(completed_steps)
     total_steps = len(EXPECTED_STEPS)
     progress_percent = int((steps_completed / total_steps) * 100) if total_steps > 0 else 0
@@ -216,11 +220,12 @@ def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
     if execution_started and not current_step:
         current_step = 'Starting analysis...'
         step_status = 'pending'
+        progress_percent = 5  # Small initial progress to show something is happening
     
     logger.debug(
         "Parsed execution progress",
         extra={
-            "completed_steps": completed_steps,
+            "completed_steps": list(completed_steps),
             "current_step": current_step,
             "progress_percent": progress_percent,
             "step_status": step_status,
