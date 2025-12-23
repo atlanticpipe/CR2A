@@ -329,8 +329,34 @@ document.addEventListener("DOMContentLoaded", () => {
         { title: "Queued", meta: "Submission sent.", active: true },
         { title: "Error", meta: String(err), active: true },
       ]);
-    }
+    };
+    const data = await resp.json();
+    const jobId = data.job_id;
+      
+    // START POLLING
+    pollJobStatus(
+      jobId,
+      // Show progress as it updates
+      (status) => {
+        renderTimeline([
+          { title: "Queued", meta: "Submitted.", active: true },
+          {
+            title: "Processing",
+            meta: `${status.current_step}... (${status.progress_percent}%)`,
+            active: true,
+          },
+        ]);
+      },
+      // Completed
+      (result) => {
+        renderTimeline([
+          { title: "Queued", meta: "Submitted.", active: true },
+          { title: "Processing", meta: "Completed.", active: true },
+        ]);
+      }
+    );
   };
+
 
   const uploadFile = async (file) => {
     // Upload via pre-signed PUT URL returned by the backend.
@@ -408,6 +434,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
     doSubmit();
   });
+
+  const pollJobStatus = async (jobId, onProgress, onComplete, onError) => {
+    let attempts = 0;
+    const poll = async () => {
+      const response = await fetch(`${apiBase}/status/${jobId}`, {
+        headers: requireAuthHeader(),
+      });
+      const status = await response.json();
+      
+      // Update UI with current step
+      onProgress(status);  // Shows: "Step: OCR & Text Extraction (22%)"
+      
+      if (status.status === 'completed') {
+        onComplete(status);
+      } else if (status.status === 'failed') {
+        onError(status.error);
+      } else {
+        attempts++;
+        if (attempts < 300) {
+          setTimeout(poll, 1000);  // Poll every second
+        }
+      }
+    };
+    poll();
+  };
 
   runDemoBtn?.addEventListener("click", () => {
     // Force demo mode regardless of backend wiring.

@@ -124,6 +124,82 @@ def _http_error(status: int, category: str, message: str) -> HTTPException:
     """Standardized error envelope for consistent API responses."""
     return HTTPException(status_code=status, detail={"category": category, "message": message})
 
+def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
+    """
+    Extract progress information from Step Functions execution history.
+    
+    Parses Step Functions events to determine:
+    - Current step executing
+    - Number of steps completed
+    - Progress percentage
+    - Step status (running, completed, failed)
+    
+    Args:
+        events: List of execution events from Step Functions history
+    
+    Returns:
+        Dict with: current_step, steps_completed, total_steps, progress_percent, step_status
+    """
+    
+    # Define expected steps in analysis workflow (in order)
+    EXPECTED_STEPS = [
+        'Download Contract',
+        'File Type Detection',
+        'OCR & Text Extraction',
+        'Heuristic Analysis',
+        'LLM Refinement',
+        'Schema Normalization',
+        'Validation',
+        'PDF Export',
+        'Upload Results',
+    ]
+    
+    completed_steps = []
+    current_step = None
+    step_status = None
+    
+    # Parse Step Functions execution history events
+    # Events include: ExecutionStarted, TaskStateEntered, TaskSucceeded, TaskFailed, etc.
+    for event in events:
+        event_type = event.get('type', '')
+        
+        # Capture task state transitions
+        if event_type == 'TaskStateEntered':
+            details = event.get('stateEnteredEventDetails', {})
+            resource = details.get('name', '')
+            if resource and resource not in completed_steps:
+                current_step = resource
+                step_status = 'running'
+        
+        # Track successful task completions
+        elif event_type == 'TaskSucceeded':
+            details = event.get('stateEnteredEventDetails', {})
+            resource = details.get('name', '')
+            if resource and resource not in completed_steps:
+                completed_steps.append(resource)
+                current_step = resource
+                step_status = 'completed'
+        
+        # Capture task failures
+        elif event_type == 'TaskFailed':
+            details = event.get('stateEnteredEventDetails', {})
+            resource = details.get('name', '')
+            current_step = resource or current_step
+            step_status = 'failed'
+    
+    # Calculate progress percentage
+    steps_completed = len(completed_steps)
+    total_steps = len(EXPECTED_STEPS)
+    progress_percent = int((steps_completed / total_steps) * 100) if total_steps > 0 else 0
+    
+    return {
+        'current_step': current_step or 'Starting...',
+        'steps_completed': steps_completed,
+        'total_steps': total_steps,
+        'progress_percent': progress_percent,
+        'step_status': step_status or 'pending',
+    }
+
 # Endpoints
 @app.get("/health")
 def health():
@@ -434,30 +510,31 @@ async def analyze_contract(payload: AnalysisRequestPayload):
     
 @app.get("/status/{job_id}")
 async def get_job_status(job_id: str):
-    """Check the status of an analysis job"""
-    try:
-        response = jobs_table.get_item(Key={'job_id': job_id})
+    """Query Step Functions execution for real-time progress"""
+    job = jobs_table.get_item(Key={'job_id': job_id})['Item']
+    
+    # Query Step Functions for live status
+    if 'execution_arn' in job:
+        execution = stepfunctions_client.describe_execution(
+            executionArn=job['execution_arn']
+        )
         
-        if 'Item' not in response:
-            raise HTTPException(status_code=404, detail="Job not found")
+        # Map Step Functions status
+        status_map = {
+            'RUNNING': 'processing',
+            'SUCCEEDED': 'completed',
+            'FAILED': 'failed',
+        }
+        job['status'] = status_map.get(execution['status'], 'processing')
         
-        job = response['Item']
-        
-        if job['status'] == 'completed' and 'result_key' in job:
-            result_url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': 'cr2a-output',
-                    'Key': job['result_key']
-                },
-                ExpiresIn=3600
-            )
-            job['result_url'] = result_url
-        
-        return job
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Get execution history for current step
+        history = stepfunctions_client.get_execution_history(
+            executionArn=job['execution_arn']
+        )
+        progress = _parse_execution_progress(history['events'])
+        job.update(progress)  # Add: current_step, progress_percent, etc.
+    
+    return job
 
 @app.get("/runs/{run_id}/report")
 def download_report(run_id: str):
