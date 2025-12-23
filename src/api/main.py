@@ -113,6 +113,12 @@ class AnalysisResponse(BaseModel):
     filled_template_url: Optional[str] = None
     error: Optional[dict] = None
 
+class JobResponse(BaseModel):
+    job_id: str
+    status: str
+    message: str
+    status_url: str
+
 # Helper Functions
 def _http_error(status: int, category: str, message: str) -> HTTPException:
     """Standardized error envelope for consistent API responses."""
@@ -324,48 +330,85 @@ def _run_analysis(payload: AnalysisRequestPayload):
         error=None,
     )
 
-@app.post("/analyze")
-async def analyze_contract(file: UploadFile):
-    """Analyze a contract asynchronously using Step Functions"""
+@app.post("/analyze", response_model=JobResponse)
+async def analyze_contract(payload: AnalysisRequestPayload):
+    """
+    Analyze a contract asynchronously using Step Functions.
+    
+    Accepts a pre-uploaded S3 key from the presigned upload workflow.
+    Does NOT accept file binary uploads directly.
+    
+    Args:
+        payload: AnalysisRequestPayload with:
+            - key: S3 key of uploaded contract (from /upload-url presign)
+            - contract_id: Identifier for this contract
+            - llm_enabled: Whether to apply LLM refinement (default: true)
+    
+    Returns:
+        JobResponse with job_id and status tracking URL
+    """
     try:
+        # Validate that we have either a key or contract_uri
+        if not payload.key and not payload.contract_uri:
+            raise _http_error(
+                400,
+                "ValidationError",
+                "Provide either 'key' (from presigned upload) or 'contract_uri' (S3 URI)"
+            )
+        
+        # Generate job ID
         job_id = str(uuid.uuid4())
-        file_content = await file.read()
         
-        # Upload to S3
-        s3_key = f"jobs/{job_id}/{file.filename}"
-        s3_client.put_object(
-            Bucket='cr2a-upload',
-            Key=s3_key,
-            Body=file_content,
-            ContentType=file.content_type
-        )
+        # Determine S3 key: use provided key or extract from URI
+        s3_key = payload.key
+        if not s3_key and payload.contract_uri:
+            parsed = urlparse(payload.contract_uri)
+            s3_key = parsed.path.lstrip('/')
         
-        # Create job record
+        # Get upload bucket name
+        upload_bucket = load_upload_bucket()
+        
+        # Create job record in DynamoDB
         jobs_table.put_item(
             Item={
                 'job_id': job_id,
                 'status': 'queued',
                 'progress': 0,
-                'created_at': datetime.now().isoformat(),
-                'file_name': file.filename,
-                'file_size_bytes': len(file_content),
-                's3_key': s3_key
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'contract_id': payload.contract_id,
+                'llm_enabled': payload.llm_enabled,
+                's3_bucket': upload_bucket,
+                's3_key': s3_key,
             }
         )
         
-        # Start Step Functions
+        # Prepare Step Functions input
         execution_input = {
             'job_id': job_id,
-            's3_bucket': 'cr2a-upload',
-            's3_key': s3_key
+            'contract_id': payload.contract_id,
+            's3_bucket': upload_bucket,
+            's3_key': s3_key,
+            'llm_enabled': payload.llm_enabled,
         }
         
+        logger.info(
+            "Starting contract analysis",
+            extra={
+                "job_id": job_id,
+                "contract_id": payload.contract_id,
+                "s3_key": s3_key,
+                "llm_enabled": payload.llm_enabled,
+            }
+        )
+        
+        # Start Step Functions execution
         response = stepfunctions_client.start_execution(
             stateMachineArn=STEP_FUNCTIONS_ARN,
             name=f"analysis-{job_id}",
             input=json.dumps(execution_input)
         )
         
+        # Update job with execution ARN
         jobs_table.update_item(
             Key={'job_id': job_id},
             UpdateExpression='SET execution_arn = :arn, #status = :status',
@@ -376,14 +419,17 @@ async def analyze_contract(file: UploadFile):
             }
         )
         
-        return {
-            'job_id': job_id,
-            'status': 'queued',
-            'message': 'Analysis started. Use /status/{job_id} to check progress.',
-            'status_url': f'/status/{job_id}'
-        }
+        return JobResponse(
+            job_id=job_id,
+            status='queued',
+            message='Analysis started. Use /status/{job_id} to check progress.',
+            status_url=f'/status/{job_id}'
+        )
         
+    except _http_error as e:
+        raise e
     except Exception as e:
+        logger.exception("Failed to start analysis", extra={"error": str(e)})
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/status/{job_id}")
