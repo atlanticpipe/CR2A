@@ -258,6 +258,51 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 2000);
   };
 
+  const pollJobStatus = async (jobId, onProgress, onComplete, onError) => {
+    // Poll Step Functions execution for real-time progress.
+    let attempts = 0;
+    const apiBase = requireApiBase();
+    
+    const poll = async () => {
+      try {
+        const response = await fetch(`${apiBase}/status/${jobId}`, {
+          headers: requireAuthHeader(),
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Status check failed: HTTP ${response.status}`);
+        }
+        
+        const status = await response.json();
+        
+        // Update UI with current step
+        onProgress(status);
+        
+        // Check terminal states
+        if (status.status === "completed") {
+          onComplete(status);
+        } else if (status.status === "failed") {
+          // Extract error message from nested error object
+          const errorMsg = status.error?.cause || status.error?.error || "Job failed with unknown error";
+          onError(errorMsg);
+        } else {
+          // Still processing - continue polling
+          attempts++;
+          if (attempts < 300) {  // ~5 minute timeout (300 * 1000ms)
+            setTimeout(poll, 1000);
+          } else {
+            onError("Job polling timeout - no response after 5 minutes");
+          }
+        }
+      } catch (err) {
+        onError(`Failed to check job status: ${String(err)}`);
+      }
+    };
+    
+    // Start polling immediately
+    poll();
+  };
+
   const submitToApi = async (key, contractId, llmEnabled) => {
     // Submit uploaded object key plus contract metadata to backend; render minimal two-step timeline.
     renderTimeline([
@@ -310,15 +355,67 @@ document.addEventListener("DOMContentLoaded", () => {
         ]);
         return data;
       }
+
+      // SUCCESS - START POLLING
+      const jobId = data.job_id;
+      
       setOutputs({
-        validation: "See response",
-        exportStatusText: data.status || "See response",
+        validation: "Processing",
+        exportStatusText: "Awaiting backend...",
         payload: data,
       });
       renderTimeline([
         { title: "Queued", meta: "Submitted.", active: true },
-        { title: "Processing", meta: "Backend returned response.", active: true },
+        { title: "Processing", meta: "Starting analysis...", active: true },
       ]);
+
+      // Start polling with proper handlers
+      pollJobStatus(
+        jobId,
+        // onProgress - update UI as job progresses
+        (status) => {
+          renderTimeline([
+            { title: "Queued", meta: "Submitted.", active: true },
+            { 
+              title: "Processing", 
+              meta: `${status.current_step || "Processing"}... ${status.progress_percent || 0}%`, 
+              active: true 
+            },
+          ]);
+          setOutputs({
+            validation: "Processing",
+            exportStatusText: `${status.current_step || "Processing"} (${status.progress_percent || 0}%)`,
+            payload: status,
+          });
+        },
+        // onComplete - job finished successfully
+        (result) => {
+          renderTimeline([
+            { title: "Queued", meta: "Submitted.", active: true },
+            { title: "Processing", meta: "Completed.", active: true },
+          ]);
+          setOutputs({
+            validation: "Passed",
+            exportStatusText: "Completed",
+            payload: result,
+          });
+          setDownloadLink(result);
+        },
+        // onError - job failed
+        (errorMsg) => {
+          renderTimeline([
+            { title: "Queued", meta: "Submitted.", active: true },
+            { title: "Error", meta: String(errorMsg), active: true },
+          ]);
+          setOutputs({
+            validation: "Failed",
+            exportStatusText: String(errorMsg),
+            payload: { error: String(errorMsg) },
+          });
+        }
+      );
+
+      return data;
     } catch (err) {
       setOutputs({
         validation: "Failed",
@@ -329,34 +426,9 @@ document.addEventListener("DOMContentLoaded", () => {
         { title: "Queued", meta: "Submission sent.", active: true },
         { title: "Error", meta: String(err), active: true },
       ]);
-    };
-    const data = await resp.json();
-    const jobId = data.job_id;
-      
-    // START POLLING
-    pollJobStatus(
-      jobId,
-      // Show progress as it updates
-      (status) => {
-        renderTimeline([
-          { title: "Queued", meta: "Submitted.", active: true },
-          {
-            title: "Processing",
-            meta: `${status.current_step}... (${status.progress_percent}%)`,
-            active: true,
-          },
-        ]);
-      },
-      // Completed
-      (result) => {
-        renderTimeline([
-          { title: "Queued", meta: "Submitted.", active: true },
-          { title: "Processing", meta: "Completed.", active: true },
-        ]);
-      }
-    );
+      throw err;
+    }
   };
-
 
   const uploadFile = async (file) => {
     // Upload via pre-signed PUT URL returned by the backend.
@@ -434,31 +506,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     doSubmit();
   });
-
-  const pollJobStatus = async (jobId, onProgress, onComplete, onError) => {
-    let attempts = 0;
-    const poll = async () => {
-      const response = await fetch(`${apiBase}/status/${jobId}`, {
-        headers: requireAuthHeader(),
-      });
-      const status = await response.json();
-      
-      // Update UI with current step
-      onProgress(status);  // Shows: "Step: OCR & Text Extraction (22%)"
-      
-      if (status.status === 'completed') {
-        onComplete(status);
-      } else if (status.status === 'failed') {
-        onError(status.error);
-      } else {
-        attempts++;
-        if (attempts < 300) {
-          setTimeout(poll, 1000);  // Poll every second
-        }
-      }
-    };
-    poll();
-  };
 
   runDemoBtn?.addEventListener("click", () => {
     // Force demo mode regardless of backend wiring.
