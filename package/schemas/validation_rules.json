@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "APS Validation Rules",
+  "version": "1.2",
+  "validation": {
+    "json_schema_enforcement": true,
+    "abort_on_failure": true,
+    "fail_fast": true,
+    "retry_on_failure": false,
+    "strict_string_match_headers": true,
+
+    "section_order": ["I", "II", "III", "IV", "V", "VI"],
+
+    "header_patterns": {
+      "I": "^I\\.[\\s\\S]*$",
+      "II": "^II\\.[\\s\\S]*$",
+      "III": "^III\\.[\\s\\S]*$",
+      "IV": "^IV\\.[\\s\\S]*$",
+      "V": "^V\\.[\\s\\S]*$",
+      "VI": "^VI\\.[\\s\\S]*$"
+    },
+
+    "completion_gate": {
+      "require_schema_pass": true,
+      "require_all_sections_present": ["I", "II", "III", "IV", "V", "VI"],
+      "require_closing_lines": true,
+      "disallow_empty_strings": true
+    },
+
+    "audit_logging": {
+      "record_validation_steps": true,
+      "record_provenance": false,
+      "include_checksums": true
+    },
+
+    "closing_line_exact": "All applicable clauses for [Item #/Title] have been identified and analyzed.",
+    "section_I_fields_required": 8,
+    "bluf_enabled": true,
+    "collect_metrics": true,
+    "log_level": "INFO"
+  }
+}

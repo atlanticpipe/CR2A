@@ -1,0 +1,1 @@
+{"errorMessage": "Cannot access S3 file: An error occurred (NoSuchKey) when calling the GetObject operation: The specified key does not exist.", "errorType": "ValueError", "requestId": "b2eaa679-2e3b-48c8-8d41-867ea4623e77", "stackTrace": ["  File \"/var/task/lambda_get_metadata.py\", line 64, in lambda_handler\n    raise ValueError(f\"Cannot access S3 file: {e}\")\n"]}

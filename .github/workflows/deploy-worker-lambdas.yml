@@ -1,0 +1,159 @@
+name: Deploy Worker Lambda Functions
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - 'worker/**'
+      - '.github/workflows/deploy-worker-lambdas.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.11'
+  S3_BUCKET: cr2a-deployment
+
+jobs:
+  deploy-workers:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    strategy:
+      matrix:
+        function:
+          - name: cr2a-get-metadata
+            file: lambda_get_metadata.py
+            handler: lambda_get_metadata.lambda_handler
+          - name: cr2a-calculate-chunks
+            file: lmabda_calculate_chunks.py
+            handler: lmabda_calculate_chunks.lambda_handler
+          - name: cr2a-analyzer-worker
+            file: lambda_analyze_chunk.py
+            handler: lambda_analyze_chunk.lambda_handler
+          - name: cr2a-aggregate-results
+            file: lambda_aggregate_results.py
+            handler: lambda_aggregate_results.lambda_handler
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create deployment package for ${{ matrix.function.name }}
+        run: |
+          echo "Creating deployment package for ${{ matrix.function.name }}..."
+          
+          # Create package directory
+          mkdir -p package
+          
+          # Install dependencies to package directory
+          pip install --target ./package --upgrade -r worker/requirements.txt
+          
+          # Copy Lambda function code
+          cp worker/${{ matrix.function.file }} package/
+          
+          # Create deployment zip
+          cd package
+          zip -r ../lambda-deployment.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
+          cd ..
+          
+          echo "Package size:"
+          ls -lh lambda-deployment.zip
+
+      - name: Upload to S3
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          S3_KEY="lambda-deployments/${{ matrix.function.name }}-${GITHUB_SHA:0:7}-${TIMESTAMP}.zip"
+          
+          echo "Uploading deployment package to S3..."
+          aws s3 cp lambda-deployment.zip "s3://${{ env.S3_BUCKET }}/${S3_KEY}"
+          
+          echo "S3_KEY=${S3_KEY}" >> $GITHUB_ENV
+          echo "Uploaded to: s3://${{ env.S3_BUCKET }}/${S3_KEY}"
+
+      - name: Deploy to Lambda
+        run: |
+          echo "Deploying to Lambda function: ${{ matrix.function.name }}"
+          echo "Using S3 object: s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}"
+          
+          aws lambda update-function-code \
+            --function-name ${{ matrix.function.name }} \
+            --s3-bucket ${{ env.S3_BUCKET }} \
+            --s3-key ${{ env.S3_KEY }} \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "Waiting for Lambda update to complete..."
+          aws lambda wait function-updated \
+            --function-name ${{ matrix.function.name }} \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "Deployment successful for ${{ matrix.function.name }}!"
+
+      - name: Update function configuration
+        run: |
+          echo "Updating Lambda configuration for ${{ matrix.function.name }}..."
+          
+          # Update handler (in case it changed)
+          aws lambda update-function-configuration \
+            --function-name ${{ matrix.function.name }} \
+            --handler ${{ matrix.function.handler }} \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "Waiting for configuration update..."
+          aws lambda wait function-updated \
+            --function-name ${{ matrix.function.name }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Verify deployment
+        run: |
+          echo "Verifying Lambda function configuration..."
+          aws lambda get-function \
+            --function-name ${{ matrix.function.name }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Configuration.[FunctionName,Runtime,Handler,LastModified,CodeSize]' \
+            --output table
+          
+          echo "✅ ${{ matrix.function.name }} deployed successfully!"
+
+  verify-all:
+    needs: deploy-workers
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify all worker Lambdas
+        run: |
+          echo "Verifying all worker Lambda functions..."
+          
+          FUNCTIONS=("cr2a-get-metadata" "cr2a-calculate-chunks" "cr2a-analyzer-worker" "cr2a-aggregate-results")
+          
+          for func in "${FUNCTIONS[@]}"; do
+            echo "\nChecking $func..."
+            aws lambda get-function-configuration \
+              --function-name $func \
+              --region ${{ env.AWS_REGION }} \
+              --query '[FunctionName,State,LastUpdateStatus,Runtime,Handler]' \
+              --output table
+          done
+          
+          echo "\n✅ All worker Lambda functions verified!"

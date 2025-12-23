@@ -1,0 +1,34 @@
+{
+  "version": "v1",
+  "section_order": ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"],
+  "headers": {
+    "I": ["I. Contract Overview"],
+    "II": ["II. Administrative & Commercial Terms", "II. Administrative and Commercial Terms"],
+    "III": ["III. Technical & Performance Scope", "III. Technical and Performance Scope"],
+    "IV": ["IV. Legal Risk & Enforcement", "IV. Legal Risk and Enforcement"],
+    "V": ["V. Regulatory & Compliance Terms", "V. Regulatory and Compliance Terms"],
+    "VI": ["VI. Data & Deliverables", "VI. Data and Deliverables"],
+    "VII": ["VII. Supplemental Operational Risks"],
+    "VIII": ["VIII. Final Analysis", "VIII. Risk Summary"]
+  },
+  "patterns": {
+    "I": "^\\s*I\\.\\s*Contract\\s+Overview",
+    "II": "^\\s*II\\.\\s*Administrative\\s*(&|and)\\s*Commercial\\s+Terms",
+    "III": "^\\s*III\\.\\s*Technical\\s*(&|and)\\s*Performance\\s+Scope",
+    "IV": "^\\s*IV\\.\\s*Legal\\s+Risk\\s*(&|and)\\s*Enforcement",
+    "V": "^\\s*V\\.\\s*Regulatory\\s*(&|and)\\s*Compliance\\s+Terms",
+    "VI": "^\\s*VI\\.\\s*Data\\s*(&|and)\\s*Deliverables",
+    "VII": "^\\s*VII\\.\\s*Supplemental\\s+Operational\\s+Risks",
+    "VIII": "^\\s*VIII\\.\\s*(Final\\s+Analysis|Risk\\s+Summary)"
+  },
+  "aliases": {
+    "Section I": "I",
+    "Section II": "II",
+    "Section III": "III",
+    "Section IV": "IV",
+    "Section V": "V",
+    "Section VI": "VI",
+    "Section VII": "VII",
+    "Section VIII": "VIII"
+  }
+}
