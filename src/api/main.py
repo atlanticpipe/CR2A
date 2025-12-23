@@ -542,7 +542,7 @@ async def analyze_contract(payload: AnalysisRequestPayload):
             status_url=f'/status/{job_id}'
         )
         
-    except _http_error as e:
+    except HTTPException as e:
         raise e
     except Exception as e:
         logger.exception("Failed to start analysis", extra={"error": str(e)})
