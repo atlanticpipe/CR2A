@@ -1,80 +1,155 @@
 """
-Lambda: Get Contract Metadata
-- Determines contract size, page count, and processing strategy
+Lambda: Get Metadata
+- Extract metadata from contract (page count, size, etc)
+- Input from Step Functions state machine
 """
 import json
 import boto3
-import io
+import logging
+from io import BytesIO
 from PyPDF2 import PdfReader
-from docx import Document
+from botocore.exceptions import ClientError
 
-s3_client = boto3.client('s3')
-dynamodb = boto3.resource('dynamodb')
-jobs_table = dynamodb.Table('cr2a-jobs')
+s3 = boto3.client('s3')
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 
 def lambda_handler(event, context):
-    """Analyze contract and determine metadata for chunking strategy"""
-    job_id = event['job_id']
-    s3_bucket = event['s3_bucket']
-    s3_key = event['s3_key']
+    """
+    Extract metadata from contract.
     
+    Step Functions Input:
+    {
+        "job_id": "...",
+        "contract_id": "...",
+        "s3_bucket": "...",
+        "s3_key": "...",
+        "llm_enabled": true
+    }
+    
+    Step Functions Output:
+    {
+        "job_id": "...",
+        "contract_id": "...",
+        "s3_bucket": "...",
+        "s3_key": "...",
+        "llm_enabled": true,
+        "metadata": {
+            "file_type": "pdf",
+            "pages": 45,
+            "size": 1234567,
+            "file_size_mb": 1.18,
+            "estimated_chunks": 1
+        }
+    }
+    """
     try:
-        # Download contract
-        response = s3_client.get_object(Bucket=s3_bucket, Key=s3_key)
-        file_content = response['Body'].read()
+        # Extract input from Step Functions
+        job_id = event.get('job_id')
+        contract_id = event.get('contract_id')
+        s3_bucket = event.get('s3_bucket')
+        s3_key = event.get('s3_key')
+        llm_enabled = event.get('llm_enabled', True)
         
-        # Extract metadata based on file type
-        file_type = s3_key.split('.')[-1].lower()
+        logger.info(f"Processing job {job_id} for contract {contract_id}")
+        logger.info(f"Downloading from s3://{s3_bucket}/{s3_key}")
+        
+        # Get file from S3
+        try:
+            response = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+            file_content = response['Body'].read()
+        except ClientError as e:
+            logger.error(f"Error downloading from S3: {e}")
+            raise ValueError(f"Cannot access S3 file: {e}")
+        
+        file_size = len(file_content)
+        file_size_mb = round(file_size / 1024 / 1024, 2)
+        
+        logger.info(f"File size: {file_size_mb} MB")
+        
+        # Determine file type and extract metadata
+        file_type = determine_file_type(s3_key, file_content)
+        logger.info(f"Detected file type: {file_type}")
         
         if file_type == 'pdf':
-            pdf_reader = PdfReader(io.BytesIO(file_content))
-            page_count = len(pdf_reader.pages)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-        elif file_type in ['docx', 'doc']:
-            doc = Document(io.BytesIO(file_content))
-            text = "\n".join([p.text for p in doc.paragraphs])
-            page_count = max(1, len(text) // 2500)
+            pages = extract_pdf_metadata(file_content)
         else:
-            text = file_content.decode('utf-8')
-            page_count = max(1, len(text) // 2500)
+            pages = 1  # For non-PDF files, treat as single page
         
-        text_length = len(text)
-        file_size_mb = len(file_content) / (1024 * 1024)
+        logger.info(f"File has {pages} pages")
         
-        chunk_size = 50000
-        estimated_chunks = max(1, (text_length // chunk_size) + 1)
+        # Estimate number of chunks (max 50 pages per chunk)
+        estimated_chunks = max(1, pages // 50)
         
+        # Prepare metadata output
         metadata = {
-            'job_id': job_id,
-            's3_bucket': s3_bucket,
-            's3_key': s3_key,
             'file_type': file_type,
-            'file_size_mb': round(file_size_mb, 2),
-            'page_count': page_count,
-            'text_length': text_length,
+            'pages': pages,
+            'size': file_size,
+            'file_size_mb': file_size_mb,
             'estimated_chunks': estimated_chunks,
-            'chunk_size': chunk_size,
-            'estimated_processing_time_minutes': estimated_chunks * 10
+            'chunk_size': 10000  # Characters per chunk for text files
         }
         
-        jobs_table.update_item(
-            Key={'job_id': job_id},
-            UpdateExpression='SET metadata = :metadata',
-            ExpressionAttributeValues={':metadata': metadata}
-        )
+        logger.info(f"Metadata extracted: {metadata}")
         
-        return metadata
+        # Return in Step Functions format (pass through all input fields + metadata)
+        return {
+            'job_id': job_id,
+            'contract_id': contract_id,
+            's3_bucket': s3_bucket,
+            's3_key': s3_key,
+            'llm_enabled': llm_enabled,
+            'metadata': metadata
+        }
         
     except Exception as e:
-        jobs_table.update_item(
-            Key={'job_id': job_id},
-            UpdateExpression='SET #status = :status, error = :error',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={
-                ':status': 'failed',
-                ':error': f"Metadata error: {str(e)}"
-            }
-        )
+        logger.error(f"Error in get_metadata: {str(e)}", exc_info=True)
+        # Step Functions will catch this exception and fail the execution
         raise
+
+
+def determine_file_type(s3_key, file_content):
+    """
+    Determine file type from key extension and magic bytes.
+    
+    Returns: 'pdf', 'docx', 'doc', or 'txt'
+    """
+    key_lower = s3_key.lower()
+    
+    # Check magic bytes
+    if file_content.startswith(b'%PDF'):
+        return 'pdf'
+    elif file_content.startswith(b'PK\x03\x04'):
+        return 'docx'
+    elif file_content.startswith(b'\xd0\xcf\x11\xe0'):
+        return 'doc'
+    
+    # Fall back to extension
+    if key_lower.endswith('.pdf'):
+        return 'pdf'
+    elif key_lower.endswith('.docx'):
+        return 'docx'
+    elif key_lower.endswith('.doc'):
+        return 'doc'
+    
+    # Default to text
+    return 'txt'
+
+
+def extract_pdf_metadata(file_content):
+    """
+    Extract page count from PDF.
+    
+    Returns: number of pages
+    """
+    try:
+        pdf_file = BytesIO(file_content)
+        pdf_reader = PdfReader(pdf_file)
+        page_count = len(pdf_reader.pages)
+        logger.info(f"PDF page count: {page_count}")
+        return page_count
+    except Exception as e:
+        logger.warning(f"Error reading PDF metadata: {e}. Using default 1 page.")
+        return 1
