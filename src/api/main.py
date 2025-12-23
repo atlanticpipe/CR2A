@@ -58,6 +58,8 @@ s3_client = boto3.client('s3')
 lambda_client = boto3.client('lambda')
 dynamodb = boto3.resource('dynamodb')
 jobs_table = dynamodb.Table('cr2a-jobs')
+stepfunctions_client = boto3.client('stepfunctions')
+STEP_FUNCTIONS_ARN = 'arn:aws:states:us-east-1:143895994429:stateMachine:cr2a-contract-analysis'
 
 # Environment config
 RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
@@ -323,36 +325,93 @@ def _run_analysis(payload: AnalysisRequestPayload):
     )
 
 @app.post("/analyze")
-async def analyze(file: UploadFile):
-    # Generate job ID
-    job_id = str(uuid.uuid4())
+async def analyze_contract(file: UploadFile):
+    """Analyze a contract asynchronously using Step Functions"""
+    try:
+        job_id = str(uuid.uuid4())
+        file_content = await file.read()
+        
+        # Upload to S3
+        s3_key = f"jobs/{job_id}/{file.filename}"
+        s3_client.put_object(
+            Bucket='cr2a-upload',
+            Key=s3_key,
+            Body=file_content,
+            ContentType=file.content_type
+        )
+        
+        # Create job record
+        jobs_table.put_item(
+            Item={
+                'job_id': job_id,
+                'status': 'queued',
+                'progress': 0,
+                'created_at': datetime.now().isoformat(),
+                'file_name': file.filename,
+                'file_size_bytes': len(file_content),
+                's3_key': s3_key
+            }
+        )
+        
+        # Start Step Functions
+        execution_input = {
+            'job_id': job_id,
+            's3_bucket': 'cr2a-upload',
+            's3_key': s3_key
+        }
+        
+        response = stepfunctions_client.start_execution(
+            stateMachineArn=STEP_FUNCTIONS_ARN,
+            name=f"analysis-{job_id}",
+            input=json.dumps(execution_input)
+        )
+        
+        jobs_table.update_item(
+            Key={'job_id': job_id},
+            UpdateExpression='SET execution_arn = :arn, #status = :status',
+            ExpressionAttributeNames={'#status': 'status'},
+            ExpressionAttributeValues={
+                ':arn': response['executionArn'],
+                ':status': 'processing'
+            }
+        )
+        
+        return {
+            'job_id': job_id,
+            'status': 'queued',
+            'message': 'Analysis started. Use /status/{job_id} to check progress.',
+            'status_url': f'/status/{job_id}'
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
-    # Upload file to S3
-    s3_key = f"jobs/{job_id}/{file.filename}"
-    file_content = await file.read()
-    s3_client.put_object(
-        Bucket='cr2a-upload',
-        Key=s3_key,
-        Body=file_content
-    )
-    
-    # Store job metadata in DynamoDB
-    jobs_table.put_item(Item={
-        'job_id': job_id,
-        'status': 'queued',
-        'created_at': datetime.now().isoformat(),
-        'file_key': s3_key
-    })
-    
-    # Trigger async processing (Lambda or SQS)
-    lambda_client.invoke(
-        FunctionName='cr2a-analyzer-worker',
-        InvocationType='Event',  # Async
-        Payload=json.dumps({'job_id': job_id, 's3_key': s3_key})
-    )
-    
-    # Return immediately
-    return {"job_id": job_id, "status": "queued"}
+@app.get("/status/{job_id}")
+async def get_job_status(job_id: str):
+    """Check the status of an analysis job"""
+    try:
+        response = jobs_table.get_item(Key={'job_id': job_id})
+        
+        if 'Item' not in response:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = response['Item']
+        
+        if job['status'] == 'completed' and 'result_key' in job:
+            result_url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': 'cr2a-output',
+                    'Key': job['result_key']
+                },
+                ExpiresIn=3600
+            )
+            job['result_url'] = result_url
+        
+        return job
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/runs/{run_id}/report")
 def download_report(run_id: str):
