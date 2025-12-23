@@ -6,7 +6,6 @@ import tempfile
 import uuid
 import logging
 import boto3
-import uuid
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -507,34 +506,118 @@ async def analyze_contract(payload: AnalysisRequestPayload):
     except Exception as e:
         logger.exception("Failed to start analysis", extra={"error": str(e)})
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 @app.get("/status/{job_id}")
 async def get_job_status(job_id: str):
-    """Query Step Functions execution for real-time progress"""
-    job = jobs_table.get_item(Key={'job_id': job_id})['Item']
+    """
+    Check the status of an analysis job with real-time Step Functions progress.
     
-    # Query Step Functions for live status
-    if 'execution_arn' in job:
-        execution = stepfunctions_client.describe_execution(
-            executionArn=job['execution_arn']
-        )
+    Returns:
+    - Current execution status (queued, processing, completed, failed)
+    - Progress percentage
+    - Current step name (from Step Functions)
+    - Results URL when complete
+    """
+    try:
+        # Get job record from DynamoDB
+        response = jobs_table.get_item(Key={'job_id': job_id})
         
-        # Map Step Functions status
-        status_map = {
-            'RUNNING': 'processing',
-            'SUCCEEDED': 'completed',
-            'FAILED': 'failed',
-        }
-        job['status'] = status_map.get(execution['status'], 'processing')
+        if 'Item' not in response:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         
-        # Get execution history for current step
-        history = stepfunctions_client.get_execution_history(
-            executionArn=job['execution_arn']
-        )
-        progress = _parse_execution_progress(history['events'])
-        job.update(progress)  # Add: current_step, progress_percent, etc.
-    
-    return job
+        job = response['Item']
+        
+        # Query Step Functions for live execution status
+        if 'execution_arn' in job:
+            try:
+                execution = stepfunctions_client.describe_execution(
+                    executionArn=job['execution_arn']
+                )
+                
+                # Map Step Functions status to UI-friendly status
+                sf_status = execution.get('status', 'UNKNOWN')
+                status_map = {
+                    'RUNNING': 'processing',
+                    'SUCCEEDED': 'completed',
+                    'FAILED': 'failed',
+                    'TIMED_OUT': 'failed',
+                    'ABORTED': 'failed',
+                }
+                job['status'] = status_map.get(sf_status, 'processing')
+                job['step_functions_status'] = sf_status
+                
+                # Extract progress info from execution history
+                history = stepfunctions_client.get_execution_history(
+                    executionArn=job['execution_arn'],
+                    maxItems=100
+                )
+                
+                # Parse execution events to determine current step
+                progress_info = _parse_execution_progress(history['events'])
+                job.update(progress_info)
+                
+                # If execution is complete, capture output
+                if sf_status == 'SUCCEEDED':
+                    try:
+                        output = json.loads(execution.get('output', '{}'))
+                        job['result_key'] = output.get('result_key')
+                        job['filled_template_key'] = output.get('filled_template_key')
+                        if execution.get('stopDate'):
+                            job['completed_at'] = execution['stopDate'].isoformat()
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
+                
+                # If execution failed, capture error
+                elif sf_status == 'FAILED':
+                    job['error'] = {
+                        'cause': execution.get('cause', 'Unknown error'),
+                        'error': execution.get('error', 'UNKNOWN'),
+                    }
+                
+            except Exception as e:
+                logger.warning(
+                    "Failed to query Step Functions",
+                    extra={"job_id": job_id, "execution_arn": job.get('execution_arn'), "error": str(e)}
+                )
+                # Don't fail the response; return what we have from DynamoDB
+        
+        # Generate presigned result URL if job is complete and has result
+        if job.get('status') == 'completed' and job.get('result_key'):
+            try:
+                result_url = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params={
+                        'Bucket': load_output_bucket(),
+                        'Key': job['result_key']
+                    },
+                    ExpiresIn=3600
+                )
+                job['result_url'] = result_url
+                
+                # Also provide filled template URL
+                if job.get('filled_template_key'):
+                    template_url = s3_client.generate_presigned_url(
+                        'get_object',
+                        Params={
+                            'Bucket': load_output_bucket(),
+                            'Key': job['filled_template_key']
+                        },
+                        ExpiresIn=3600
+                    )
+                    job['filled_template_url'] = template_url
+            except Exception as e:
+                logger.warning(
+                    "Failed to generate presigned URLs",
+                    extra={"job_id": job_id, "error": str(e)}
+                )
+        
+        return job
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get job status", extra={"job_id": job_id, "error": str(e)})
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/runs/{run_id}/report")
 def download_report(run_id: str):
