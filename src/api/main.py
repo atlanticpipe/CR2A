@@ -642,7 +642,7 @@ async def get_job_status(job_id: str):
                         'Bucket': load_output_bucket(),
                         'Key': job['result_key']
                     },
-                    ExpiresIn=3600
+                    ExpiresIn=36000
                 )
                 job['result_url'] = result_url
                 

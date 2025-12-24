@@ -269,7 +269,6 @@ def _find_item_anchor_indices(region_lines: List[str], item_number: int, item_ti
             candidates.append(idx)
     return min(candidates) if candidates else None
 
-
 def _focus_span_lines(span_lines: List[str]) -> List[str]:
     """
     Prefer clause headings or numbered list entries; fall back to nearby paragraphs.
@@ -287,7 +286,6 @@ def _focus_span_lines(span_lines: List[str]) -> List[str]:
             return span_lines[idx:end]
     cleaned = [ln for ln in span_lines if ln.strip()]
     return cleaned[:8] if cleaned else span_lines[:6]
-
 
 def _items_from_region(
     region_lines: List[str],

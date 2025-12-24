@@ -1,32 +1,18 @@
 {
-  "Comment": "CR2A Contract Analysis Workflow",
+  "Comment": "CR2A Contract Analysis with LLM Refinement",
   "StartAt": "GetContractMetadata",
   "States": {
     "GetContractMetadata": {
       "Type": "Task",
       "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-get-metadata",
-      "TimeoutSeconds": 300,
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "AnalysisFailedMetadata"
-        }
-      ],
-      "Next": "CalculateChunks",
-      "ResultPath": "$.metadata"
+      "TimeoutSeconds": 600,
+      "Next": "CalculateChunks"
     },
     "CalculateChunks": {
       "Type": "Task",
       "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-calculate-chunks",
-      "TimeoutSeconds": 300,
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "AnalysisFailedChunks"
-        }
-      ],
-      "Next": "ProcessChunksInParallel",
-      "ResultPath": "$.chunk_plan"
+      "TimeoutSeconds": 600,
+      "Next": "ProcessChunksInParallel"
     },
     "ProcessChunksInParallel": {
       "Type": "Map",
@@ -39,65 +25,52 @@
             "Type": "Task",
             "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-analyzer-worker",
             "TimeoutSeconds": 900,
-            "Retry": [
-              {
-                "ErrorEquals": ["States.TaskFailed"],
-                "IntervalSeconds": 2,
-                "MaxAttempts": 2,
-                "BackoffRate": 2.0
-              }
-            ],
-            "Catch": [
-              {
-                "ErrorEquals": ["States.ALL"],
-                "Next": "ChunkAnalysisFailed"
-              }
-            ],
-            "End": true
-          },
-          "ChunkAnalysisFailed": {
-            "Type": "Pass",
-            "Result": {
-              "chunk_index": "ERROR",
-              "status": "failed"
-            },
             "End": true
           }
         }
       },
-      "ResultPath": "$.chunk_results",
       "Next": "AggregateResults"
     },
     "AggregateResults": {
       "Type": "Task",
       "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-aggregate-results",
-      "TimeoutSeconds": 300,
+      "TimeoutSeconds": 600,
+      "Next": "CheckLLMEnabled"
+    },
+    "CheckLLMEnabled": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.llm_enabled",
+          "BooleanEquals": true,
+          "Next": "LLMRefinement"
+        }
+      ],
+      "Default": "AnalysisSucceeded"
+    },
+    "LLMRefinement": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-llm-refine",
+      "TimeoutSeconds": 900,
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed", "States.Timeout"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 1.5
+        }
+      ],
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
-          "Next": "AnalysisFailedAggregation"
+          "ResultPath": "$.llm_error",
+          "Next": "AnalysisSucceeded"
         }
       ],
-      "Next": "AnalysisSucceeded",
-      "ResultPath": "$.final_result"
+      "Next": "AnalysisSucceeded"
     },
     "AnalysisSucceeded": {
       "Type": "Succeed"
-    },
-    "AnalysisFailedMetadata": {
-      "Type": "Fail",
-      "Error": "MetadataExtractionError",
-      "Cause": "Failed to extract contract metadata"
-    },
-    "AnalysisFailedChunks": {
-      "Type": "Fail",
-      "Error": "ChunkCalculationError",
-      "Cause": "Failed to calculate contract chunks"
-    },
-    "AnalysisFailedAggregation": {
-      "Type": "Fail",
-      "Error": "AggregationError",
-      "Cause": "Failed to aggregate chunk results"
     }
   }
 }
