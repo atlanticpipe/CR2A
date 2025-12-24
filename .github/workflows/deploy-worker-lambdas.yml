@@ -35,6 +35,9 @@ jobs:
           - name: cr2a-aggregate-results
             file: lambda_aggregate_results.py
             handler: lambda_aggregate_results.lambda_handler
+          - name: cr2a-llm-refine
+            file: lambda_llm_refine.py
+            handler: lambda_llm_refine.lambda_handler
 
     steps:
       - name: Checkout code
@@ -63,6 +66,12 @@ jobs:
           
           # Copy Lambda function code
           cp worker/${{ matrix.function.file }} package/
+          
+          # Copy src/ directory for lambda_llm_refine which imports from src.core
+          if [ "${{ matrix.function.name }}" = "cr2a-llm-refine" ]; then
+            cp -r src package/
+            echo "Included src/ directory for LLM dependencies"
+          fi
           
           # Create deployment zip
           cd package
@@ -145,10 +154,11 @@ jobs:
         run: |
           echo "Verifying all worker Lambda functions..."
           
-          FUNCTIONS=("cr2a-get-metadata" "cr2a-calculate-chunks" "cr2a-analyzer-worker" "cr2a-aggregate-results")
+          FUNCTIONS=("cr2a-get-metadata" "cr2a-calculate-chunks" "cr2a-analyzer-worker" "cr2a-aggregate-results" "cr2a-llm-refine")
           
           for func in "${FUNCTIONS[@]}"; do
-            echo "\nChecking $func..."
+            echo ""
+            echo "Checking $func..."
             aws lambda get-function-configuration \
               --function-name $func \
               --region ${{ env.AWS_REGION }} \
@@ -156,4 +166,5 @@ jobs:
               --output table
           done
           
-          echo "\n✅ All worker Lambda functions verified!"
+          echo ""
+          echo "✅ All worker Lambda functions verified!"
