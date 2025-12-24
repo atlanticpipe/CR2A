@@ -1,690 +1,352 @@
+"""
+CR2A REST API - Contract Risk & Compliance Analyzer
+Provides endpoints for contract submission, analysis, and progress tracking.
+"""
+
 from __future__ import annotations
 
+import asyncio
 import json
-import os
-import tempfile
-import uuid
 import logging
-import boto3
+import os
+import uuid
+from datetime import datetime
+from io import BytesIO
+from typing import Optional
 
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from flask import Flask, request, jsonify, Response, stream_with_context
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from src.core.config import AppConfig, get_secret_env_or_aws
+from src.core.llm_analyzer import LLMAnalyzer, AnalysisStage, ProgressUpdate, AnalysisResult
+from src.services.document_processor import DocumentProcessor
 
-# Core business logic
-from src.core.analyzer import analyze_to_json
-from src.core.validator import validate_filled_template
-
-# Services
-from src.services.openai_client import OpenAIClientError, refine_cr2a
-from src.services.pdf_export import export_pdf_from_filled_json
-from src.services.storage import (
-    get_s3_client,
-    load_upload_bucket,
-    load_output_bucket,
-    build_output_key,
-    build_s3_uri,
-    download_from_s3,
-    upload_artifacts,
-    generate_download_url,
-    generate_upload_url,
-    MAX_FILE_MB,
-    MAX_FILE_BYTES,
-    UPLOAD_EXPIRES_SECONDS,
-    UPLOAD_PREFIX,
-    OUTPUT_BUCKET,
-    OUTPUT_PREFIX,
-    OUTPUT_EXPIRES_SECONDS,
-    AWS_REGION,
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-
-# Schema management
-from src.schemas.policy_loader import load_validation_rules, load_output_schema
-from src.schemas.normalizer import normalize_to_schema
-from src.schemas.template_spec import CR2A_TEMPLATE_SPEC
-
-# Utils
-from src.utils.mime_utils import infer_extension_from_content_type_or_magic, infer_mime_type
-
-# Initialize AWS clients
-s3_client = boto3.client('s3')
-lambda_client = boto3.client('lambda')
-dynamodb = boto3.resource('dynamodb')
-jobs_table = dynamodb.Table('cr2a-jobs')
-stepfunctions_client = boto3.client('stepfunctions')
-STEP_FUNCTIONS_ARN = 'arn:aws:states:us-east-1:143895994429:stateMachine:cr2a-contract-analysis'
-
-# Environment config
-RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-# FastAPI app
-app = FastAPI(title="CR2A API", version="0.1.0")
-
-# CORS
-allow_origins = os.getenv("CORS_ALLOW_ORIGINS", "*")
-origins: List[str] = [o.strip() for o in allow_origins.split(",")] if allow_origins else ["*"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["content-type", "authorization"],
-)
-
-LOG_LEVEL = os.getenv("CR2A_LOG_LEVEL", "INFO").upper()
-# Configure root logging once so API + OpenAI client emit debug traces when requested.
-logging.basicConfig(level=LOG_LEVEL, format="%(levelname)s %(name)s: %(message)s")
-logging.getLogger("src.api.main").setLevel(LOG_LEVEL)
-logging.getLogger("src.services.openai_client").setLevel(LOG_LEVEL)
-
 logger = logging.getLogger(__name__)
 
-# API Models
-class UploadUrlResponse(BaseModel):
-    uploadUrl: str
-    url: str
-    upload_method: str = "PUT"
-    fields: Optional[dict] = None
-    bucket: str
-    key: str
-    expires_in: int
-    headers: Optional[Dict[str, str]] = None
+# Initialize Flask app
+app = Flask(__name__)
+CORS(app)
 
-class AnalysisRequestPayload(BaseModel):
-    contract_id: str
-    contract_uri: Optional[str] = None
-    key: Optional[str] = None
-    llm_enabled: bool = True
+# Configuration
+MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500 MB
+ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
+UPLOAD_FOLDER = "/tmp/cr2a_uploads"
 
-class AnalysisResponse(BaseModel):
-    run_id: str
-    status: str
-    completed_at: datetime
-    manifest: dict
-    download_url: Optional[str] = None
-    filled_template_url: Optional[str] = None
-    error: Optional[dict] = None
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-class JobResponse(BaseModel):
-    job_id: str
-    status: str
-    message: str
-    status_url: str
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 
-# Helper Functions
-def _http_error(status: int, category: str, message: str) -> HTTPException:
-    """Standardized error envelope for consistent API responses."""
-    return HTTPException(status_code=status, detail={"category": category, "message": message})
+# Global state (in production, use Redis or database)
+analysis_store = {}
 
-def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
-    """
-    Extract progress information from Step Functions execution history.
-    
-    Maps Lambda function names to user-friendly step names and calculates progress.
-    
-    Args:
-        events: List of execution events from Step Functions history
-    
-    Returns:
-        Dict with: current_step, steps_completed, total_steps, progress_percent, step_status
-    """
-    
-    # Map Lambda function names to user-friendly step names
-    # These correspond to the state machine definition in worker/step_functions_state_machine.json
-    STEP_MAPPING = {
-        'cr2a-get-metadata': 'Extracting Metadata',
-        'cr2a-calculate-chunks': 'Calculating Chunks',
-        'cr2a-analyzer-worker': 'Analyzing Content',
-        'cr2a-aggregate-results': 'Aggregating Results',
-    }
-    
-    # Expected step order in the workflow
-    EXPECTED_STEPS = [
-        'Extracting Metadata',
-        'Calculating Chunks',
-        'Analyzing Content',
-        'Aggregating Results',
-    ]
-    
-    completed_steps = set()
-    current_step = None
-    step_status = None
-    execution_started = False
-    
-    # Parse Step Functions execution history events
-    for event in events:
-        event_type = event.get('type', '')
-        
-        # Track execution start
-        if event_type == 'ExecutionStarted':
-            execution_started = True
-        
-        # Capture task state entered
-        elif event_type == 'TaskStateEntered':
-            details = event.get('stateEnteredEventDetails', {})
-            # The resource field contains the Lambda ARN
-            resource = details.get('resource', '')
-            if resource:
-                # Extract function name from ARN
-                # arn:aws:lambda:region:account:function:name -> name
-                func_name = resource.split(':')[-1] if ':' in resource else resource
-                # Map to user-friendly name
-                user_step = STEP_MAPPING.get(func_name, func_name)
-                current_step = user_step
-                step_status = 'running'
-        
-        # Track successful Lambda completions
-        elif event_type == 'TaskSucceeded':
-            details = event.get('stateEnteredEventDetails', {})
-            resource = details.get('resource', '')
-            if resource:
-                func_name = resource.split(':')[-1] if ':' in resource else resource
-                user_step = STEP_MAPPING.get(func_name, func_name)
-                completed_steps.add(user_step)
-                current_step = user_step
-                step_status = 'completed'
-        
-        # Capture Lambda failures
-        elif event_type == 'TaskFailed':
-            details = event.get('stateEnteredEventDetails', {})
-            resource = details.get('resource', '')
-            if resource:
-                func_name = resource.split(':')[-1] if ':' in resource else resource
-                user_step = STEP_MAPPING.get(func_name, func_name)
-                current_step = user_step
-            step_status = 'failed'
-        
-        # Also track LambdaFunctionFailed events which have different event structure
-        elif event_type == 'LambdaFunctionFailed' or event_type == 'LambdaFunctionScheduleFailed':
-            step_status = 'failed'
-            if 'stateEnteredEventDetails' in event:
-                details = event.get('stateEnteredEventDetails', {})
-                resource = details.get('resource', '')
-                if resource:
-                    func_name = resource.split(':')[-1] if ':' in resource else resource
-                    current_step = STEP_MAPPING.get(func_name, func_name)
-    
-    # Calculate progress percentage based on completed steps
-    steps_completed = len(completed_steps)
-    total_steps = len(EXPECTED_STEPS)
-    progress_percent = int((steps_completed / total_steps) * 100) if total_steps > 0 else 0
-    
-    # If execution started but no steps tracked yet, show initial progress
-    if execution_started and not current_step:
-        current_step = 'Starting analysis...'
-        step_status = 'pending'
-        progress_percent = 5  # Small initial progress to show something is happening
-    
-    logger.debug(
-        "Parsed execution progress",
-        extra={
-            "completed_steps": list(completed_steps),
-            "current_step": current_step,
-            "progress_percent": progress_percent,
-            "step_status": step_status,
-        }
-    )
-    
-    return {
-        'current_step': current_step or 'Starting...',
-        'steps_completed': steps_completed,
-        'total_steps': total_steps,
-        'progress_percent': progress_percent,
-        'step_status': step_status or 'pending',
-    }
 
-# Endpoints
-@app.get("/health")
+def allowed_file(filename: str) -> bool:
+    """Check if file extension is allowed."""
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def initialize_analyzer() -> LLMAnalyzer:
+    """Initialize the LLM analyzer with API credentials."""
+    config = AppConfig.from_env()
+
+    api_key = get_secret_env_or_aws("OPENAI_API_KEY", "OPENAI_API_KEY_ARN")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not found in environment or AWS Secrets Manager")
+
+    analyzer = LLMAnalyzer(api_key=api_key, model=config.openai_model)
+    return analyzer
+
+
+@app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint."""
-    return {"ok": True, "version": app.version}
+    return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat()}), 200
 
-@app.get("/upload-url", response_model=UploadUrlResponse)
-def upload_url(
-    filename: str = Query(..., description="Original filename"),
-    contentType: str = Query("application/octet-stream", description="MIME type"),
-    size: int = Query(..., description="File size in bytes"),
-):
-    """Generate a presigned S3 upload URL."""
-    if size > MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large: {size} bytes. Limit is {MAX_FILE_BYTES} bytes ({MAX_FILE_MB} MB).",
-        )
 
-    try:
-        result = generate_upload_url(filename, contentType)
-        return UploadUrlResponse(**result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Presign failed: {e}")
+@app.route("/analyze", methods=["POST"])
+def submit_analysis():
+    """
+    Submit a contract for analysis.
 
-@app.post("/upload-local")
-async def upload_local(file: UploadFile = File(...), key: str = Query(..., description="Storage key from presign")):
-    """Minimal local upload handler for when S3 is unavailable."""
-    size = 0
-    dest = RUN_OUTPUT_ROOT / "uploads" / key
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    Form data:
+        - file: PDF/DOCX/TXT file
+        - contract_id: Unique contract identifier (optional)
 
-    try:
-        with dest.open("wb") as fh:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MAX_FILE_BYTES:
-                    raise _http_error(400, "ValidationError", f"File exceeds limit of {MAX_FILE_MB} MB")
-                fh.write(chunk)
-    finally:
-        await file.close()
+    Returns:
+        JSON with analysis_id, status, and submission timestamp
+    """
+    logger.info("Received analysis submission")
 
-    return {"location": f"file://{dest}"}
+    # Validate file
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
 
-def _run_analysis(payload: AnalysisRequestPayload):
-    """Main analysis orchestration logic."""
-    # Resolve contract URI
-    contract_uri = payload.contract_uri
-    if not contract_uri and payload.key:
-        bucket = load_upload_bucket()
-        contract_uri = build_s3_uri(payload.key, bucket)
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No file selected"})
 
-    if not contract_uri:
-        raise _http_error(400, "ValidationError", "Provide contract_uri or upload key to run analysis.")
+    if not allowed_file(file.filename):
+        return jsonify(
+            {"error": f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"}
+        ), 400
 
-    run_id = f"run_{uuid.uuid4().hex[:12]}"
-    original_ext = Path(urlparse(str(contract_uri)).path).suffix.lower()
-    dest_name = f"input{original_ext}" if original_ext else "input.bin"
+    # Generate IDs
+    analysis_id = str(uuid.uuid4())
+    contract_id = request.form.get("contract_id", f"CONTRACT-{analysis_id[:8]}")
 
-    llm_mode = "off"
-    artifact_refs: Dict[str, str] = {}
+    # Save file
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], f"{analysis_id}_{filename}")
+    file.save(filepath)
 
-    try:
-        RUN_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=RUN_OUTPUT_ROOT) as tmpdir:
-            run_dir = Path(tmpdir)
-            input_path = run_dir / dest_name
-
-            # Download contract from S3
-            downloaded = download_from_s3(str(contract_uri), input_path)
-
-            # Infer file type if needed
-            inferred_ext = None
-            target_path = downloaded
-            if not original_ext or original_ext == ".bin":
-                try:
-                    inferred_ext = infer_extension_from_content_type_or_magic(downloaded)
-                except ValueError as exc:
-                    raise _http_error(400, "ValidationError", f"Unable to determine file type: {exc}")
-
-                if inferred_ext and downloaded.suffix.lower() != inferred_ext:
-                    target_path = downloaded.with_suffix(inferred_ext)
-                    downloaded = downloaded.rename(target_path)
-
-            input_path = target_path
-
-            try:
-                mime_type = infer_mime_type(input_path)
-            except ValueError:
-                mime_type = "unknown"
-
-            logger.debug(
-                "Prepared analysis input",
-                extra={
-                    "file_name": input_path.name,
-                    "original_ext": original_ext or "none",
-                    "inferred_ext": inferred_ext or input_path.suffix,
-                    "mime_type": mime_type,
-                    "detected_via": "uri-extension" if original_ext and original_ext != ".bin" else "content-sniff",
-                },
-            )
-
-            # Run heuristic analysis
-            raw_json = analyze_to_json(downloaded, REPO_ROOT, ocr=os.getenv("OCR_MODE", "auto"))
-
-            # LLM refinement - always enabled when llm_enabled=True
-            if payload.llm_enabled:
-                llm_mode = "on"
-                try:
-                    refined = refine_cr2a(raw_json)
-                    if isinstance(refined, dict) and refined:
-                        raw_json = refined
-                except OpenAIClientError as exc:
-                    # Trace OpenAI failures with category/status so status mapping is visible in logs.
-                    logger.exception(
-                        "LLM refinement failed",
-                        extra={"contract_id": payload.contract_id, "category": exc.category, "error_message": str(exc)},
-                    )
-                    status_map = {
-                        "ValidationError": 400,
-                        "TimeoutError": 504,
-                        "NetworkError": 502,
-                        "ProcessingError": 500,
-                    }
-                    status = status_map.get(exc.category, 500)
-                    raise _http_error(status, exc.category, str(exc))
-                except HTTPException:
-                    # Bubble up FastAPI errors untouched to preserve status code.
-                    raise
-                except Exception as exc:
-                    # Wrap unexpected errors so callers always receive a typed HTTP envelope.
-                    logger.exception(
-                        "Unexpected LLM refinement failure",
-                        extra={"contract_id": payload.contract_id, "category": "ProcessingError", "error_message": str(exc)},
-                    )
-                    raise _http_error(500, "ProcessingError", f"LLM refinement failed: {exc}") from exc
-
-            # Normalize to schema
-            rules = load_validation_rules(REPO_ROOT)
-            val = rules.get("validation", rules)
-            closing_line = val.get("mandatory_fields", {}).get(
-                "section_II_to_VI_closing_line",
-                "All applicable clauses for [Item #/Title] have been identified and analyzed.",
-            )
-            normalized = normalize_to_schema(raw_json, closing_line, None)
-
-            # Validate
-            schema = load_output_schema(REPO_ROOT)
-            validation = validate_filled_template(normalized, schema, rules)
-            if not validation.ok:
-                details = "; ".join(f"{f.code}: {f.message}" for f in validation.findings)
-                raise _http_error(400, "ValidationError", details)
-
-            # Save filled template
-            filled_path = run_dir / "filled_template.json"
-            filled_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
-
-            # Export PDF
-            output_pdf = run_dir / "cr2a_export.pdf"
-            export_path = export_pdf_from_filled_json(
-                normalized,
-                output_pdf,
-                backend="reportlab",
-                template_docx=REPO_ROOT / "templates" / "CR2A_Template.docx",
-                title="Contract Risk & Compliance Analysis",
-            )
-
-            # Upload artifacts to S3
-            artifact_refs = upload_artifacts(run_id, normalized, export_path)
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise _http_error(500, "ProcessingError", str(exc))
-
-    # Build response
-    completed_at = datetime.now(timezone.utc)
-    manifest = {
-        "contract_id": payload.contract_id,
-        "contract_uri": contract_uri,
-        "llm_enabled": payload.llm_enabled,
-        "policy_version": "schemas@v1.0",
-        "ocr_mode": os.getenv("OCR_MODE", "auto"),
-        "llm_refinement": llm_mode,
-        "validation": {"ok": True, "findings": len(validation.findings)},
-        "export": {"pdf": artifact_refs["pdf_key"], "backend": "reportlab"},
+    # Store analysis metadata
+    analysis_store[analysis_id] = {
+        "status": "queued",
+        "contract_id": contract_id,
+        "filepath": filepath,
+        "submitted_at": datetime.utcnow().isoformat(),
+        "progress": {
+            "stage": AnalysisStage.INITIALIZATION.value,
+            "percentage": 0,
+            "message": "Queued for analysis",
+        },
     }
 
-    pdf_url = generate_download_url(artifact_refs["pdf_key"])
-    json_url = generate_download_url(artifact_refs["json_key"])
+    logger.info(f"Analysis {analysis_id} queued for contract {contract_id}")
 
-    return AnalysisResponse(
-        run_id=run_id,
-        status="completed",
-        completed_at=completed_at,
-        manifest=manifest,
-        download_url=pdf_url,
-        filled_template_url=json_url,
-        error=None,
+    return (
+        jsonify(
+            {
+                "analysis_id": analysis_id,
+                "contract_id": contract_id,
+                "status": "queued",
+                "submitted_at": analysis_store[analysis_id]["submitted_at"],
+            }
+        ),
+        202,
     )
 
-@app.post("/analyze", response_model=JobResponse)
-async def analyze_contract(payload: AnalysisRequestPayload):
+
+@app.route("/analyze/<analysis_id>/stream", methods=["GET"])
+def stream_analysis(analysis_id: str):
     """
-    Analyze a contract asynchronously using Step Functions.
-    
-    Accepts a pre-uploaded S3 key from the presigned upload workflow.
-    Does NOT accept file binary uploads directly.
-    
-    Args:
-        payload: AnalysisRequestPayload with:
-            - key: S3 key of uploaded contract (from /upload-url presign)
-            - contract_id: Identifier for this contract
-            - llm_enabled: Whether to apply LLM refinement (default: true)
-    
+    Stream analysis progress and results.
+
+    Returns: Server-sent events stream with progress updates and final result
+    """
+    if analysis_id not in analysis_store:
+        return jsonify({"error": f"Analysis {analysis_id} not found"}), 404
+
+    def event_stream():
+        """Generate server-sent events for analysis progress."""
+        try:
+            # Get analysis metadata
+            metadata = analysis_store[analysis_id]
+            filepath = metadata["filepath"]
+            contract_id = metadata["contract_id"]
+
+            # Extract text from file
+            processor = DocumentProcessor()
+            contract_text = processor.extract_text(filepath)
+            metadata["status"] = "processing"
+
+            # Initialize analyzer
+            analyzer = initialize_analyzer()
+
+            # Run streaming analysis
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            async def run_analysis():
+                async for update in analyzer.analyze_streaming(
+                    contract_text=contract_text,
+                    contract_id=contract_id,
+                    analysis_id=analysis_id,
+                ):
+                    if isinstance(update, ProgressUpdate):
+                        # Yield progress update
+                        metadata["progress"] = {
+                            "stage": update.stage.value,
+                            "percentage": update.percentage,
+                            "message": update.message,
+                            "detail": update.detail,
+                        }
+
+                        yield f"data: {json.dumps({'type': 'progress', 'data': metadata['progress']})}\n\n"
+
+                    elif isinstance(update, AnalysisResult):
+                        # Yield final result
+                        metadata["status"] = "complete"
+                        metadata["result"] = {
+                            "analysis_id": update.analysis_id,
+                            "contract_id": update.contract_id,
+                            "risk_level": update.risk_level,
+                            "overall_score": update.overall_score,
+                            "executive_summary": update.executive_summary,
+                            "findings": [
+                                {
+                                    "clause_type": f.clause_type,
+                                    "risk_level": f.risk_level,
+                                    "concern": f.concern,
+                                    "recommendation": f.recommendation,
+                                }
+                                for f in update.findings
+                            ],
+                            "recommendations": update.recommendations,
+                            "compliance_issues": update.compliance_issues,
+                            "metadata": update.metadata,
+                        }
+                        metadata["completed_at"] = datetime.utcnow().isoformat()
+
+                        yield f"data: {json.dumps({'type': 'result', 'data': metadata['result']})}\n\n"
+                        yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+
+            loop.run_until_complete(run_analysis())
+
+        except Exception as e:
+            logger.error(f"Error during streaming analysis: {e}")
+            analysis_store[analysis_id]["status"] = "error"
+            analysis_store[analysis_id]["error"] = str(e)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return Response(stream_with_context(event_stream()), mimetype="text/event-stream")
+
+
+@app.route("/status/<analysis_id>", methods=["GET"])
+def get_status(analysis_id: str):
+    """
+    Get current status and progress of an analysis.
+
     Returns:
-        JobResponse with job_id and status tracking URL
+        JSON with status, progress, and metadata
     """
-    try:
-        # Validate that we have either a key or contract_uri
-        if not payload.key and not payload.contract_uri:
-            raise _http_error(
-                400,
-                "ValidationError",
-                "Provide either 'key' (from presigned upload) or 'contract_uri' (S3 URI)"
-            )
-        
-        # Generate job ID
-        job_id = str(uuid.uuid4())
-        
-        # Determine S3 key: use provided key or extract from URI
-        s3_key = payload.key
-        if not s3_key and payload.contract_uri:
-            parsed = urlparse(payload.contract_uri)
-            s3_key = parsed.path.lstrip('/')
-        
-        # Get upload bucket name
-        upload_bucket = load_upload_bucket()
-        
-        # Create job record in DynamoDB
-        jobs_table.put_item(
-            Item={
-                'job_id': job_id,
-                'status': 'queued',
-                'progress': 0,
-                'created_at': datetime.now(timezone.utc).isoformat(),
-                'contract_id': payload.contract_id,
-                'llm_enabled': payload.llm_enabled,
-                's3_bucket': upload_bucket,
-                's3_key': s3_key,
-            }
-        )
-        
-        # Prepare Step Functions input
-        execution_input = {
-            'job_id': job_id,
-            'contract_id': payload.contract_id,
-            's3_bucket': upload_bucket,
-            's3_key': s3_key,
-            'llm_enabled': payload.llm_enabled,
+    if analysis_id not in analysis_store:
+        return jsonify({"error": f"Analysis {analysis_id} not found"}), 404
+
+    metadata = analysis_store[analysis_id]
+    return jsonify(
+        {
+            "analysis_id": analysis_id,
+            "contract_id": metadata["contract_id"],
+            "status": metadata["status"],
+            "progress": metadata.get("progress"),
+            "submitted_at": metadata["submitted_at"],
+            "completed_at": metadata.get("completed_at"),
+            "error": metadata.get("error"),
         }
-        
-        logger.info(
-            "Starting contract analysis",
-            extra={
-                "job_id": job_id,
-                "contract_id": payload.contract_id,
-                "s3_key": s3_key,
-                "llm_enabled": payload.llm_enabled,
-            }
-        )
-        
-        # Start Step Functions execution
-        response = stepfunctions_client.start_execution(
-            stateMachineArn=STEP_FUNCTIONS_ARN,
-            name=f"analysis-{job_id}",
-            input=json.dumps(execution_input)
-        )
-        
-        # Update job with execution ARN
-        jobs_table.update_item(
-            Key={'job_id': job_id},
-            UpdateExpression='SET execution_arn = :arn, #status = :status',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={
-                ':arn': response['executionArn'],
-                ':status': 'processing'
-            }
-        )
-        
-        return JobResponse(
-            job_id=job_id,
-            status='queued',
-            message='Analysis started. Use /status/{job_id} to check progress.',
-            status_url=f'/status/{job_id}'
-        )
-        
-    except _http_error as e:
-        raise e
-    except Exception as e:
-        logger.exception("Failed to start analysis", extra={"error": str(e)})
-        raise HTTPException(status_code=500, detail=str(e))
+    ), 200
 
-@app.get("/status/{job_id}")
-async def get_job_status(job_id: str):
+
+@app.route("/results/<analysis_id>", methods=["GET"])
+def get_results(analysis_id: str):
     """
-    Check the status of an analysis job with real-time Step Functions progress.
-    
+    Get analysis results.
+
     Returns:
-    - Current execution status (queued, processing, completed, failed)
-    - Progress percentage
-    - Current step name (from Step Functions)
-    - Results URL when complete
+        JSON with complete analysis results
     """
-    try:
-        # Get job record from DynamoDB
-        response = jobs_table.get_item(Key={'job_id': job_id})
-        
-        if 'Item' not in response:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-        
-        job = response['Item']
-        
-        # Query Step Functions for live execution status
-        if 'execution_arn' in job:
-            try:
-                execution = stepfunctions_client.describe_execution(
-                    executionArn=job['execution_arn']
-                )
-                
-                # Map Step Functions status to UI-friendly status
-                sf_status = execution.get('status', 'UNKNOWN')
-                status_map = {
-                    'RUNNING': 'processing',
-                    'SUCCEEDED': 'completed',
-                    'FAILED': 'failed',
-                    'TIMED_OUT': 'failed',
-                    'ABORTED': 'failed',
+    if analysis_id not in analysis_store:
+        return jsonify({"error": f"Analysis {analysis_id} not found"}), 404
+
+    metadata = analysis_store[analysis_id]
+
+    if metadata["status"] != "complete":
+        return (
+            jsonify(
+                {"error": f"Analysis status is {metadata['status']}, not complete"}
+            ),
+            202,
+        )
+
+    return jsonify(metadata.get("result")), 200
+
+
+@app.route("/download/<analysis_id>", methods=["GET"])
+def download_report(analysis_id: str):
+    """
+    Download analysis report as PDF.
+
+    Returns:
+        PDF file
+    """
+    if analysis_id not in analysis_store:
+        return jsonify({"error": f"Analysis {analysis_id} not found"}), 404
+
+    metadata = analysis_store[analysis_id]
+
+    if metadata["status"] != "complete":
+        return (
+            jsonify({"error": f"Analysis not complete"}),
+            202,
+        )
+
+    result = metadata.get("result")
+    if not result:
+        return jsonify({"error": "No results available"}), 404
+
+    # TODO: Implement PDF export using pdf_export service
+    # For now, return JSON
+    return jsonify(result), 200
+
+
+@app.route("/analyses", methods=["GET"])
+def list_analyses():
+    """
+    List all analyses (with pagination).
+
+    Returns:
+        JSON array of analysis metadata
+    """
+    limit = request.args.get("limit", 50, type=int)
+    offset = request.args.get("offset", 0, type=int)
+
+    analyses = list(analysis_store.items())[offset : offset + limit]
+
+    return jsonify(
+        {
+            "total": len(analysis_store),
+            "limit": limit,
+            "offset": offset,
+            "analyses": [
+                {
+                    "analysis_id": aid,
+                    "contract_id": metadata["contract_id"],
+                    "status": metadata["status"],
+                    "submitted_at": metadata["submitted_at"],
                 }
-                job['status'] = status_map.get(sf_status, 'processing')
-                job['step_functions_status'] = sf_status
-                
-                # Extract progress info from execution history
-                history = stepfunctions_client.get_execution_history(
-                    executionArn=job['execution_arn'],
-                    maxItems=100
-                )
-                
-                # Parse execution events to determine current step
-                progress_info = _parse_execution_progress(history['events'])
-                job.update(progress_info)
-                
-                # Log progress for debugging
-                logger.info(
-                    "Job status check",
-                    extra={
-                        "job_id": job_id,
-                        "sf_status": sf_status,
-                        "progress_percent": progress_info.get('progress_percent'),
-                        "current_step": progress_info.get('current_step'),
-                    }
-                )
-                
-                # If execution is complete, capture output
-                if sf_status == 'SUCCEEDED':
-                    try:
-                        output = json.loads(execution.get('output', '{}'))
-                        job['result_key'] = output.get('result_key')
-                        job['filled_template_key'] = output.get('filled_template_key')
-                        if execution.get('stopDate'):
-                            job['completed_at'] = execution['stopDate'].isoformat()
-                    except (json.JSONDecodeError, AttributeError):
-                        pass
-                
-                # If execution failed, capture error
-                elif sf_status == 'FAILED':
-                    job['error'] = {
-                        'cause': execution.get('cause', 'Unknown error'),
-                        'error': execution.get('error', 'UNKNOWN'),
-                    }
-                
-            except Exception as e:
-                logger.warning(
-                    "Failed to query Step Functions",
-                    extra={"job_id": job_id, "execution_arn": job.get('execution_arn'), "error": str(e)}
-                )
-                # Don't fail the response; return what we have from DynamoDB
-        
-        # Generate presigned result URL if job is complete and has result
-        if job.get('status') == 'completed' and job.get('result_key'):
-            try:
-                result_url = s3_client.generate_presigned_url(
-                    'get_object',
-                    Params={
-                        'Bucket': load_output_bucket(),
-                        'Key': job['result_key']
-                    },
-                    ExpiresIn=3600
-                )
-                job['result_url'] = result_url
-                
-                # Also provide filled template URL
-                if job.get('filled_template_key'):
-                    template_url = s3_client.generate_presigned_url(
-                        'get_object',
-                        Params={
-                            'Bucket': load_output_bucket(),
-                            'Key': job['filled_template_key']
-                        },
-                        ExpiresIn=3600
-                    )
-                    job['filled_template_url'] = template_url
-            except Exception as e:
-                logger.warning(
-                    "Failed to generate presigned URLs",
-                    extra={"job_id": job_id, "error": str(e)}
-                )
-        
-        return job
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get job status", extra={"job_id": job_id, "error": str(e)})
-        raise HTTPException(status_code=500, detail=str(e))
+                for aid, metadata in analyses
+            ],
+        }
+    ), 200
 
-@app.get("/runs/{run_id}/report")
-def download_report(run_id: str):
-    """Download analysis PDF report."""
-    key = build_output_key(run_id, "cr2a_export.pdf")
-    url = generate_download_url(key)
-    return RedirectResponse(url=url, status_code=307)
 
-@app.get("/runs/{run_id}/filled-template")
-def download_json(run_id: str):
-    """Download filled template JSON."""
-    key = build_output_key(run_id, "filled_template.json")
-    url = generate_download_url(key)
-    return RedirectResponse(url=url, status_code=307)
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """Handle file too large error."""
+    return jsonify({"error": "File too large. Maximum size is 500 MB"}), 413
 
-# Lambda handler
-from mangum import Mangum
-handler = Mangum(app, lifespan="off", api_gateway_base_path="/prod")
+
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors."""
+    return jsonify({"error": "Endpoint not found"}), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors."""
+    logger.error(f"Internal server error: {error}")
+    return jsonify({"error": "Internal server error"}), 500
+
+
+if __name__ == "__main__":
+    # For local development only
+    app.run(debug=True, port=5000)
