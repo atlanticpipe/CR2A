@@ -1,360 +1,533 @@
-"""
-CR2A Frontend Application
-Handles file submission, progress tracking, and results display.
-"""
+document.addEventListener("DOMContentLoaded", () => {
+  "use strict";
 
-// Configuration
-const API_BASE_URL = window.env?.API_BASE_URL || 'http://localhost:5000';
-const UPLOAD_CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+  // Backend URL comes from env.js or a global override; GitHub Pages keeps this static.
+  const configuredApiBase =
+    (typeof window !== "undefined" &&
+      (window._env?.API_BASE_URL || window.CR2A_API_BASE)) ||
+    "";
+  const configuredAuthToken =
+    (typeof window !== "undefined" &&
+      (window._env?.API_AUTH_TOKEN || window.CR2A_API_TOKEN)) ||
+    "";
+  const API_BASE_URL = configuredApiBase.replace(/\/+$/, "");
+  const AUTHORIZATION = configuredAuthToken.trim();
+  const requireApiBase = () => {
+    // Fail fast if the API base is missing so uploads never target the wrong host.
+    if (!API_BASE_URL) {
+      throw new Error(
+        "API base URL is not set. Edit webapp/env.js or set window.CR2A_API_BASE to your API Gateway base path.",
+      );
+    }
+    return API_BASE_URL;
+  };
+  const requireAuthHeader = () => {
+    // Lambda authorizer guard: ensure Authorization header is always sent.
+    if (!AUTHORIZATION) {
+      // For MVP: send a dummy token since authorizer allows all requests
+      return { Authorization: "Bearer mvp-token" };
+    }
+    return { Authorization: AUTHORIZATION };
+  };
+  const POLICY_DOC_URL = ""; // Optional link to your policy/rulebook docs
+  const MAX_FILE_MB = 500; // client-side guard; matches CLI default
+  const UPLOAD_ENDPOINT = "/upload-url"; // expected presign endpoint relative to API_BASE_URL
+  const getUploadUrl = async (filename, contentType, size) => {
+    // Request a presigned URL for the given file with explicit params.
+    const apiBase = requireApiBase();
+    const params = new URLSearchParams({
+      filename,
+      contentType,
+      size: String(size),
+    });
 
-// State management
-let currentAnalysisId = null;
-let currentContractId = null;
-let analysisInProgress = false;
+    const res = await fetch(`${apiBase}${UPLOAD_ENDPOINT}?${params.toString()}`, {
+      headers: requireAuthHeader(), // Propagate caller auth for Lambda authorizer.
+    });
+    if (!res.ok) {
+      throw new Error("Failed to get upload URL");
+    }
+    return res.json(); // { uploadUrl, key }
+  };
 
-// DOM Elements
-const fileInput = document.getElementById('file-input');
-const contractIdInput = document.getElementById('contract-id');
-const submitBtn = document.getElementById('submit-btn');
-const progressContainer = document.getElementById('progress-container');
-const resultsContainer = document.getElementById('results-container');
-const progressBar = document.getElementById('progress-bar');
-const progressText = document.getElementById('progress-text');
-const stageIndicator = document.getElementById('stage-indicator');
+  // Cache DOM nodes once after load to avoid repeated lookups.
+  const form = document.querySelector("#submission-form");
+  const dropzone = document.querySelector("#dropzone");
+  const fileInput = document.querySelector("#file-input");
+  const contractIdInput = document.querySelector('input[name="contract_id"]');
+  const llmToggle = document.querySelector("#llm_toggle");
+  const fileName = document.querySelector("#file-name");
+  const timelineEl = document.querySelector("#timeline");
+  const validationStatus = document.querySelector("#validation-status");
+  const exportStatus = document.querySelector("#export-status");
+  const downloadReportBtn = document.querySelector("#download-report");
+  const runDemoBtn = document.querySelector("#run-demo");
+  const docLinkBtn = document.querySelector("#doc-link");
+  const uploadProgress = document.querySelector("#upload-progress");
+  const uploadProgressBar = document.querySelector("#upload-progress-bar");
+  const uploadProgressText = document.querySelector("#upload-progress-text");
+  const uploadMessage = document.querySelector("#upload-message");
 
-// Event listeners
-submitBtn?.addEventListener('click', handleSubmit);
-fileInput?.addEventListener('change', handleFileSelect);
+  // Provide demo output for mock mode and initial render.
+  const sampleResult = {
+    // Demo payload mirrors the backend response shape so UI wiring stays consistent.
+    run_id: "run_demo_123",
+    status: "completed",
+    completed_at: new Date().toISOString(),
+    llm_enabled: true,
+    download_url: "https://example.com/cr2a_export.pdf",
+    manifest: {
+      contract_id: "FDOT-Bridge-2024-18",
+      validation: { ok: true, findings: 0 },
+      export: { pdf: "cr2a_export.pdf", backend: "docx" },
+      ocr_mode: "auto",
+      llm_refinement: "on",
+    },
+  };
 
-/**
- * Handle file selection
- */
-function handleFileSelect(e) {
-    const file = e.target.files?.[0];
+  const handleFileSelect = (file) => {
+    // Enforce local size guard and surface the selected filename.
     if (!file) return;
-
-    // Validate file type
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (!['pdf', 'docx', 'txt'].includes(ext)) {
-        showError('Invalid file type. Please upload PDF, DOCX, or TXT.');
-        return;
+    const mb = file.size / 1024 / 1024;
+    if (mb > MAX_FILE_MB) {
+      fileInput.value = "";
+      fileName.textContent = "No file selected";
+      setUploadMessage(`File is ${(mb).toFixed(2)} MB; limit is ${MAX_FILE_MB} MB.`, true);
+      return;
     }
+    fileName.textContent = `${file.name} (${mb.toFixed(2)} MB)`;
+    setUploadMessage("");
+  };
 
-    // Validate file size (500MB)
-    const maxSize = 500 * 1024 * 1024;
-    if (file.size > maxSize) {
-        showError('File too large. Maximum size is 500 MB.');
-        return;
+  dropzone?.addEventListener("dragover", (e) => {
+    // Highlight dropzone on drag to guide the user.
+    e.preventDefault();
+    dropzone.classList.add("dragging");
+  });
+
+  dropzone?.addEventListener("dragleave", () => {
+    dropzone.classList.remove("dragging");
+  });
+
+  dropzone?.addEventListener("drop", (e) => {
+    // Accept the first dropped file and mirror it into the file input for form submission.
+    e.preventDefault();
+    dropzone.classList.remove("dragging");
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      fileInput.files = e.dataTransfer.files;
+      handleFileSelect(file);
     }
+  });
 
-    // Show file info
-    const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
-    document.getElementById('file-info').textContent = `${file.name} (${sizeMB} MB)`;
-}
+  fileInput?.addEventListener("change", (e) => {
+    // Keep UI state in sync with manual file picker selection.
+    const file = e.target.files?.[0];
+    handleFileSelect(file);
+  });
 
-/**
- * Handle form submission
- */
-async function handleSubmit() {
-    if (analysisInProgress) {
-        showError('Analysis already in progress');
-        return;
+  const renderTimeline = (steps) => {
+    // Render timeline rows from the current progression state.
+    timelineEl.innerHTML = "";
+    steps.forEach((step) => {
+      const row = document.createElement("div");
+      row.className = "timeline-row";
+      const dot = document.createElement("div");
+      dot.className = `dot ${step.active ? "active" : ""}`;
+      const copy = document.createElement("div");
+      const title = document.createElement("p");
+      title.className = "title";
+      title.textContent = step.title;
+      const meta = document.createElement("p");
+      meta.className = "meta";
+      meta.textContent = step.meta;
+      copy.appendChild(title);
+      copy.appendChild(meta);
+      row.appendChild(dot);
+      row.appendChild(copy);
+      timelineEl.appendChild(row);
+    });
+  };
+
+  const resolveDownloadUrl = (payload) => {
+    // Only enable downloads when an explicit artifact URL exists and no errors were reported.
+    if (!payload || payload.error) return "";
+    const explicitUrl =
+      payload.filled_template_url ||
+      payload.filledTemplateUrl ||
+      payload.download_url ||
+      payload.downloadUrl;
+    return explicitUrl || "";
+  };
+
+  const setDownloadLink = (payload) => {
+    // Enable the report link only when a URL is ready.
+    if (!downloadReportBtn) return;
+    const url = resolveDownloadUrl(payload);
+    const ready = Boolean(url);
+    downloadReportBtn.setAttribute("aria-disabled", ready ? "false" : "true");
+    downloadReportBtn.classList.toggle("disabled", !ready);
+    downloadReportBtn.setAttribute("href", ready ? url : "#");
+    if (ready) {
+      downloadReportBtn.setAttribute("download", "cr2a_export.pdf");
+    } else {
+      downloadReportBtn.removeAttribute("download");
     }
+  };
 
-    const file = fileInput?.files?.[0];
-    if (!file) {
-        showError('Please select a file');
-        return;
+  const setOutputs = ({ validation, exportStatusText, payload }) => {
+    // Surface backend status and activate download link when available.
+    validationStatus.textContent = validation;
+    exportStatus.textContent = exportStatusText;
+    setDownloadLink(payload);
+  };
+
+  const setUploadProgress = (pct) => {
+    // Show a simple percentage bar while uploading to presigned URL.
+    if (!uploadProgress) return;
+    uploadProgress.hidden = false;
+    uploadProgressBar.style.setProperty("--pct", `${pct}%`);
+    uploadProgressText.textContent = `${Math.min(100, Math.max(0, pct)).toFixed(0)}%`;
+  };
+
+  const setUploadMessage = (msg, isError = false) => {
+    // Provide inline feedback next to the upload bar.
+    if (!uploadMessage) return;
+    uploadMessage.textContent = msg || "";
+    uploadMessage.style.color = isError ? "var(--danger)" : "var(--muted)";
+  };
+
+  const setRunState = (running) => {
+    // Disable the LLM toggle while a submission is active to prevent race conditions.
+    if (llmToggle) {
+      llmToggle.disabled = running;
+      llmToggle.setAttribute("aria-disabled", running ? "true" : "false");
     }
+  };
 
-    const contractId = contractIdInput?.value || `CONTRACT-${Date.now()}`;
+  const resetUploadUi = () => {
+    // Clear progress and messaging before a fresh upload attempt.
+    if (uploadProgress) uploadProgress.hidden = true;
+    if (uploadProgressBar) uploadProgressBar.style.setProperty("--pct", "0%");
+    if (uploadProgressText) uploadProgressText.textContent = "0%";
+    setUploadMessage("");
+  };
 
-    try {
-        // Submit file for analysis
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('contract_id', contractId);
+  const runMock = (payload) => {
+    // Simple simulated progression for offline demo mode.
+    const steps = [
+      { title: "Queued", meta: "Submission accepted and queued.", active: true },
+      { title: "OCR / text prep", meta: "Detecting scans, normalizing text.", active: false },
+      { title: "Policy validation", meta: "Running CR2A rules + schemas.", active: false },
+      { title: "LLM refinement (optional)", meta: "Applying OpenAI refinement if enabled.", active: false },
+      { title: "Export ready", meta: "PDF + JSON outputs available.", active: false },
+    ];
 
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Submitting...';
-        showProgress();
+    renderTimeline(steps);
+    setOutputs({
+      validation: "Pending",
+      exportStatusText: "Pending",
+      payload: payload,
+    });
 
-        const response = await fetch(`${API_BASE_URL}/analyze`, {
-            method: 'POST',
-            body: formData,
+    const advance = (index, metaOverride) => {
+      steps.forEach((s, i) => (s.active = i <= index));
+      if (metaOverride) steps[index].meta = metaOverride;
+      renderTimeline(steps);
+    };
+
+    setTimeout(() => advance(1, "OCR complete; ready for validation."), 500);
+    setTimeout(() => {
+      advance(2, "No blocking findings detected.");
+      setOutputs({
+        validation: "Passed",
+        exportStatusText: "Rendering PDF…",
+        payload: payload,
+      });
+    }, 1000);
+    setTimeout(() => {
+      advance(3, payload.llm_enabled ? "LLM refinement applied." : "LLM skipped (off).");
+    }, 1500);
+    setTimeout(() => {
+      advance(4, "Export finished.");
+      setOutputs({
+        validation: "Passed",
+        exportStatusText: "Completed",
+        payload: { ...payload, status: "completed", completed_at: new Date().toISOString() },
+      });
+    }, 2000);
+  };
+
+  const pollJobStatus = async (jobId, onProgress, onComplete, onError) => {
+    // Poll Step Functions execution for real-time progress.
+    let attempts = 0;
+    const apiBase = requireApiBase();
+    
+    const poll = async () => {
+      try {
+        const response = await fetch(`${apiBase}/status/${jobId}`, {
+          headers: requireAuthHeader(),
         });
-
-        if (response.status !== 202) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to submit analysis');
+        
+        if (!response.ok) {
+          throw new Error(`Status check failed: HTTP ${response.status}`);
         }
-
-        const data = await response.json();
-        currentAnalysisId = data.analysis_id;
-        currentContractId = data.contract_id;
-
-        console.log(`Analysis submitted: ${currentAnalysisId}`);
-        updateProgress(`Submitted for analysis`, 5);
-
-        // Start streaming results
-        await streamAnalysis(currentAnalysisId);
-
-    } catch (error) {
-        showError(error.message);
-    } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Analyze Contract';
-    }
-}
-
-/**
- * Stream analysis progress and results
- */
-async function streamAnalysis(analysisId) {
-    analysisInProgress = true;
-    const eventSource = new EventSource(`${API_BASE_URL}/analyze/${analysisId}/stream`);
-
-    eventSource.addEventListener('open', () => {
-        console.log('Connected to analysis stream');
-    });
-
-    eventSource.addEventListener('message', (event) => {
-        try {
-            const message = JSON.parse(event.data);
-
-            if (message.type === 'progress') {
-                handleProgressUpdate(message.data);
-            } else if (message.type === 'result') {
-                handleAnalysisResult(message.data);
-            } else if (message.type === 'complete') {
-                handleAnalysisComplete();
-                eventSource.close();
-            } else if (message.type === 'error') {
-                showError(message.message);
-                eventSource.close();
-            }
-        } catch (error) {
-            console.error('Error parsing stream message:', error);
-        }
-    });
-
-    eventSource.addEventListener('error', (error) => {
-        console.error('Stream error:', error);
-        if (eventSource.readyState === EventSource.CLOSED) {
-            console.log('Stream closed');
+        
+        const status = await response.json();
+        
+        // Update UI with current step
+        onProgress(status);
+        
+        // Check terminal states
+        if (status.status === "completed") {
+          onComplete(status);
+        } else if (status.status === "failed") {
+          // Extract error message from nested error object
+          const errorMsg = status.error?.cause || status.error?.error || "Job failed with unknown error";
+          onError(errorMsg);
         } else {
-            showError('Connection lost during analysis');
+          // Still processing - continue polling
+          attempts++;
+          if (attempts < 300) {  // ~5 minute timeout (300 * 1000ms)
+            setTimeout(poll, 1000);
+          } else {
+            onError("Job polling timeout - no response after 5 minutes");
+          }
         }
-        eventSource.close();
-        analysisInProgress = false;
-    });
-}
-
-/**
- * Handle progress update from stream
- */
-function handleProgressUpdate(progress) {
-    console.log(`Progress: ${progress.stage} - ${progress.percentage}%`);
-    updateProgress(progress.message, progress.percentage);
-    updateStage(progress.stage);
-}
-
-/**
- * Handle analysis result
- */
-function handleAnalysisResult(result) {
-    console.log('Analysis result received:', result);
-    displayResults(result);
-}
-
-/**
- * Handle analysis completion
- */
-function handleAnalysisComplete() {
-    console.log('Analysis complete');
-    analysisInProgress = false;
-}
-
-/**
- * Update progress bar and text
- */
-function updateProgress(message, percentage) {
-    if (progressBar) progressBar.style.width = `${percentage}%`;
-    if (progressText) progressText.textContent = `${message} (${percentage}%)`;
-}
-
-/**
- * Update stage indicator
- */
-function updateStage(stage) {
-    const stageNames = {
-        'initialization': 'Initializing',
-        'text_extraction': 'Extracting Text',
-        'clause_extraction': 'Finding Clauses',
-        'risk_assessment': 'Assessing Risks',
-        'compliance_check': 'Checking Compliance',
-        'summary_generation': 'Generating Summary',
-        'report_generation': 'Building Report',
-        'complete': 'Complete',
+      } catch (err) {
+        onError(`Failed to check job status: ${String(err)}`);
+      }
     };
+    
+    // Start polling immediately
+    poll();
+  };
 
-    if (stageIndicator) {
-        stageIndicator.textContent = stageNames[stage] || stage;
-    }
-}
-
-/**
- * Display analysis results
- */
-function displayResults(result) {
-    if (!resultsContainer) return;
-
-    const riskColor = {
-        'HIGH': '#ef4444',
-        'MEDIUM': '#f59e0b',
-        'LOW': '#10b981',
-    }[result.risk_level] || '#6b7280';
-
-    resultsContainer.innerHTML = `
-        <div class="results-header">
-            <h2>Analysis Results</h2>
-            <div class="contract-info">
-                <p><strong>Contract ID:</strong> ${escapeHtml(result.contract_id)}</p>
-                <p><strong>Analysis ID:</strong> ${escapeHtml(result.analysis_id)}</p>
-            </div>
-        </div>
-
-        <div class="risk-summary">
-            <div class="risk-badge" style="background-color: ${riskColor}">
-                <div class="risk-level">${result.risk_level}</div>
-                <div class="risk-score">Score: ${result.overall_score.toFixed(1)}/100</div>
-            </div>
-        </div>
-
-        <div class="executive-summary">
-            <h3>Executive Summary</h3>
-            <p>${escapeHtml(result.executive_summary)}</p>
-        </div>
-
-        <div class="findings">
-            <h3>Key Findings (${result.findings.length})</h3>
-            <div class="findings-list">
-                ${result.findings.map(finding => `
-                    <div class="finding-card" data-risk="${finding.risk_level}">
-                        <div class="finding-header">
-                            <span class="clause-type">${escapeHtml(finding.clause_type)}</span>
-                            <span class="risk-badge-small">${finding.risk_level}</span>
-                        </div>
-                        <div class="finding-body">
-                            <p><strong>Concern:</strong> ${escapeHtml(finding.concern)}</p>
-                            <p><strong>Recommendation:</strong> ${escapeHtml(finding.recommendation)}</p>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-
-        <div class="recommendations">
-            <h3>Recommendations</h3>
-            <ul>
-                ${result.recommendations.map(rec => `<li>${escapeHtml(rec)}</li>`).join('')}
-            </ul>
-        </div>
-
-        <div class="compliance-issues">
-            <h3>Compliance Issues</h3>
-            ${result.compliance_issues.length > 0 ? `
-                <ul>
-                    ${result.compliance_issues.map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}
-                </ul>
-            ` : `<p>No compliance issues identified.</p>`}
-        </div>
-
-        <div class="results-actions">
-            <button onclick="downloadReport('${result.analysis_id}')">Download Report (PDF)</button>
-            <button onclick="resetForm()">Analyze Another</button>
-        </div>
-    `;
-}
-
-/**
- * Show progress container
- */
-function showProgress() {
-    if (progressContainer) {
-        progressContainer.style.display = 'block';
-    }
-    if (resultsContainer) {
-        resultsContainer.style.display = 'none';
-    }
-}
-
-/**
- * Show error message
- */
-function showError(message) {
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'error-message';
-    errorDiv.textContent = message;
-    document.body.insertBefore(errorDiv, document.body.firstChild);
-
-    setTimeout(() => errorDiv.remove(), 5000);
-}
-
-/**
- * Download report as PDF
- */
-async function downloadReport(analysisId) {
+  const submitToApi = async (key, contractId, llmEnabled) => {
+    // Submit uploaded object key plus contract metadata to backend; render minimal two-step timeline.
+    renderTimeline([
+      { title: "Queued", meta: "Submitting to API…", active: true },
+      { title: "Processing", meta: "Waiting for backend response…", active: false },
+    ]);
     try {
-        const response = await fetch(`${API_BASE_URL}/download/${analysisId}`);
-        if (!response.ok) throw new Error('Failed to download report');
-
-        // For now, download as JSON
-        const data = await response.json();
-        const blob = new Blob([JSON.stringify(data, null, 2)], {
-            type: 'application/json'
+      const apiBase = requireApiBase();
+      if (!key) {
+        // Prevent empty payloads that would be stringified to undefined/null.
+        throw new Error("Upload key missing; retry upload.");
+      }
+      const payload = {
+        key,
+        contract_id: contractId || "", // backend expects a string; enforce empty string fallback.
+        llm_enabled: llmEnabled ?? true, // Always send explicit LLM flag; default to true.
+      };
+      const resp = await fetch(`${apiBase}/analyze`, {
+        method: "POST",
+        headers: { ...requireAuthHeader(), "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        // Parse backend error envelope so users see actionable guidance.
+        let apiMessage = `HTTP ${resp.status}`;
+        try {
+          const errorBody = await resp.json();
+          const detail = errorBody?.detail || errorBody;
+          const category = detail?.category || detail?.error_type || "Error";
+          const message = detail?.message || detail?.detail || detail?.error || apiMessage;
+          apiMessage = `${category}: ${message} — fix the issue then retry.`;
+        } catch {
+          apiMessage = `HTTP ${resp.status} — retry after fixing inputs.`;
+        }
+        throw new Error(apiMessage);
+      }
+      const data = await resp.json();
+      if (data?.error) {
+        const category = data.error.category || "Error";
+        const message = data.error.message || "Request failed";
+        const exportMessage = `${category}: ${message} — fix inputs and retry.`;
+        setOutputs({
+          validation: category,
+          exportStatusText: exportMessage,
+          payload: data,
         });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `CR2A-Report-${analysisId}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    } catch (error) {
-        showError(error.message);
+        renderTimeline([
+          { title: "Queued", meta: "Submitted.", active: true },
+          { title: "Error", meta: exportMessage, active: true },
+        ]);
+        return data;
+      }
+
+      // SUCCESS - START POLLING
+      const jobId = data.job_id;
+      
+      setOutputs({
+        validation: "Processing",
+        exportStatusText: "Awaiting backend...",
+        payload: data,
+      });
+      renderTimeline([
+        { title: "Queued", meta: "Submitted.", active: true },
+        { title: "Processing", meta: "Starting analysis...", active: true },
+      ]);
+
+      // Start polling with proper handlers
+      pollJobStatus(
+        jobId,
+        // onProgress - update UI as job progresses
+        (status) => {
+          renderTimeline([
+            { title: "Queued", meta: "Submitted.", active: true },
+            { 
+              title: "Processing", 
+              meta: `${status.current_step || "Processing"}... ${status.progress_percent || 0}%`, 
+              active: true 
+            },
+          ]);
+          setOutputs({
+            validation: "Processing",
+            exportStatusText: `${status.current_step || "Processing"} (${status.progress_percent || 0}%)`,
+            payload: status,
+          });
+        },
+        // onComplete - job finished successfully
+        (result) => {
+          renderTimeline([
+            { title: "Queued", meta: "Submitted.", active: true },
+            { title: "Processing", meta: "Completed.", active: true },
+          ]);
+          setOutputs({
+            validation: "Passed",
+            exportStatusText: "Completed",
+            payload: result,
+          });
+          setDownloadLink(result);
+        },
+        // onError - job failed
+        (errorMsg) => {
+          renderTimeline([
+            { title: "Queued", meta: "Submitted.", active: true },
+            { title: "Error", meta: String(errorMsg), active: true },
+          ]);
+          setOutputs({
+            validation: "Failed",
+            exportStatusText: String(errorMsg),
+            payload: { error: String(errorMsg) },
+          });
+        }
+      );
+
+      return data;
+    } catch (err) {
+      setOutputs({
+        validation: "Failed",
+        exportStatusText: `${String(err)} — retry after resolving the issue.`,
+        payload: { error: String(err) },
+      });
+      renderTimeline([
+        { title: "Queued", meta: "Submission sent.", active: true },
+        { title: "Error", meta: String(err), active: true },
+      ]);
+      throw err;
     }
-}
+  };
 
-/**
- * Reset form for new analysis
- */
-function resetForm() {
-    if (fileInput) fileInput.value = '';
-    if (contractIdInput) contractIdInput.value = '';
-    if (progressContainer) progressContainer.style.display = 'none';
-    if (resultsContainer) resultsContainer.style.display = 'none';
-    if (progressBar) progressBar.style.width = '0%';
-    if (progressText) progressText.textContent = '';
-    currentAnalysisId = null;
-    currentContractId = null;
-    analysisInProgress = false;
-}
+  const uploadFile = async (file) => {
+    // Upload via pre-signed PUT URL returned by the backend.
+    resetUploadUi();
+    setUploadProgress(1);
+    const { uploadUrl, key } = await getUploadUrl(
+      file.name,
+      file.type || "application/octet-stream",
+      file.size,
+    );
 
-/**
- * Escape HTML entities
- */
-function escapeHtml(text) {
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;',
+    const resp = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+      },
+      body: file,
+    });
+
+    if (!resp.ok) throw new Error(`Upload failed: HTTP ${resp.status}`);
+    setUploadProgress(100);
+    return { key };
+  };
+
+  form?.addEventListener("submit", (e) => {
+    // Main submit handler driving upload + API submission or mock fallback.
+    e.preventDefault();
+    const file = fileInput?.files?.[0] || null;
+    const contractId = contractIdInput?.value?.trim() || "";
+    const llmEnabled = llmToggle ? !!llmToggle.checked : true; // Default to true when toggle is absent.
+    const mb = file ? file.size / 1024 / 1024 : 0;
+
+    if (!contractId) {
+      setUploadMessage("Provide a contract ID before submitting.", true);
+      return;
+    }
+
+    if (file && mb > MAX_FILE_MB) {
+      setUploadMessage(`File is ${(mb).toFixed(2)} MB; limit is ${MAX_FILE_MB} MB.`, true);
+      return;
+    }
+
+    if (!file) {
+      // Require an upload since manual contract URIs were removed for safety.
+      setUploadMessage("Attach a contract file to continue.", true);
+      return;
+    }
+
+    setRunState(true);
+    setDownloadLink(null); // Keep downloads disabled until the backend returns a valid artifact.
+
+    const doSubmit = async () => {
+      try {
+        if (file) {
+          setUploadMessage("Uploading…");
+          const res = await uploadFile(file);
+          setUploadMessage("Upload complete.");
+          await submitToApi(res.key, contractId, llmEnabled);
+        }
+      } catch (err) {
+        setUploadMessage(String(err), true);
+        setOutputs({
+          validation: "Failed",
+          exportStatusText: `${String(err)} — retry after resolving the issue.`,
+          payload: { error: String(err) },
+        });
+        renderTimeline([
+          { title: "Queued", meta: "Submission sent.", active: true },
+          { title: "Error", meta: String(err), active: true },
+        ]);
+      } finally {
+        setRunState(false);
+      }
     };
-    return text.replace(/[&<>"']/g, m => map[m]);
-}
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('CR2A Frontend initialized');
+    doSubmit();
+  });
+
+  runDemoBtn?.addEventListener("click", () => {
+    // Force demo mode regardless of backend wiring.
+    runMock(sampleResult);
+  });
+
+  docLinkBtn?.addEventListener("click", () => {
+    // Open policy bundle link when provided.
+    if (POLICY_DOC_URL) {
+      window.open(POLICY_DOC_URL, "_blank");
+    } else {
+      alert("Set POLICY_DOC_URL in app.js to link to your policy bundle.");
+    }
+  });
+
+  // Initial render showing idle state and sample payload.
+  renderTimeline([
+    { title: "Awaiting submission", meta: "Provide contract details to start.", active: true },
+  ]);
+  setOutputs({
+    validation: "Pending",
+    exportStatusText: "Pending",
+    payload: sampleResult,
+  });
 });
