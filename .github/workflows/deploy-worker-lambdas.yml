@@ -27,8 +27,8 @@ jobs:
             file: lambda_get_metadata.py
             handler: lambda_get_metadata.lambda_handler
           - name: cr2a-calculate-chunks
-            file: lmabda_calculate_chunks.py
-            handler: lmabda_calculate_chunks.lambda_handler
+            file: lambda_calculate_chunks.py
+            handler: lambda_calculate_chunks.lambda_handler
           - name: cr2a-analyzer-worker
             file: lambda_analyze_chunk.py
             handler: lambda_analyze_chunk.lambda_handler
@@ -134,7 +134,7 @@ jobs:
             --query 'Configuration.[FunctionName,Runtime,Handler,LastModified,CodeSize]' \
             --output table
           
-          echo "✅ ${{ matrix.function.name }} deployed successfully!"
+          echo "${{ matrix.function.name }} deployed successfully!"
 
   verify-all:
     needs: deploy-workers
@@ -167,4 +167,4 @@ jobs:
           done
           
           echo ""
-          echo "✅ All worker Lambda functions verified!"
+          echo "All worker Lambda functions verified!"
