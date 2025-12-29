@@ -26,6 +26,7 @@ def lambda_handler(event, context):
         "job_id": "...",
         "s3_bucket": "...",
         "s3_key": "...",
+        "llm_enabled": true,
         "chunk_plan": {
             "total_chunks": 2,
             "chunks": [...]
@@ -40,6 +41,7 @@ def lambda_handler(event, context):
     {
         "job_id": "...",
         "status": "completed",
+        "llm_enabled": true,
         "result_key": "results/job_id/final_analysis.json",
         "filled_template_key": "results/job_id/filled_template.json",
         "total_clauses_found": 20,
@@ -51,12 +53,14 @@ def lambda_handler(event, context):
         job_id = event.get('job_id')
         s3_bucket = event.get('s3_bucket')
         s3_key = event.get('s3_key')
+        llm_enabled = event.get('llm_enabled', True)  # IMPORTANT: Capture from input
         chunk_results = event.get('chunk_results', [])
         chunk_plan = event.get('chunk_plan', {})
         total_chunks = chunk_plan.get('total_chunks', 0)
         
         logger.info(f"Aggregating results for job {job_id}")
         logger.info(f"Processing {len(chunk_results)} chunk results out of {total_chunks} expected")
+        logger.info(f"LLM enabled for this job: {llm_enabled}")
         
         all_chunks = []
         all_clauses = []
@@ -166,10 +170,11 @@ def lambda_handler(event, context):
         except ClientError as e:
             logger.error(f"Error updating job status: {e}")
         
-        # Return result for Step Functions
+        # Return result for Step Functions - INCLUDE llm_enabled!
         return {
             'job_id': job_id,
             'status': 'completed',
+            'llm_enabled': llm_enabled,  # CRITICAL: Pass this forward to CheckLLMEnabled state
             'result_key': result_key,
             'filled_template_key': f"results/{job_id}/filled_template.json",
             'total_clauses_found': len(all_clauses),
