@@ -542,8 +542,9 @@ async def analyze_contract(payload: AnalysisRequestPayload):
             status_url=f'/status/{job_id}'
         )
         
-    except _http_error as e:
-        raise e
+    except HTTPException:
+        # Explicitly catch and re-raise FastAPI HTTPException
+        raise
     except Exception as e:
         logger.exception("Failed to start analysis", extra={"error": str(e)})
         raise HTTPException(status_code=500, detail=str(e))
