@@ -29,7 +29,7 @@ python-dotenv==1.0.0
 requests==2.31.0
 jsonschema==4.20.0
 python-multipart==0.0.6
-mangum==0.27.0
+mangum==0.20.0
 
 # Data Processing
 pandas==2.1.1
