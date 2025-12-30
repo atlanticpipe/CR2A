@@ -14,12 +14,51 @@ env:
   S3_BUCKET: cr2a-deployment
 
 jobs:
+  build_worker_layer:
+    runs-on: ubuntu-latest
+    outputs:
+      worker_layer_arn: ${{ steps.publish_layer.outputs.layer_arn }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps into layer dir
+        run: |
+          mkdir -p layer/python
+          pip install -r requirements-core.txt -t layer/python
+
+      - name: Zip layer
+        run: |
+          cd layer
+          zip -r ../worker-layer.zip .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+
+      - name: Publish worker layer
+        id: publish_layer
+        run: |
+          LAYER_ARN=$(aws lambda publish-layer-version \
+            --layer-name cr2a-worker-layer \
+            --zip-file fileb://worker-layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'LayerVersionArn' --output text)
+          echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
+  
   deploy-workers:
+    needs: build_worker_layer
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-
     strategy:
       matrix:
         function:
@@ -38,15 +77,9 @@ jobs:
           - name: cr2a-llm-refine
             file: lambda_llm_refine.py
             handler: lambda_llm_refine.lambda_handler
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -54,30 +87,35 @@ jobs:
           role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Update function configuration (set handler + attach layer)
+        run: |
+          echo "Updating Lambda configuration for ${{ matrix.function.name }}..."
+          aws lambda update-function-configuration \
+            --function-name ${{ matrix.function.name }} \
+            --handler ${{ matrix.function.handler }} \
+            --layers ${{ needs.build_worker_layer.outputs.worker_layer_arn }} \
+            --region ${{ env.AWS_REGION }}
+          echo "Waiting for configuration update..."
+          aws lambda wait function-updated \
+            --function-name ${{ matrix.function.name }} \
+            --region ${{ env.AWS_REGION }}
+
       - name: Create deployment package for ${{ matrix.function.name }}
         run: |
           echo "Creating deployment package for ${{ matrix.function.name }}..."
-          
-          # Create package directory
           mkdir -p package
-          
-          # Install dependencies to package directory
-          pip install --target ./package --upgrade -r worker/requirements.txt
-          
-          # Copy Lambda function code
+          # Copy Lambda function code only (deps come from layer)
           cp worker/${{ matrix.function.file }} package/
-          
+
           # Copy src/ directory for lambda_llm_refine which imports from src.core
           if [ "${{ matrix.function.name }}" = "cr2a-llm-refine" ]; then
             cp -r src package/
             echo "Included src/ directory for LLM dependencies"
           fi
-          
-          # Create deployment zip
+
           cd package
           zip -r ../lambda-deployment.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
           cd ..
-          
           echo "Package size:"
           ls -lh lambda-deployment.zip
 
@@ -85,10 +123,8 @@ jobs:
         run: |
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           S3_KEY="lambda-deployments/${{ matrix.function.name }}-${GITHUB_SHA:0:7}-${TIMESTAMP}.zip"
-          
           echo "Uploading deployment package to S3..."
           aws s3 cp lambda-deployment.zip "s3://${{ env.S3_BUCKET }}/${S3_KEY}"
-          
           echo "S3_KEY=${S3_KEY}" >> $GITHUB_ENV
           echo "Uploaded to: s3://${{ env.S3_BUCKET }}/${S3_KEY}"
 
@@ -96,34 +132,16 @@ jobs:
         run: |
           echo "Deploying to Lambda function: ${{ matrix.function.name }}"
           echo "Using S3 object: s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}"
-          
           aws lambda update-function-code \
             --function-name ${{ matrix.function.name }} \
             --s3-bucket ${{ env.S3_BUCKET }} \
             --s3-key ${{ env.S3_KEY }} \
             --region ${{ env.AWS_REGION }}
-          
           echo "Waiting for Lambda update to complete..."
           aws lambda wait function-updated \
             --function-name ${{ matrix.function.name }} \
             --region ${{ env.AWS_REGION }}
-          
           echo "Deployment successful for ${{ matrix.function.name }}!"
-
-      - name: Update function configuration
-        run: |
-          echo "Updating Lambda configuration for ${{ matrix.function.name }}..."
-          
-          # Update handler (in case it changed)
-          aws lambda update-function-configuration \
-            --function-name ${{ matrix.function.name }} \
-            --handler ${{ matrix.function.handler }} \
-            --region ${{ env.AWS_REGION }}
-          
-          echo "Waiting for configuration update..."
-          aws lambda wait function-updated \
-            --function-name ${{ matrix.function.name }} \
-            --region ${{ env.AWS_REGION }}
 
       - name: Verify deployment
         run: |
@@ -133,7 +151,6 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --query 'Configuration.[FunctionName,Runtime,Handler,LastModified,CodeSize]' \
             --output table
-          
           echo "${{ matrix.function.name }} deployed successfully!"
 
   verify-all:

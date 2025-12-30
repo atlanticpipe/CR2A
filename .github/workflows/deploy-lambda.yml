@@ -19,20 +19,101 @@ env:
   S3_KEY_PREFIX: lambda-deployments
 
 jobs:
-  deploy:
+  build_shared_code_layer:
+    runs-on: ubuntu-latest
+    outputs:
+      shared_layer_arn: ${{ steps.publish_shared_layer.outputs.layer_arn }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create shared code layer
+        run: |
+          mkdir -p layer/python
+          
+          # Copy shared code into layer
+          cp -r src layer/python/
+          cp -r schemas layer/python/
+          cp -r templates layer/python/
+
+      - name: Zip shared code layer
+        run: |
+          cd layer
+          zip -r ../shared-code-layer.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
+          cd ..
+          echo "Shared code layer size:"
+          ls -lh shared-code-layer.zip
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+
+      - name: Publish shared code layer
+        id: publish_shared_layer
+        run: |
+          LAYER_ARN=$(aws lambda publish-layer-version \
+            --layer-name cr2a-shared-code \
+            --zip-file fileb://shared-code-layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'LayerVersionArn' --output text)
+          echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
+          echo "Published shared code layer: $LAYER_ARN"
+
+  build_dependency_layer:
+    runs-on: ubuntu-latest
+    outputs:
+      dependency_layer_arn: ${{ steps.publish_dependency_layer.outputs.layer_arn }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies into layer
+        run: |
+          mkdir -p layer/python
+          pip install -r requirements-core.txt -t layer/python
+          pip install -r requirements-optional.txt -t layer/python
+
+      - name: Zip dependency layer
+        run: |
+          cd layer
+          zip -r ../dependency-layer.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
+          cd ..
+          echo "Dependency layer size:"
+          ls -lh dependency-layer.zip
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+
+      - name: Publish dependency layer
+        id: publish_dependency_layer
+        run: |
+          LAYER_ARN=$(aws lambda publish-layer-version \
+            --layer-name cr2a-shared-deps \
+            --zip-file fileb://dependency-layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'LayerVersionArn' --output text)
+          echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
+          echo "Published dependency layer: $LAYER_ARN"
+
+  deploy_api:
+    needs: [build_shared_code_layer, build_dependency_layer]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -40,26 +121,42 @@ jobs:
           role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Create deployment package
+      - name: Update function configuration (attach both layers)
         run: |
-          echo "Creating Lambda deployment package..."
-          # Create package directory
+          echo "Updating Lambda configuration with both layers..."
+          SHARED_LAYER=${{ needs.build_shared_code_layer.outputs.shared_layer_arn }}
+          DEPENDENCY_LAYER=${{ needs.build_dependency_layer.outputs.dependency_layer_arn }}
+          
+          aws lambda update-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --handler src.api.main.handler \
+            --layers "$SHARED_LAYER" "$DEPENDENCY_LAYER" \
+            --region ${{ env.AWS_REGION }}
+          
+          echo "Waiting for configuration update..."
+          aws lambda wait function-updated \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Create deployment package (handler only)
+        run: |
+          echo "Creating minimal deployment package (handler code only)..."
           mkdir -p package
           
-          # Install dependencies to package directory
-          pip install --target ./package --upgrade -r requirements.txt
+          # Copy ONLY the handler file (src/api/main.py)
+          # The rest of src/, schemas/, templates/ come from the shared code layer
+          mkdir -p package/src/api
+          cp src/api/main.py package/src/api/__init__.py package/src/api/
           
-          # Copy application code to package
-          cp -r src package/
-          cp -r schemas package/
-          cp -r templates package/
+          # Also copy src/__init__.py if it exists
+          if [ -f src/__init__.py ]; then
+            cp src/__init__.py package/src/
+          fi
           
-          # Create deployment zip with timestamp
           cd package
           zip -r ../lambda-deployment.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
           cd ..
-          
-          echo "Package size:"
+          echo "Minimal package size (handler only):"
           ls -lh lambda-deployment.zip
 
       - name: Upload to S3
@@ -69,7 +166,6 @@ jobs:
           
           echo "Uploading deployment package to S3..."
           aws s3 cp lambda-deployment.zip "s3://${{ env.S3_BUCKET }}/${S3_KEY}"
-          
           echo "S3_KEY=${S3_KEY}" >> $GITHUB_ENV
           echo "Uploaded to: s3://${{ env.S3_BUCKET }}/${S3_KEY}"
 
@@ -88,7 +184,6 @@ jobs:
           aws lambda wait function-updated \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --region ${{ env.AWS_REGION }}
-          
           echo "Deployment successful!"
 
       - name: Verify deployment
@@ -97,5 +192,13 @@ jobs:
           aws lambda get-function \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --region ${{ env.AWS_REGION }} \
-            --query 'Configuration.[FunctionName,Runtime,LastModified,CodeSize]' \
+            --query 'Configuration.[FunctionName,Runtime,Handler,LastModified,CodeSize]' \
+            --output table
+          
+          echo ""
+          echo "Verifying attached layers..."
+          aws lambda get-function \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Configuration.Layers[*].[Arn]' \
             --output table

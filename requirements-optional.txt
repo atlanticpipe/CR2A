@@ -1,0 +1,12 @@
+# Web Framework (API only)
+Flask==3.0.0
+Flask-CORS==4.0.0
+fastapi==0.104.1
+mangum==0.27.0
+
+# PDF Generation (refine + API only)
+reportlab==4.0.7
+Pillow==10.1.0
+python-docx==0.8.11
+PyPDF2==3.0.1
+pdfplumber==0.10.3

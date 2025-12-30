@@ -1,0 +1,173 @@
+name: Deploy Lambda Layers
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - 'requirements-core.txt'
+      - 'requirements-optional.txt'
+      - 'src/**'
+      - 'schemas/**'
+      - 'templates/**'
+      - '.github/workflows/deploy-layers.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.11'
+  S3_BUCKET: cr2a-deployment
+
+jobs:
+  build_dependency_layer:
+    runs-on: ubuntu-latest
+    outputs:
+      dependency_layer_arn: ${{ steps.publish_dependency_layer.outputs.layer_arn }}
+      dependency_layer_version: ${{ steps.publish_dependency_layer.outputs.layer_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies into layer
+        run: |
+          mkdir -p layer/python
+          echo "Installing core dependencies..."
+          pip install -r requirements-core.txt -t layer/python
+          echo "Installing optional dependencies..."
+          pip install -r requirements-optional.txt -t layer/python
+
+      - name: Zip dependency layer
+        run: |
+          cd layer
+          zip -r ../dependency-layer.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
+          cd ..
+          echo "Dependency layer size:"
+          ls -lh dependency-layer.zip
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+
+      - name: Publish dependency layer
+        id: publish_dependency_layer
+        run: |
+          echo "Publishing dependency layer..."
+          LAYER_ARN=$(aws lambda publish-layer-version \
+            --layer-name cr2a-shared-deps \
+            --zip-file fileb://dependency-layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'LayerVersionArn' --output text)
+          
+          LAYER_VERSION=$(aws lambda publish-layer-version \
+            --layer-name cr2a-shared-deps \
+            --zip-file fileb://dependency-layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'Version' --output text 2>/dev/null || echo "")
+          
+          echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
+          echo "layer_version=$LAYER_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Published dependency layer: $LAYER_ARN"
+
+  build_shared_code_layer:
+    runs-on: ubuntu-latest
+    outputs:
+      shared_layer_arn: ${{ steps.publish_shared_layer.outputs.layer_arn }}
+      shared_layer_version: ${{ steps.publish_shared_layer.outputs.layer_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create shared code layer
+        run: |
+          mkdir -p layer/python
+          echo "Copying shared code..."
+          cp -r src layer/python/
+          cp -r schemas layer/python/
+          cp -r templates layer/python/
+
+      - name: Zip shared code layer
+        run: |
+          cd layer
+          zip -r ../shared-code-layer.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
+          cd ..
+          echo "Shared code layer size:"
+          ls -lh shared-code-layer.zip
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+
+      - name: Publish shared code layer
+        id: publish_shared_layer
+        run: |
+          echo "Publishing shared code layer..."
+          LAYER_ARN=$(aws lambda publish-layer-version \
+            --layer-name cr2a-shared-code \
+            --zip-file fileb://shared-code-layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'LayerVersionArn' --output text)
+          
+          LAYER_VERSION=$(aws lambda publish-layer-version \
+            --layer-name cr2a-shared-code \
+            --zip-file fileb://shared-code-layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'Version' --output text 2>/dev/null || echo "")
+          
+          echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
+          echo "layer_version=$LAYER_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Published shared code layer: $LAYER_ARN"
+
+  verify_layers:
+    needs: [build_dependency_layer, build_shared_code_layer]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+
+      - name: Verify published layers
+        run: |
+          echo "Verifying cr2a-shared-deps layer..."
+          aws lambda get-layer-version-by-arn \
+            --arn "${{ needs.build_dependency_layer.outputs.dependency_layer_arn }}" \
+            --query '[Arn,Version,CreatedDate]' \
+            --output table
+          
+          echo ""
+          echo "Verifying cr2a-shared-code layer..."
+          aws lambda get-layer-version-by-arn \
+            --arn "${{ needs.build_shared_code_layer.outputs.shared_layer_arn }}" \
+            --query '[Arn,Version,CreatedDate]' \
+            --output table
+          
+          echo ""
+          echo "✓ Both layers published and verified!"
+
+  log_layer_metadata:
+    needs: [build_dependency_layer, build_shared_code_layer]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log layer ARNs and versions
+        run: |
+          echo "Layer Deployment Summary"
+          echo "======================="
+          echo "Dependency Layer ARN: ${{ needs.build_dependency_layer.outputs.dependency_layer_arn }}"
+          echo "Dependency Layer Version: ${{ needs.build_dependency_layer.outputs.dependency_layer_version }}"
+          echo ""
+          echo "Shared Code Layer ARN: ${{ needs.build_shared_code_layer.outputs.shared_layer_arn }}"
+          echo "Shared Code Layer Version: ${{ needs.build_shared_code_layer.outputs.shared_layer_version }}"
+          echo ""
+          echo "Use these ARNs in deploy-lambda.yml and deploy-worker-lambdas.yml"
