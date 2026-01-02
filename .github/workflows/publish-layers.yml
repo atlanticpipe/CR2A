@@ -141,6 +141,7 @@ jobs:
           layer-type: 'shared-code'
           source-paths: 'src,schemas,templates'
           aws-region: ${{ env.AWS_REGION }}
+          skip-du: 'true'
 
   # Build and publish API dependency layer (core + optional)
   publish_api_dependency_layer:
@@ -172,6 +173,7 @@ jobs:
           requirements-files: 'requirements-core.txt,requirements-optional.txt'
           python-version: ${{ env.PYTHON_VERSION }}
           aws-region: ${{ env.AWS_REGION }}
+          skip-du: 'true'
 
   # Build and publish worker dependency layer (core only)
   publish_worker_dependency_layer:
@@ -203,6 +205,7 @@ jobs:
           requirements-files: 'requirements-core.txt'
           python-version: ${{ env.PYTHON_VERSION }}
           aws-region: ${{ env.AWS_REGION }}
+          skip-du: 'true'
 
   # Verify all published layers
   verify_layers:

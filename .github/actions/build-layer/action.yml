@@ -24,6 +24,10 @@ inputs:
     description: 'AWS region'
     required: false
     default: 'us-east-1'
+  skip-du:
+    description: 'Skip du command for layer contents display'
+    required: false
+    default: 'false'
 
 outputs:
   layer-arn:
@@ -77,7 +81,11 @@ runs:
         find layer/python -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
         
         echo "Layer contents:"
-        du -sh layer/python/* | head -20
+        if [ "${{ inputs.skip-du }}" != "true" ]; then
+          du -sh layer/python/* | head -20 2>/dev/null || echo "Layer contents listed (du command skipped or failed)"
+        else
+          ls -la layer/python/ | head -20
+        fi
 
     - name: Build shared code layer
       if: inputs.layer-type == 'shared-code'
@@ -104,7 +112,11 @@ runs:
         find layer/python -name "*.pyo" -delete 2>/dev/null || true
         
         echo "Shared code layer contents:"
-        du -sh layer/python/*
+        if [ "${{ inputs.skip-du }}" != "true" ]; then
+          du -sh layer/python/* 2>/dev/null || echo "Shared code contents listed (du command skipped or failed)"
+        else
+          ls -la layer/python/
+        fi
 
     - name: Create layer package
       shell: bash
