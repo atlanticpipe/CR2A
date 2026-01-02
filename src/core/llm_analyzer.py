@@ -64,13 +64,13 @@ class AnalysisResult:
 class LLMAnalyzer:
     """Main analyzer using LLM for contract analysis."""
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str, model: str = "gpt-5.2"):
         """
         Initialize the LLM analyzer.
 
         Args:
             api_key: OpenAI API key
-            model: Model to use (default: gpt-4o-mini)
+            model: Model to use (default: gpt-5.2)
         """
         self.client = OpenAI(api_key=api_key)
         self.async_client = AsyncOpenAI(api_key=api_key)
