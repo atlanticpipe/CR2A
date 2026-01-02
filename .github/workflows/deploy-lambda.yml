@@ -62,6 +62,9 @@ jobs:
   # Get existing layer ARNs (layers are managed by publish-layers.yml)
   get_layer_arns:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       shared_layer_arn: ${{ steps.get_layers.outputs.shared_layer_arn }}
       core_dependency_layer_arn: ${{ steps.get_layers.outputs.core_dependency_layer_arn }}
