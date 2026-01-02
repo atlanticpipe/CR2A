@@ -62,13 +62,13 @@ runs:
         echo "Building ${{ inputs.layer-type }} layer..."
         mkdir -p layer/python
         
-        # Install requirements files
+        # Install requirements files with optimization
         IFS=',' read -ra REQUIREMENTS <<< "${{ inputs.requirements-files }}"
         for req_file in "${REQUIREMENTS[@]}"; do
           req_file=$(echo "$req_file" | xargs)  # trim whitespace
           if [ -f "$req_file" ]; then
             echo "Installing from $req_file..."
-            pip install -r "$req_file" -t layer/python
+            pip install --no-cache-dir --only-binary=:all: --no-compile -r "$req_file" -t layer/python
           else
             echo "Warning: $req_file not found"
           fi
@@ -79,6 +79,24 @@ runs:
         find layer/python -name "*.pyc" -delete 2>/dev/null || true
         find layer/python -name "*.pyo" -delete 2>/dev/null || true
         find layer/python -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+        find layer/python -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+        
+        # Remove test files and documentation to reduce size
+        find layer/python -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
+        find layer/python -type d -name "test" -exec rm -rf {} + 2>/dev/null || true
+        find layer/python -type d -name "docs" -exec rm -rf {} + 2>/dev/null || true
+        find layer/python -type d -name "examples" -exec rm -rf {} + 2>/dev/null || true
+        find layer/python -name "*.md" -delete 2>/dev/null || true
+        find layer/python -name "*.txt" -not -name "requirements*.txt" -delete 2>/dev/null || true
+        
+        # Remove CLI tools and binaries that aren't needed in Lambda
+        find layer/python -type d -name "bin" -exec rm -rf {} + 2>/dev/null || true
+        find layer/python -name "*.exe" -delete 2>/dev/null || true
+        
+        echo "Layer size after optimization:"
+        if [ "${{ inputs.skip-du }}" != "true" ]; then
+          du -sh layer/python 2>/dev/null || echo "Layer size check completed"
+        fi
         
         echo "Layer contents:"
         if [ "${{ inputs.skip-du }}" != "true" ]; then

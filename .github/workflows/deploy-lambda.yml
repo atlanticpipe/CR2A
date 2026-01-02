@@ -21,7 +21,8 @@ env:
   S3_BUCKET: cr2a-deployment
   S3_KEY_PREFIX: lambda-deployments
   SHARED_CODE_LAYER_NAME: cr2a-shared-code
-  DEPENDENCY_LAYER_NAME: cr2a-shared-deps
+  CORE_DEPENDENCY_LAYER_NAME: cr2a-core-deps
+  OPTIONAL_DEPENDENCY_LAYER_NAME: cr2a-optional-deps
 
 jobs:
   # Detect what changed to determine deployment strategy
@@ -63,7 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       shared_layer_arn: ${{ steps.get_layers.outputs.shared_layer_arn }}
-      dependency_layer_arn: ${{ steps.get_layers.outputs.dependency_layer_arn }}
+      core_dependency_layer_arn: ${{ steps.get_layers.outputs.core_dependency_layer_arn }}
+      optional_dependency_layer_arn: ${{ steps.get_layers.outputs.optional_dependency_layer_arn }}
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -83,25 +85,35 @@ jobs:
             --output json)
           SHARED_ARN=$(echo "$SHARED_RESPONSE" | jq -r '.LayerVersions[0].LayerVersionArn')
           
-          # Get dependency layer
-          DEPENDENCY_RESPONSE=$(aws lambda list-layer-versions \
-            --layer-name ${{ env.DEPENDENCY_LAYER_NAME }} \
+          # Get core dependency layer
+          CORE_RESPONSE=$(aws lambda list-layer-versions \
+            --layer-name ${{ env.CORE_DEPENDENCY_LAYER_NAME }} \
             --max-items 1 \
             --output json)
-          DEPENDENCY_ARN=$(echo "$DEPENDENCY_RESPONSE" | jq -r '.LayerVersions[0].LayerVersionArn')
+          CORE_ARN=$(echo "$CORE_RESPONSE" | jq -r '.LayerVersions[0].LayerVersionArn')
           
-          if [ "$SHARED_ARN" = "null" ] || [ "$DEPENDENCY_ARN" = "null" ]; then
+          # Get optional dependency layer
+          OPTIONAL_RESPONSE=$(aws lambda list-layer-versions \
+            --layer-name ${{ env.OPTIONAL_DEPENDENCY_LAYER_NAME }} \
+            --max-items 1 \
+            --output json)
+          OPTIONAL_ARN=$(echo "$OPTIONAL_RESPONSE" | jq -r '.LayerVersions[0].LayerVersionArn')
+          
+          if [ "$SHARED_ARN" = "null" ] || [ "$CORE_ARN" = "null" ] || [ "$OPTIONAL_ARN" = "null" ]; then
             echo "Error: Required layers not found. Please run publish-layers.yml workflow first."
             echo "Shared code layer ARN: $SHARED_ARN"
-            echo "Dependency layer ARN: $DEPENDENCY_ARN"
+            echo "Core dependency layer ARN: $CORE_ARN"
+            echo "Optional dependency layer ARN: $OPTIONAL_ARN"
             exit 1
           fi
           
           echo "shared_layer_arn=$SHARED_ARN" >> "$GITHUB_OUTPUT"
-          echo "dependency_layer_arn=$DEPENDENCY_ARN" >> "$GITHUB_OUTPUT"
+          echo "core_dependency_layer_arn=$CORE_ARN" >> "$GITHUB_OUTPUT"
+          echo "optional_dependency_layer_arn=$OPTIONAL_ARN" >> "$GITHUB_OUTPUT"
           
           echo "Using shared code layer: $SHARED_ARN"
-          echo "Using dependency layer: $DEPENDENCY_ARN"
+          echo "Using core dependency layer: $CORE_ARN"
+          echo "Using optional dependency layer: $OPTIONAL_ARN"
 
   # Deploy API function
   deploy_api:
@@ -125,12 +137,13 @@ jobs:
         run: |
           echo "Updating Lambda configuration with layers..."
           SHARED_LAYER="${{ needs.get_layer_arns.outputs.shared_layer_arn }}"
-          DEPENDENCY_LAYER="${{ needs.get_layer_arns.outputs.dependency_layer_arn }}"
+          CORE_LAYER="${{ needs.get_layer_arns.outputs.core_dependency_layer_arn }}"
+          OPTIONAL_LAYER="${{ needs.get_layer_arns.outputs.optional_dependency_layer_arn }}"
           
           aws lambda update-function-configuration \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --handler src.api.main.handler \
-            --layers "$SHARED_LAYER" "$DEPENDENCY_LAYER" \
+            --layers "$SHARED_LAYER" "$CORE_LAYER" "$OPTIONAL_LAYER" \
             --region ${{ env.AWS_REGION }}
           
           echo "Waiting for configuration update..."

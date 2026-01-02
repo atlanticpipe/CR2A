@@ -143,8 +143,8 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           skip-du: 'true'
 
-  # Build and publish API dependency layer (core + optional)
-  publish_api_dependency_layer:
+  # Build and publish core dependency layer (essential deps only)
+  publish_core_dependency_layer:
     runs-on: ubuntu-latest
     needs: detect_changes
     if: needs.detect_changes.outputs.dependencies_changed == 'true'
@@ -164,13 +164,45 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
 
-      - name: Build and publish API dependency layer
+      - name: Build and publish core dependency layer
         id: build_layer
         uses: ./.github/actions/build-layer
         with:
-          layer-name: ${{ env.DEPENDENCY_LAYER_NAME }}
+          layer-name: 'cr2a-core-deps'
           layer-type: 'dependencies'
-          requirements-files: 'requirements-core.txt,requirements-optional.txt'
+          requirements-files: 'requirements-core.txt'
+          python-version: ${{ env.PYTHON_VERSION }}
+          aws-region: ${{ env.AWS_REGION }}
+          skip-du: 'true'
+
+  # Build and publish optional dependency layer (API-specific deps)
+  publish_optional_dependency_layer:
+    runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.dependencies_changed == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      layer_arn: ${{ steps.build_layer.outputs.layer-arn }}
+      layer_version: ${{ steps.build_layer.outputs.layer-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+
+      - name: Build and publish optional dependency layer
+        id: build_layer
+        uses: ./.github/actions/build-layer
+        with:
+          layer-name: 'cr2a-optional-deps'
+          layer-type: 'dependencies'
+          requirements-files: 'requirements-optional.txt'
           python-version: ${{ env.PYTHON_VERSION }}
           aws-region: ${{ env.AWS_REGION }}
           skip-du: 'true'
@@ -210,11 +242,12 @@ jobs:
   # Verify all published layers
   verify_layers:
     runs-on: ubuntu-latest
-    needs: [detect_changes, publish_shared_code_layer, publish_api_dependency_layer, publish_worker_dependency_layer]
+    needs: [detect_changes, publish_shared_code_layer, publish_core_dependency_layer, publish_optional_dependency_layer, publish_worker_dependency_layer]
     if: |
       always() && 
       (needs.publish_shared_code_layer.result == 'success' || 
-       needs.publish_api_dependency_layer.result == 'success' || 
+       needs.publish_core_dependency_layer.result == 'success' || 
+       needs.publish_optional_dependency_layer.result == 'success' ||
        needs.publish_worker_dependency_layer.result == 'success')
     permissions:
       id-token: write
@@ -243,11 +276,21 @@ jobs:
             echo ""
           fi
           
-          # Verify API dependency layer if rebuilt
-          if [ "${{ needs.publish_api_dependency_layer.result }}" = "success" ]; then
-            echo "=== API Dependency Layer ==="
+          # Verify core dependency layer if rebuilt
+          if [ "${{ needs.publish_core_dependency_layer.result }}" = "success" ]; then
+            echo "=== Core Dependency Layer ==="
             aws lambda get-layer-version-by-arn \
-              --arn "${{ needs.publish_api_dependency_layer.outputs.layer_arn }}" \
+              --arn "${{ needs.publish_core_dependency_layer.outputs.layer_arn }}" \
+              --query '[Arn,Version,CreatedDate,Description]' \
+              --output table
+            echo ""
+          fi
+          
+          # Verify optional dependency layer if rebuilt
+          if [ "${{ needs.publish_optional_dependency_layer.result }}" = "success" ]; then
+            echo "=== Optional Dependency Layer ==="
+            aws lambda get-layer-version-by-arn \
+              --arn "${{ needs.publish_optional_dependency_layer.outputs.layer_arn }}" \
               --query '[Arn,Version,CreatedDate,Description]' \
               --output table
             echo ""
@@ -268,7 +311,7 @@ jobs:
   # Store layer metadata for other workflows
   store_layer_metadata:
     runs-on: ubuntu-latest
-    needs: [detect_changes, publish_shared_code_layer, publish_api_dependency_layer, publish_worker_dependency_layer, verify_layers]
+    needs: [detect_changes, publish_shared_code_layer, publish_core_dependency_layer, publish_optional_dependency_layer, publish_worker_dependency_layer, verify_layers]
     if: needs.verify_layers.result == 'success'
     steps:
       - name: Store layer ARNs as artifacts
@@ -281,10 +324,16 @@ jobs:
             echo "${{ needs.publish_shared_code_layer.outputs.layer_version }}" > layer-metadata/shared-code-layer-version.txt
           fi
           
-          # Store API dependency layer ARN if rebuilt
-          if [ "${{ needs.publish_api_dependency_layer.result }}" = "success" ]; then
-            echo "${{ needs.publish_api_dependency_layer.outputs.layer_arn }}" > layer-metadata/api-dependency-layer-arn.txt
-            echo "${{ needs.publish_api_dependency_layer.outputs.layer_version }}" > layer-metadata/api-dependency-layer-version.txt
+          # Store core dependency layer ARN if rebuilt
+          if [ "${{ needs.publish_core_dependency_layer.result }}" = "success" ]; then
+            echo "${{ needs.publish_core_dependency_layer.outputs.layer_arn }}" > layer-metadata/core-dependency-layer-arn.txt
+            echo "${{ needs.publish_core_dependency_layer.outputs.layer_version }}" > layer-metadata/core-dependency-layer-version.txt
+          fi
+          
+          # Store optional dependency layer ARN if rebuilt
+          if [ "${{ needs.publish_optional_dependency_layer.result }}" = "success" ]; then
+            echo "${{ needs.publish_optional_dependency_layer.outputs.layer_arn }}" > layer-metadata/optional-dependency-layer-arn.txt
+            echo "${{ needs.publish_optional_dependency_layer.outputs.layer_version }}" > layer-metadata/optional-dependency-layer-version.txt
           fi
           
           # Store worker dependency layer ARN if rebuilt
@@ -305,7 +354,7 @@ jobs:
   # Cleanup old layer versions
   cleanup_old_layers:
     runs-on: ubuntu-latest
-    needs: [verify_layers, publish_shared_code_layer, publish_api_dependency_layer, publish_worker_dependency_layer]
+    needs: [verify_layers, publish_shared_code_layer, publish_core_dependency_layer, publish_optional_dependency_layer, publish_worker_dependency_layer]
     if: needs.verify_layers.result == 'success'
     permissions:
       id-token: write
@@ -347,8 +396,12 @@ jobs:
             cleanup_layer "${{ env.SHARED_CODE_LAYER_NAME }}"
           fi
           
-          if [ "${{ needs.publish_api_dependency_layer.result }}" = "success" ]; then
-            cleanup_layer "${{ env.DEPENDENCY_LAYER_NAME }}"
+          if [ "${{ needs.publish_core_dependency_layer.result }}" = "success" ]; then
+            cleanup_layer "cr2a-core-deps"
+          fi
+          
+          if [ "${{ needs.publish_optional_dependency_layer.result }}" = "success" ]; then
+            cleanup_layer "cr2a-optional-deps"
           fi
           
           if [ "${{ needs.publish_worker_dependency_layer.result }}" = "success" ]; then
