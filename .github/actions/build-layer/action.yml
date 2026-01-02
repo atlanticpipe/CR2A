@@ -122,6 +122,12 @@ runs:
       run: |
         echo "Publishing layer: ${{ inputs.layer-name }}"
         
+        # Check if AWS credentials are configured
+        if ! aws sts get-caller-identity >/dev/null 2>&1; then
+          echo "Error: AWS credentials not configured. Please ensure AWS credentials are set up before calling this action."
+          exit 1
+        fi
+        
         LAYER_RESPONSE=$(aws lambda publish-layer-version \
           --layer-name "${{ inputs.layer-name }}" \
           --zip-file fileb://layer-package.zip \
