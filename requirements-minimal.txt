@@ -1,0 +1,23 @@
+# Minimal dependencies for lightweight Lambda functions
+# Use this for functions that only need basic AWS + document processing
+
+# AWS Integration
+boto3==1.35.84
+botocore==1.35.84
+
+# Web Framework - Minimal API
+fastapi==0.115.6
+mangum==0.20.0
+python-multipart==0.0.12
+uvicorn==0.32.1
+
+# Validation
+pydantic==2.10.3
+
+# Basic Document Processing
+PyPDF2==3.0.1
+python-docx==1.1.2
+reportlab==4.2.5
+
+# HTTP Client
+httpx==0.28.1

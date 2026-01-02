@@ -6,10 +6,23 @@ on:
     paths:
       - 'src/**'
       - 'requirements.txt'
+      - 'requirements-core.txt'
+      - 'requirements-optional.txt'
       - 'schemas/**'
       - 'templates/**'
       - '.github/workflows/deploy-lambda.yml'
   workflow_dispatch:
+    inputs:
+      force_layer_rebuild:
+        description: 'Force rebuild of Lambda layers'
+        required: false
+        default: false
+        type: boolean
+      deploy_function_only:
+        description: 'Deploy function code only (skip layers)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   LAMBDA_FUNCTION_NAME: cr2a-api
@@ -17,24 +30,111 @@ env:
   PYTHON_VERSION: '3.11'
   S3_BUCKET: cr2a-deployment
   S3_KEY_PREFIX: lambda-deployments
+  SHARED_CODE_LAYER_NAME: cr2a-shared-code
+  DEPENDENCY_LAYER_NAME: cr2a-shared-deps
 
 jobs:
-  build_shared_code_layer:
+  # Detect what changed to determine deployment strategy
+  detect_changes:
     runs-on: ubuntu-latest
     outputs:
+      shared_code_changed: ${{ steps.changes.outputs.shared_code_changed }}
+      dependencies_changed: ${{ steps.changes.outputs.dependencies_changed }}
+      function_changed: ${{ steps.changes.outputs.function_changed }}
+      force_layers: ${{ steps.changes.outputs.force_layers }}
+      deploy_function_only: ${{ steps.changes.outputs.deploy_function_only }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changes
+        id: changes
+        run: |
+          # Check for manual workflow dispatch inputs
+          FORCE_LAYERS="${{ github.event.inputs.force_layer_rebuild }}"
+          DEPLOY_FUNCTION_ONLY="${{ github.event.inputs.deploy_function_only }}"
+          
+          if [ "$DEPLOY_FUNCTION_ONLY" = "true" ]; then
+            echo "deploy_function_only=true" >> "$GITHUB_OUTPUT"
+            echo "shared_code_changed=false" >> "$GITHUB_OUTPUT"
+            echo "dependencies_changed=false" >> "$GITHUB_OUTPUT"
+            echo "function_changed=true" >> "$GITHUB_OUTPUT"
+            echo "force_layers=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          if [ "$FORCE_LAYERS" = "true" ]; then
+            echo "force_layers=true" >> "$GITHUB_OUTPUT"
+            echo "shared_code_changed=true" >> "$GITHUB_OUTPUT"
+            echo "dependencies_changed=true" >> "$GITHUB_OUTPUT"
+            echo "function_changed=true" >> "$GITHUB_OUTPUT"
+            echo "deploy_function_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          
+          # For push events, detect what files changed
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Check if shared code changed (src/, schemas/, templates/)
+            if git diff --name-only HEAD~1 HEAD | grep -E "(src/|schemas/|templates/)"; then
+              echo "shared_code_changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "shared_code_changed=false" >> "$GITHUB_OUTPUT"
+            fi
+            
+            # Check if dependencies changed
+            if git diff --name-only HEAD~1 HEAD | grep -E "(requirements.*\.txt|\.github/workflows/deploy-lambda\.yml)"; then
+              echo "dependencies_changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "dependencies_changed=false" >> "$GITHUB_OUTPUT"
+            fi
+            
+            # Check if function handler changed (src/api/main.py specifically)
+            if git diff --name-only HEAD~1 HEAD | grep -E "(src/api/main\.py|src/api/__init__\.py)"; then
+              echo "function_changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "function_changed=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            # Default for other triggers
+            echo "shared_code_changed=true" >> "$GITHUB_OUTPUT"
+            echo "dependencies_changed=true" >> "$GITHUB_OUTPUT"
+            echo "function_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          
+          echo "force_layers=false" >> "$GITHUB_OUTPUT"
+          echo "deploy_function_only=false" >> "$GITHUB_OUTPUT"
+
+  # Build and publish shared code layer (only when shared code changes)
+  build_shared_code_layer:
+    runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.shared_code_changed == 'true'
+    outputs:
       shared_layer_arn: ${{ steps.publish_shared_layer.outputs.layer_arn }}
+      shared_layer_version: ${{ steps.publish_shared_layer.outputs.layer_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create shared code layer
+      - name: Build shared code layer
         run: |
+          echo "Building shared code layer..."
           mkdir -p layer/python
           
           # Copy shared code into layer
           cp -r src layer/python/
           cp -r schemas layer/python/
           cp -r templates layer/python/
+          
+          # Remove unnecessary files to reduce layer size
+          find layer/python -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          find layer/python -name "*.pyc" -delete 2>/dev/null || true
+          find layer/python -name "*.pyo" -delete 2>/dev/null || true
+          
+          echo "Shared code layer contents:"
+          du -sh layer/python/*
 
       - name: Zip shared code layer
         run: |
@@ -53,18 +153,31 @@ jobs:
       - name: Publish shared code layer
         id: publish_shared_layer
         run: |
-          LAYER_ARN=$(aws lambda publish-layer-version \
-            --layer-name cr2a-shared-code \
+          echo "Publishing shared code layer..."
+          LAYER_RESPONSE=$(aws lambda publish-layer-version \
+            --layer-name ${{ env.SHARED_CODE_LAYER_NAME }} \
             --zip-file fileb://shared-code-layer.zip \
-            --compatible-runtimes python3.11 \
-            --query 'LayerVersionArn' --output text)
+            --compatible-runtimes python${{ env.PYTHON_VERSION }} \
+            --description "Shared code layer - built from commit ${{ github.sha }}" \
+            --output json)
+          
+          LAYER_ARN=$(echo "$LAYER_RESPONSE" | jq -r '.LayerVersionArn')
+          LAYER_VERSION=$(echo "$LAYER_RESPONSE" | jq -r '.Version')
+          
           echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
-          echo "Published shared code layer: $LAYER_ARN"
+          echo "layer_version=$LAYER_VERSION" >> "$GITHUB_OUTPUT"
+          
+          echo "Published shared code layer version $LAYER_VERSION"
+          echo "Layer ARN: $LAYER_ARN"
 
+  # Build and publish dependency layer (only when dependencies change)
   build_dependency_layer:
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.dependencies_changed == 'true'
     outputs:
       dependency_layer_arn: ${{ steps.publish_dependency_layer.outputs.layer_arn }}
+      dependency_layer_version: ${{ steps.publish_dependency_layer.outputs.layer_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,13 +185,44 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies into layer
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-core.txt', 'requirements-optional.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Build dependency layer
         run: |
+          echo "Building dependency layer..."
           mkdir -p layer/python
-          pip install -r requirements-core.txt -t layer/python
-          pip install -r requirements-optional.txt -t layer/python
+          
+          # Install core dependencies
+          if [ -f requirements-core.txt ]; then
+            pip install -r requirements-core.txt -t layer/python
+          fi
+          
+          # Install optional dependencies
+          if [ -f requirements-optional.txt ]; then
+            pip install -r requirements-optional.txt -t layer/python
+          fi
+          
+          # Fallback to requirements.txt if core/optional don't exist
+          if [ ! -f requirements-core.txt ] && [ ! -f requirements-optional.txt ] && [ -f requirements.txt ]; then
+            pip install -r requirements.txt -t layer/python
+          fi
+          
+          # Remove unnecessary files to reduce layer size
+          find layer/python -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          find layer/python -name "*.pyc" -delete 2>/dev/null || true
+          find layer/python -name "*.pyo" -delete 2>/dev/null || true
+          find layer/python -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+          
+          echo "Dependency layer contents:"
+          du -sh layer/python/* | head -20
 
       - name: Zip dependency layer
         run: |
@@ -97,17 +241,77 @@ jobs:
       - name: Publish dependency layer
         id: publish_dependency_layer
         run: |
-          LAYER_ARN=$(aws lambda publish-layer-version \
-            --layer-name cr2a-shared-deps \
+          echo "Publishing dependency layer..."
+          LAYER_RESPONSE=$(aws lambda publish-layer-version \
+            --layer-name ${{ env.DEPENDENCY_LAYER_NAME }} \
             --zip-file fileb://dependency-layer.zip \
-            --compatible-runtimes python3.11 \
-            --query 'LayerVersionArn' --output text)
+            --compatible-runtimes python${{ env.PYTHON_VERSION }} \
+            --description "Dependency layer - built from commit ${{ github.sha }}" \
+            --output json)
+          
+          LAYER_ARN=$(echo "$LAYER_RESPONSE" | jq -r '.LayerVersionArn')
+          LAYER_VERSION=$(echo "$LAYER_RESPONSE" | jq -r '.Version')
+          
           echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
-          echo "Published dependency layer: $LAYER_ARN"
+          echo "layer_version=$LAYER_VERSION" >> "$GITHUB_OUTPUT"
+          
+          echo "Published dependency layer version $LAYER_VERSION"
+          echo "Layer ARN: $LAYER_ARN"
 
-  deploy_api:
-    needs: [build_shared_code_layer, build_dependency_layer]
+  # Get existing layer ARNs if not rebuilding
+  get_existing_layers:
     runs-on: ubuntu-latest
+    needs: detect_changes
+    if: |
+      needs.detect_changes.outputs.shared_code_changed == 'false' || 
+      needs.detect_changes.outputs.dependencies_changed == 'false'
+    outputs:
+      shared_layer_arn: ${{ steps.get_layers.outputs.shared_layer_arn }}
+      dependency_layer_arn: ${{ steps.get_layers.outputs.dependency_layer_arn }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+
+      - name: Get existing layer versions
+        id: get_layers
+        run: |
+          echo "Getting existing layer versions..."
+          
+          # Get shared code layer if not rebuilding
+          if [ "${{ needs.detect_changes.outputs.shared_code_changed }}" = "false" ]; then
+            SHARED_RESPONSE=$(aws lambda list-layer-versions \
+              --layer-name ${{ env.SHARED_CODE_LAYER_NAME }} \
+              --max-items 1 \
+              --output json)
+            SHARED_ARN=$(echo "$SHARED_RESPONSE" | jq -r '.LayerVersions[0].LayerVersionArn')
+            echo "shared_layer_arn=$SHARED_ARN" >> "$GITHUB_OUTPUT"
+            echo "Using existing shared code layer: $SHARED_ARN"
+          fi
+          
+          # Get dependency layer if not rebuilding
+          if [ "${{ needs.detect_changes.outputs.dependencies_changed }}" = "false" ]; then
+            DEPENDENCY_RESPONSE=$(aws lambda list-layer-versions \
+              --layer-name ${{ env.DEPENDENCY_LAYER_NAME }} \
+              --max-items 1 \
+              --output json)
+            DEPENDENCY_ARN=$(echo "$DEPENDENCY_RESPONSE" | jq -r '.LayerVersions[0].LayerVersionArn')
+            echo "dependency_layer_arn=$DEPENDENCY_ARN" >> "$GITHUB_OUTPUT"
+            echo "Using existing dependency layer: $DEPENDENCY_ARN"
+          fi
+
+  # Deploy API function
+  deploy_api:
+    runs-on: ubuntu-latest
+    needs: [detect_changes, build_shared_code_layer, build_dependency_layer, get_existing_layers]
+    if: |
+      always() && 
+      needs.detect_changes.outputs.function_changed == 'true' &&
+      (needs.build_shared_code_layer.result == 'success' || needs.build_shared_code_layer.result == 'skipped') &&
+      (needs.build_dependency_layer.result == 'success' || needs.build_dependency_layer.result == 'skipped') &&
+      (needs.get_existing_layers.result == 'success' || needs.get_existing_layers.result == 'skipped')
     permissions:
       id-token: write
       contents: read
@@ -121,11 +325,41 @@ jobs:
           role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Update function configuration (attach both layers)
+      - name: Determine layer ARNs
+        id: layer_info
         run: |
-          echo "Updating Lambda configuration with both layers..."
-          SHARED_LAYER=${{ needs.build_shared_code_layer.outputs.shared_layer_arn }}
-          DEPENDENCY_LAYER=${{ needs.build_dependency_layer.outputs.dependency_layer_arn }}
+          # Determine shared code layer ARN
+          if [ "${{ needs.build_shared_code_layer.result }}" = "success" ]; then
+            SHARED_LAYER_ARN="${{ needs.build_shared_code_layer.outputs.shared_layer_arn }}"
+            echo "Using newly built shared code layer"
+          else
+            SHARED_LAYER_ARN="${{ needs.get_existing_layers.outputs.shared_layer_arn }}"
+            echo "Using existing shared code layer"
+          fi
+          
+          # Determine dependency layer ARN
+          if [ "${{ needs.build_dependency_layer.result }}" = "success" ]; then
+            DEPENDENCY_LAYER_ARN="${{ needs.build_dependency_layer.outputs.dependency_layer_arn }}"
+            echo "Using newly built dependency layer"
+          else
+            DEPENDENCY_LAYER_ARN="${{ needs.get_existing_layers.outputs.dependency_layer_arn }}"
+            echo "Using existing dependency layer"
+          fi
+          
+          echo "shared_layer_arn=$SHARED_LAYER_ARN" >> "$GITHUB_OUTPUT"
+          echo "dependency_layer_arn=$DEPENDENCY_LAYER_ARN" >> "$GITHUB_OUTPUT"
+          
+          echo "Shared code layer ARN: $SHARED_LAYER_ARN"
+          echo "Dependency layer ARN: $DEPENDENCY_LAYER_ARN"
+
+      - name: Update function configuration
+        if: |
+          needs.detect_changes.outputs.shared_code_changed == 'true' || 
+          needs.detect_changes.outputs.dependencies_changed == 'true'
+        run: |
+          echo "Updating Lambda configuration with layers..."
+          SHARED_LAYER="${{ steps.layer_info.outputs.shared_layer_arn }}"
+          DEPENDENCY_LAYER="${{ steps.layer_info.outputs.dependency_layer_arn }}"
           
           aws lambda update-function-configuration \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
@@ -138,24 +372,30 @@ jobs:
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --region ${{ env.AWS_REGION }}
 
-      - name: Create deployment package (handler only)
+      - name: Create deployment package
         run: |
           echo "Creating minimal deployment package (handler code only)..."
           mkdir -p package
           
-          # Copy ONLY the handler file (src/api/main.py)
+          # Copy ONLY the handler file and necessary __init__.py files
           # The rest of src/, schemas/, templates/ come from the shared code layer
           mkdir -p package/src/api
-          cp src/api/main.py package/src/api/__init__.py package/src/api/
+          cp src/api/main.py package/src/api/
           
-          # Also copy src/__init__.py if it exists
+          # Copy __init__.py files if they exist
           if [ -f src/__init__.py ]; then
             cp src/__init__.py package/src/
+          fi
+          if [ -f src/api/__init__.py ]; then
+            cp src/api/__init__.py package/src/api/
           fi
           
           cd package
           zip -r ../lambda-deployment.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
           cd ..
+          
+          echo "Package contents:"
+          unzip -l lambda-deployment.zip
           echo "Minimal package size (handler only):"
           ls -lh lambda-deployment.zip
 
@@ -169,9 +409,9 @@ jobs:
           echo "S3_KEY=${S3_KEY}" >> $GITHUB_ENV
           echo "Uploaded to: s3://${{ env.S3_BUCKET }}/${S3_KEY}"
 
-      - name: Deploy to Lambda
+      - name: Deploy function code
         run: |
-          echo "Deploying to Lambda function: ${{ env.LAMBDA_FUNCTION_NAME }}"
+          echo "Deploying function code to: ${{ env.LAMBDA_FUNCTION_NAME }}"
           echo "Using S3 object: s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}"
           
           aws lambda update-function-code \
@@ -184,7 +424,7 @@ jobs:
           aws lambda wait function-updated \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --region ${{ env.AWS_REGION }}
-          echo "Deployment successful!"
+          echo "Function deployment successful!"
 
       - name: Verify deployment
         run: |
@@ -202,3 +442,95 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --query 'Configuration.Layers[*].[Arn]' \
             --output table
+
+  # Final verification and cleanup
+  verify_deployment:
+    runs-on: ubuntu-latest
+    needs: [detect_changes, deploy_api]
+    if: always() && needs.deploy_api.result == 'success'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Final verification
+        run: |
+          echo "=== Deployment Summary ==="
+          echo "Shared code layer rebuilt: ${{ needs.detect_changes.outputs.shared_code_changed }}"
+          echo "Dependency layer rebuilt: ${{ needs.detect_changes.outputs.dependencies_changed }}"
+          echo "Function code updated: ${{ needs.detect_changes.outputs.function_changed }}"
+          echo ""
+          echo "=== Lambda Function Status ==="
+          aws lambda get-function-configuration \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query '[FunctionName,State,LastUpdateStatus,Runtime,Handler,CodeSize,Layers[*].Arn]' \
+            --output table
+          
+          echo ""
+          echo "✅ API Lambda function deployed successfully!"
+
+  # Cleanup old layer versions (optional maintenance)
+  cleanup_old_layers:
+    runs-on: ubuntu-latest
+    needs: [build_shared_code_layer, build_dependency_layer, verify_deployment]
+    if: |
+      always() && 
+      needs.verify_deployment.result == 'success' &&
+      (needs.build_shared_code_layer.result == 'success' || needs.build_dependency_layer.result == 'success')
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Cleanup old layer versions
+        run: |
+          echo "Cleaning up old layer versions (keeping latest 5)..."
+          
+          # Cleanup shared code layer versions
+          if [ "${{ needs.build_shared_code_layer.result }}" = "success" ]; then
+            echo "Cleaning up ${{ env.SHARED_CODE_LAYER_NAME }} versions..."
+            VERSIONS=$(aws lambda list-layer-versions \
+              --layer-name ${{ env.SHARED_CODE_LAYER_NAME }} \
+              --query 'LayerVersions[].Version' \
+              --output text | tr '\t' '\n' | sort -nr)
+            
+            echo "$VERSIONS" | tail -n +6 | while read version; do
+              if [ -n "$version" ]; then
+                echo "Deleting shared code layer version $version..."
+                aws lambda delete-layer-version \
+                  --layer-name ${{ env.SHARED_CODE_LAYER_NAME }} \
+                  --version-number $version || true
+              fi
+            done
+          fi
+          
+          # Cleanup dependency layer versions
+          if [ "${{ needs.build_dependency_layer.result }}" = "success" ]; then
+            echo "Cleaning up ${{ env.DEPENDENCY_LAYER_NAME }} versions..."
+            VERSIONS=$(aws lambda list-layer-versions \
+              --layer-name ${{ env.DEPENDENCY_LAYER_NAME }} \
+              --query 'LayerVersions[].Version' \
+              --output text | tr '\t' '\n' | sort -nr)
+            
+            echo "$VERSIONS" | tail -n +6 | while read version; do
+              if [ -n "$version" ]; then
+                echo "Deleting dependency layer version $version..."
+                aws lambda delete-layer-version \
+                  --layer-name ${{ env.DEPENDENCY_LAYER_NAME }} \
+                  --version-number $version || true
+              fi
+            done
+          fi
+          
+          echo "Layer cleanup completed."

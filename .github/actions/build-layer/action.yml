@@ -1,0 +1,140 @@
+name: 'Build Lambda Layer'
+description: 'Reusable action for building and publishing Lambda layers'
+
+inputs:
+  layer-name:
+    description: 'Name of the Lambda layer'
+    required: true
+  layer-type:
+    description: 'Type of layer: dependencies, shared-code, or worker'
+    required: true
+  requirements-files:
+    description: 'Comma-separated list of requirements files (for dependencies layer)'
+    required: false
+    default: ''
+  source-paths:
+    description: 'Comma-separated list of source paths to include (for shared-code layer)'
+    required: false
+    default: ''
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.11'
+  aws-region:
+    description: 'AWS region'
+    required: false
+    default: 'us-east-1'
+
+outputs:
+  layer-arn:
+    description: 'ARN of the published layer'
+    value: ${{ steps.publish.outputs.layer-arn }}
+  layer-version:
+    description: 'Version number of the published layer'
+    value: ${{ steps.publish.outputs.layer-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      if: inputs.layer-type == 'dependencies' || inputs.layer-type == 'worker'
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Cache pip dependencies
+      if: inputs.layer-type == 'dependencies' || inputs.layer-type == 'worker'
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Build dependencies layer
+      if: inputs.layer-type == 'dependencies' || inputs.layer-type == 'worker'
+      shell: bash
+      run: |
+        echo "Building ${{ inputs.layer-type }} layer..."
+        mkdir -p layer/python
+        
+        # Install requirements files
+        IFS=',' read -ra REQUIREMENTS <<< "${{ inputs.requirements-files }}"
+        for req_file in "${REQUIREMENTS[@]}"; do
+          req_file=$(echo "$req_file" | xargs)  # trim whitespace
+          if [ -f "$req_file" ]; then
+            echo "Installing from $req_file..."
+            pip install -r "$req_file" -t layer/python
+          else
+            echo "Warning: $req_file not found"
+          fi
+        done
+        
+        # Remove unnecessary files to reduce layer size
+        find layer/python -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        find layer/python -name "*.pyc" -delete 2>/dev/null || true
+        find layer/python -name "*.pyo" -delete 2>/dev/null || true
+        find layer/python -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+        
+        echo "Layer contents:"
+        du -sh layer/python/* | head -20
+
+    - name: Build shared code layer
+      if: inputs.layer-type == 'shared-code'
+      shell: bash
+      run: |
+        echo "Building shared code layer..."
+        mkdir -p layer/python
+        
+        # Copy source paths
+        IFS=',' read -ra PATHS <<< "${{ inputs.source-paths }}"
+        for src_path in "${PATHS[@]}"; do
+          src_path=$(echo "$src_path" | xargs)  # trim whitespace
+          if [ -d "$src_path" ] || [ -f "$src_path" ]; then
+            echo "Copying $src_path..."
+            cp -r "$src_path" layer/python/
+          else
+            echo "Warning: $src_path not found"
+          fi
+        done
+        
+        # Remove unnecessary files
+        find layer/python -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+        find layer/python -name "*.pyc" -delete 2>/dev/null || true
+        find layer/python -name "*.pyo" -delete 2>/dev/null || true
+        
+        echo "Shared code layer contents:"
+        du -sh layer/python/*
+
+    - name: Create layer package
+      shell: bash
+      run: |
+        cd layer
+        zip -r ../layer-package.zip . -x "*.pyc" "*__pycache__*" "*.git*"
+        cd ..
+        
+        echo "Layer package size:"
+        ls -lh layer-package.zip
+
+    - name: Publish layer
+      id: publish
+      shell: bash
+      run: |
+        echo "Publishing layer: ${{ inputs.layer-name }}"
+        
+        LAYER_RESPONSE=$(aws lambda publish-layer-version \
+          --layer-name "${{ inputs.layer-name }}" \
+          --zip-file fileb://layer-package.zip \
+          --compatible-runtimes python${{ inputs.python-version }} \
+          --description "${{ inputs.layer-type }} layer - built from commit ${{ github.sha }}" \
+          --region "${{ inputs.aws-region }}" \
+          --output json)
+        
+        LAYER_ARN=$(echo "$LAYER_RESPONSE" | jq -r '.LayerVersionArn')
+        LAYER_VERSION=$(echo "$LAYER_RESPONSE" | jq -r '.Version')
+        
+        echo "layer-arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
+        echo "layer-version=$LAYER_VERSION" >> "$GITHUB_OUTPUT"
+        
+        echo "Published layer version $LAYER_VERSION"
+        echo "Layer ARN: $LAYER_ARN"
