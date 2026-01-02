@@ -65,7 +65,7 @@ RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduse
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # FastAPI app
-app = FastAPI(title="CR2A API", version="0.1.0")
+app = FastAPI(title="CR2A API", version="0.1.1")
 
 # CORS configuration for webapp
 allow_origins = os.getenv("CORS_ALLOW_ORIGINS", "https://velmur.info")
