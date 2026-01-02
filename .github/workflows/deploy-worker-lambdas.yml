@@ -5,18 +5,11 @@ on:
     branches: ["main"]
     paths:
       - 'worker/**'
-      - 'src/**'
-      - 'requirements-core.txt'
       - '.github/workflows/deploy-worker-lambdas.yml'
   workflow_dispatch:
     inputs:
-      force_layer_rebuild:
-        description: 'Force rebuild of Lambda layer'
-        required: false
-        default: false
-        type: boolean
       deploy_functions_only:
-        description: 'Deploy function code only (skip layer)'
+        description: 'Deploy function code only (layers managed separately)'
         required: false
         default: false
         type: boolean
@@ -32,9 +25,7 @@ jobs:
   detect_changes:
     runs-on: ubuntu-latest
     outputs:
-      layer_changed: ${{ steps.changes.outputs.layer_changed }}
       functions_changed: ${{ steps.changes.outputs.functions_changed }}
-      force_layer: ${{ steps.changes.outputs.force_layer }}
       deploy_functions_only: ${{ steps.changes.outputs.deploy_functions_only }}
     steps:
       - name: Checkout
@@ -46,127 +37,27 @@ jobs:
         id: changes
         run: |
           # Check for manual workflow dispatch inputs
-          FORCE_LAYER="${{ github.event.inputs.force_layer_rebuild }}"
           DEPLOY_FUNCTIONS_ONLY="${{ github.event.inputs.deploy_functions_only }}"
           
           if [ "$DEPLOY_FUNCTIONS_ONLY" = "true" ]; then
             echo "deploy_functions_only=true" >> "$GITHUB_OUTPUT"
-            echo "layer_changed=false" >> "$GITHUB_OUTPUT"
             echo "functions_changed=true" >> "$GITHUB_OUTPUT"
-            echo "force_layer=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           
-          if [ "$FORCE_LAYER" = "true" ]; then
-            echo "force_layer=true" >> "$GITHUB_OUTPUT"
-            echo "layer_changed=true" >> "$GITHUB_OUTPUT"
-            echo "functions_changed=true" >> "$GITHUB_OUTPUT"
-            echo "deploy_functions_only=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          
-          # For push events, detect what files changed
+          # For push events, always deploy functions (since layers are managed separately)
           if [ "${{ github.event_name }}" = "push" ]; then
-            # Check if layer dependencies changed
-            if git diff --name-only HEAD~1 HEAD | grep -E "(requirements-core\.txt|\.github/workflows/deploy-worker-lambdas\.yml)"; then
-              echo "layer_changed=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "layer_changed=false" >> "$GITHUB_OUTPUT"
-            fi
-            
-            # Check if function code changed
-            if git diff --name-only HEAD~1 HEAD | grep -E "(worker/|src/)"; then
-              echo "functions_changed=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "functions_changed=false" >> "$GITHUB_OUTPUT"
-            fi
+            echo "functions_changed=true" >> "$GITHUB_OUTPUT"
           else
             # Default for other triggers
-            echo "layer_changed=true" >> "$GITHUB_OUTPUT"
             echo "functions_changed=true" >> "$GITHUB_OUTPUT"
           fi
           
-          echo "force_layer=false" >> "$GITHUB_OUTPUT"
           echo "deploy_functions_only=false" >> "$GITHUB_OUTPUT"
 
-  # Build and deploy Lambda layer (only when dependencies change)
-  build_deploy_layer:
+  # Get existing layer ARN (layers are managed by publish-layers.yml)
+  get_layer_arn:
     runs-on: ubuntu-latest
-    needs: detect_changes
-    if: needs.detect_changes.outputs.layer_changed == 'true'
-    outputs:
-      layer_arn: ${{ steps.publish_layer.outputs.layer_arn }}
-      layer_version: ${{ steps.publish_layer.outputs.layer_version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-core.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Build layer
-        run: |
-          echo "Building Lambda layer with dependencies..."
-          mkdir -p layer/python
-          pip install -r requirements-core.txt -t layer/python
-          
-          # Remove unnecessary files to reduce layer size
-          find layer/python -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-          find layer/python -name "*.pyc" -delete 2>/dev/null || true
-          find layer/python -name "*.pyo" -delete 2>/dev/null || true
-          find layer/python -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
-          
-          echo "Layer contents:"
-          du -sh layer/python/*
-          
-          cd layer
-          zip -r ../worker-layer.zip . -x "*.pyc" "*__pycache__*"
-          cd ..
-          
-          echo "Layer package size:"
-          ls -lh worker-layer.zip
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
-
-      - name: Publish layer version
-        id: publish_layer
-        run: |
-          echo "Publishing new layer version..."
-          LAYER_RESPONSE=$(aws lambda publish-layer-version \
-            --layer-name ${{ env.LAYER_NAME }} \
-            --zip-file fileb://worker-layer.zip \
-            --compatible-runtimes python${{ env.PYTHON_VERSION }} \
-            --description "Worker layer - built from commit ${{ github.sha }}" \
-            --output json)
-          
-          LAYER_ARN=$(echo "$LAYER_RESPONSE" | jq -r '.LayerVersionArn')
-          LAYER_VERSION=$(echo "$LAYER_RESPONSE" | jq -r '.Version')
-          
-          echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
-          echo "layer_version=$LAYER_VERSION" >> "$GITHUB_OUTPUT"
-          
-          echo "Published layer version $LAYER_VERSION"
-          echo "Layer ARN: $LAYER_ARN"
-
-  # Get existing layer ARN if not rebuilding
-  get_existing_layer:
-    runs-on: ubuntu-latest
-    needs: detect_changes
-    if: needs.detect_changes.outputs.layer_changed == 'false'
     outputs:
       layer_arn: ${{ steps.get_layer.outputs.layer_arn }}
       layer_version: ${{ steps.get_layer.outputs.layer_version }}
@@ -180,7 +71,7 @@ jobs:
       - name: Get latest layer version
         id: get_layer
         run: |
-          echo "Getting latest layer version..."
+          echo "Getting latest worker layer version..."
           LAYER_RESPONSE=$(aws lambda list-layer-versions \
             --layer-name ${{ env.LAYER_NAME }} \
             --max-items 1 \
@@ -190,23 +81,20 @@ jobs:
           LAYER_VERSION=$(echo "$LAYER_RESPONSE" | jq -r '.LayerVersions[0].Version')
           
           if [ "$LAYER_ARN" = "null" ]; then
-            echo "No existing layer found. This shouldn't happen in normal operation."
+            echo "Error: Worker layer not found. Please run publish-layers.yml workflow first."
             exit 1
           fi
           
           echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
           echo "layer_version=$LAYER_VERSION" >> "$GITHUB_OUTPUT"
           
-          echo "Using existing layer version $LAYER_VERSION"
+          echo "Using worker layer version $LAYER_VERSION"
           echo "Layer ARN: $LAYER_ARN"
   # Deploy function code (always runs when functions changed)
   deploy_functions:
     runs-on: ubuntu-latest
-    needs: [detect_changes, build_deploy_layer, get_existing_layer]
-    if: |
-      always() && 
-      needs.detect_changes.outputs.functions_changed == 'true' &&
-      (needs.build_deploy_layer.result == 'success' || needs.get_existing_layer.result == 'success')
+    needs: [detect_changes, get_layer_arn]
+    if: needs.detect_changes.outputs.functions_changed == 'true'
     permissions:
       id-token: write
       contents: read
@@ -238,30 +126,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Determine layer ARN
-        id: layer_info
-        run: |
-          if [ "${{ needs.build_deploy_layer.result }}" = "success" ]; then
-            LAYER_ARN="${{ needs.build_deploy_layer.outputs.layer_arn }}"
-            LAYER_VERSION="${{ needs.build_deploy_layer.outputs.layer_version }}"
-            echo "Using newly built layer version $LAYER_VERSION"
-          else
-            LAYER_ARN="${{ needs.get_existing_layer.outputs.layer_arn }}"
-            LAYER_VERSION="${{ needs.get_existing_layer.outputs.layer_version }}"
-            echo "Using existing layer version $LAYER_VERSION"
-          fi
-          
-          echo "layer_arn=$LAYER_ARN" >> "$GITHUB_OUTPUT"
-          echo "Layer ARN: $LAYER_ARN"
-
-      - name: Update function configuration
-        if: needs.detect_changes.outputs.layer_changed == 'true'
+      - name: Update function configuration with layer
         run: |
           echo "Updating Lambda configuration for ${{ matrix.function.name }}..."
           aws lambda update-function-configuration \
             --function-name ${{ matrix.function.name }} \
             --handler ${{ matrix.function.handler }} \
-            --layers ${{ steps.layer_info.outputs.layer_arn }} \
+            --layers ${{ needs.get_layer_arn.outputs.layer_arn }} \
             --region ${{ env.AWS_REGION }}
           
           echo "Waiting for configuration update..."
@@ -269,23 +140,18 @@ jobs:
             --function-name ${{ matrix.function.name }} \
             --region ${{ env.AWS_REGION }}
 
-      - name: Create deployment package
+      - name: Create deployment package (handler only)
         run: |
-          echo "Creating deployment package for ${{ matrix.function.name }}..."
-          mkdir -p package
+          echo "Creating minimal deployment package for ${{ matrix.function.name }}..."
           
-          # Copy Lambda function code only (deps come from layer)
-          cp worker/${{ matrix.function.file }} package/
-
-          # Copy src/ directory for lambda_llm_refine which imports from src.core
+          # For lambda_llm_refine, include src/ directory as it imports from src.core
           if [ "${{ matrix.function.name }}" = "cr2a-llm-refine" ]; then
-            cp -r src package/
-            echo "Included src/ directory for LLM dependencies"
+            echo "Including src/ directory for LLM dependencies..."
+            zip -r lambda-deployment.zip worker/${{ matrix.function.file }} src/
+          else
+            # For other functions: zip handler file only
+            zip lambda-deployment.zip worker/${{ matrix.function.file }}
           fi
-
-          cd package
-          zip -r ../lambda-deployment.zip . -x '*.pyc' -x '*__pycache__*' -x '*.git*'
-          cd ..
           
           echo "Package contents:"
           unzip -l lambda-deployment.zip
@@ -347,8 +213,8 @@ jobs:
       - name: Verify all worker functions
         run: |
           echo "=== Deployment Summary ==="
-          echo "Layer rebuilt: ${{ needs.detect_changes.outputs.layer_changed }}"
           echo "Functions updated: ${{ needs.detect_changes.outputs.functions_changed }}"
+          echo "Note: Layers are managed by publish-layers.yml workflow"
           echo ""
           echo "Verifying all worker Lambda functions..."
           
@@ -366,40 +232,3 @@ jobs:
           
           echo ""
           echo "✅ All worker Lambda functions verified successfully!"
-
-  # Cleanup old layer versions (optional maintenance job)
-  cleanup_old_layers:
-    runs-on: ubuntu-latest
-    needs: [build_deploy_layer, verify_deployment]
-    if: needs.build_deploy_layer.result == 'success' && needs.verify_deployment.result == 'success'
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_LAMBDA_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Cleanup old layer versions
-        run: |
-          echo "Cleaning up old layer versions (keeping latest 5)..."
-          
-          # Get all layer versions sorted by version number (descending)
-          VERSIONS=$(aws lambda list-layer-versions \
-            --layer-name ${{ env.LAYER_NAME }} \
-            --query 'LayerVersions[].Version' \
-            --output text | tr '\t' '\n' | sort -nr)
-          
-          # Skip first 5 versions (keep them), delete the rest
-          echo "$VERSIONS" | tail -n +6 | while read version; do
-            if [ -n "$version" ]; then
-              echo "Deleting layer version $version..."
-              aws lambda delete-layer-version \
-                --layer-name ${{ env.LAYER_NAME }} \
-                --version-number $version || true
-            fi
-          done
-          
-          echo "Layer cleanup completed."
