@@ -67,15 +67,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # FastAPI app
 app = FastAPI(title="CR2A API", version="0.1.0")
 
-# CORS
-allow_origins = os.getenv("CORS_ALLOW_ORIGINS", "*")
-origins: List[str] = [o.strip() for o in allow_origins.split(",")] if allow_origins else ["*"]
+# CORS configuration for webapp
+allow_origins = os.getenv("CORS_ALLOW_ORIGINS", "https://velmur.info")
+origins: List[str] = [o.strip() for o in allow_origins.split(",")] if allow_origins else ["https://velmur.info"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["content-type", "authorization"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["content-type", "authorization", "x-amz-date", "x-api-key", "x-amz-security-token"],
 )
 
 LOG_LEVEL = os.getenv("CR2A_LOG_LEVEL", "INFO").upper()

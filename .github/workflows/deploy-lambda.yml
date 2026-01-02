@@ -144,6 +144,11 @@ jobs:
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --handler src.api.main.handler \
             --layers "$SHARED_LAYER" "$CORE_LAYER" "$OPTIONAL_LAYER" \
+            --environment Variables='{
+              "CORS_ALLOW_ORIGINS": "https://velmur.info,https://www.velmur.info",
+              "AWS_REGION": "${{ env.AWS_REGION }}",
+              "CR2A_LOG_LEVEL": "INFO"
+            }' \
             --region ${{ env.AWS_REGION }}
           
           echo "Waiting for configuration update..."
