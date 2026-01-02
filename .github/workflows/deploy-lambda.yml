@@ -224,15 +224,15 @@ jobs:
       - name: Final verification
         run: |
           echo "=== Deployment Summary ==="
-          echo "Function code updated: ${{ needs.detect_changes.outputs.function_changed }}"
+          echo "Function code updated: true"
           echo "Note: Layers are managed by publish-layers.yml workflow"
           echo ""
           echo "=== Lambda Function Status ==="
+
           aws lambda get-function-configuration \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query '[FunctionName,State,LastUpdateStatus,Runtime,Handler,CodeSize,Layers[*].Arn]' \
-            --output table
-          
+            --query '{FunctionName:FunctionName,State:State,LastUpdateStatus:LastUpdateStatus,Runtime:Runtime,Handler:Handler,CodeSize:CodeSize,LayerArns:Layers[*].Arn}' \
+            --output json
+
           echo ""
           echo "✅ API Lambda function deployed successfully!"
