@@ -1,0 +1,353 @@
+{
+  "Comment": "CR2A Contract Analysis with LLM Refinement - FIXED VERSION v2",
+  "StartAt": "GetMetadata",
+  "States": {
+    "GetMetadata": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-get-metadata",
+      "Parameters": {
+        "s3_bucket.$": "$.s3_bucket",
+        "s3_key.$": "$.s3_key",
+        "job_id.$": "$.job_id",
+        "llm_enabled.$": "$.llm_enabled"
+      },
+      "ResultPath": "$",
+      "Next": "CalculateChunks",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkJobFailedOnInput"
+        }
+      ]
+    },
+    "CalculateChunks": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-calculate-chunks",
+      "Parameters": {
+        "s3_bucket.$": "$.s3_bucket",
+        "s3_key.$": "$.s3_key",
+        "job_id.$": "$.job_id",
+        "file_size.$": "$.metadata.size",
+        "page_count.$": "$.metadata.pages",
+        "llm_enabled.$": "$.llm_enabled"
+      },
+      "ResultPath": "$.chunks",
+      "Next": "ProcessChunksInParallel",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkJobFailed"
+        }
+      ]
+    },
+    "ProcessChunksInParallel": {
+      "Type": "Map",
+      "ItemsPath": "$.chunks.chunk_plan.chunks",
+      "MaxConcurrency": 5,
+      "Iterator": {
+        "StartAt": "AnalyzeChunk",
+        "States": {
+          "AnalyzeChunk": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-analyzer-worker",
+            "Parameters": {
+              "s3_bucket.$": "$.s3_bucket",
+              "s3_key.$": "$.s3_key",
+              "job_id.$": "$.job_id",
+              "chunk_index.$": "$.chunk_index",
+              "start_page.$": "$.start_page",
+              "end_page.$": "$.end_page",
+              "page_count.$": "$.page_count",
+              "file_type.$": "$.file_type"
+            },
+            "ResultPath": "$",
+            "End": true,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.TaskFailed"
+                ],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 2,
+                "BackoffRate": 1.5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ChunkFailed"
+              }
+            ]
+          },
+          "ChunkFailed": {
+            "Type": "Pass",
+            "Parameters": {
+              "chunk_index.$": "$.chunk_index",
+              "error": "Chunk processing failed",
+              "status": "failed"
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.chunk_results",
+      "Next": "AggregateResults",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkJobFailed"
+        }
+      ]
+    },
+    "AggregateResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-aggregate-results",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "chunk_results.$": "$.chunk_results",
+        "s3_bucket.$": "$.s3_bucket",
+        "s3_results_bucket": "cr2a-output",
+        "llm_enabled.$": "$.llm_enabled"
+      },
+      "ResultPath": "$.aggregated",
+      "Next": "PreserveLLMEnabled",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 1,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "MarkJobFailed"
+        }
+      ]
+    },
+    "PreserveLLMEnabled": {
+      "Type": "Pass",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "s3_bucket.$": "$.s3_bucket",
+        "s3_results_bucket": "cr2a-output",
+        "llm_enabled.$": "$.llm_enabled",
+        "result_key.$": "$.aggregated.result_key",
+        "filled_template_key.$": "$.aggregated.filled_template_key",
+        "aggregated.$": "$.aggregated"
+      },
+      "Next": "CheckLLMEnabled"
+    },
+    "CheckLLMEnabled": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.llm_enabled",
+          "BooleanEquals": true,
+          "Next": "LLMRefinement"
+        }
+      ],
+      "Default": "SkipLLM"
+    },
+    "LLMRefinement": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:143895994429:function:cr2a-llm-refine",
+      "Parameters": {
+        "job_id.$": "$.job_id",
+        "s3_bucket.$": "$.s3_bucket",
+        "result_key.$": "$.result_key",
+        "llm_enabled.$": "$.llm_enabled"
+      },
+      "TimeoutSeconds": 900,
+      "ResultPath": "$.llm_result",
+      "Next": "MarkJobComplete",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 1.5
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.llm_error",
+          "Next": "MarkJobComplete"
+        }
+      ]
+    },
+    "SkipLLM": {
+      "Type": "Pass",
+      "Result": {
+        "status": "skipped",
+        "reason": "llm_enabled=false"
+      },
+      "ResultPath": "$.llm_result",
+      "Next": "MarkJobComplete"
+    },
+    "MarkJobComplete": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "cr2a-jobs",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #progress = :progress, #updated_at = :updated_at, #results_location = :results_location",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#progress": "progress",
+          "#updated_at": "updated_at",
+          "#results_location": "results_location"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "completed"
+          },
+          ":progress": {
+            "N": "100"
+          },
+          ":updated_at": {
+            "S.$": "$$.State.EnteredTime"
+          },
+          ":results_location": {
+            "S.$": "$.result_key"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "Success"
+    },
+    "MarkJobFailedOnInput": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "cr2a-jobs",
+        "Key": {
+          "job_id": {
+            "S.$": "$$.Execution.Input.job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #progress = :progress, #updated_at = :updated_at, #error_message = :error_message",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#progress": "progress",
+          "#updated_at": "updated_at",
+          "#error_message": "error_message"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "failed"
+          },
+          ":progress": {
+            "N": "0"
+          },
+          ":updated_at": {
+            "S.$": "$$.State.EnteredTime"
+          },
+          ":error_message": {
+            "S": "Initial validation failed"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "Failure",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Failure"
+        }
+      ]
+    },
+    "MarkJobFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "cr2a-jobs",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, #progress = :progress, #updated_at = :updated_at, #error_message = :error_message",
+        "ExpressionAttributeNames": {
+          "#status": "status",
+          "#progress": "progress",
+          "#updated_at": "updated_at",
+          "#error_message": "error_message"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "failed"
+          },
+          ":progress": {
+            "N": "0"
+          },
+          ":updated_at": {
+            "S.$": "$$.State.EnteredTime"
+          },
+          ":error_message": {
+            "S": "Workflow execution failed"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "Failure"
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Failure": {
+      "Type": "Fail",
+      "Error": "WorkflowFailed",
+      "Cause": "Contract analysis workflow failed to complete"
+    }
+  }
+}
