@@ -142,21 +142,12 @@ jobs:
           SHARED_LAYER="${{ needs.get_layer_arns.outputs.shared_layer_arn }}"
           CORE_LAYER="${{ needs.get_layer_arns.outputs.core_dependency_layer_arn }}"
           OPTIONAL_LAYER="${{ needs.get_layer_arns.outputs.optional_dependency_layer_arn }}"
-          
+
           aws lambda update-function-configuration \
             --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
             --handler src.api.main.handler \
             --layers "$SHARED_LAYER" "$CORE_LAYER" "$OPTIONAL_LAYER" \
-            --environment Variables='{
-              "CORS_ALLOW_ORIGINS": "https://velmur.info,https://www.velmur.info",
-              "AWS_REGION": "${{ env.AWS_REGION }}",
-              "CR2A_LOG_LEVEL": "INFO"
-            }' \
-            --region ${{ env.AWS_REGION }}
-          
-          echo "Waiting for configuration update..."
-          aws lambda wait function-updated \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --environment "Variables={CORS_ALLOW_ORIGINS=\"https://velmur.info,https://www.velmur.info\",AWS_REGION=\"${{ env.AWS_REGION }}\",CR2A_LOG_LEVEL=\"INFO\"}" \
             --region ${{ env.AWS_REGION }}
 
       - name: Create deployment package (handler only)
