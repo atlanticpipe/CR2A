@@ -72,17 +72,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const sampleResult = {
     // Demo payload mirrors the backend response shape so UI wiring stays consistent.
     run_id: "run_demo_123",
-    status: "completed",
-    completed_at: new Date().toISOString(),
+    job_id: "demo_job_123",
+    status: "pending",
+    contract_id: "demo_contract",
     llm_enabled: true,
-    download_url: "https://example.com/cr2a_export.pdf",
-    manifest: {
-      contract_id: "FDOT-Bridge-2024-18",
-      validation: { ok: true, findings: 0 },
-      export: { pdf: "cr2a_export.pdf", backend: "docx" },
-      ocr_mode: "auto",
-      llm_refinement: "on",
-    },
+    created_at: new Date().toISOString(),
+    current_step: "Awaiting submission",
+    progress_percent: 0,
+    // These would be populated by actual workflow results
+    filled_template_url: null,
+    download_url: null,
+    validation_results: null,
+    error: null
   };
 
   const handleFileSelect = (file) => {
@@ -250,10 +251,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 1500);
     setTimeout(() => {
       advance(4, "Export finished.");
+      // Simulate completed workflow result with download URL
+      const completedPayload = { 
+        ...payload, 
+        status: "completed", 
+        completed_at: new Date().toISOString(),
+        filled_template_url: "#demo-download",
+        download_url: "#demo-download",
+        current_step: "Export ready",
+        progress_percent: 100
+      };
       setOutputs({
         validation: "Passed",
         exportStatusText: "Completed",
-        payload: { ...payload, status: "completed", completed_at: new Date().toISOString() },
+        payload: completedPayload,
       });
     }, 2000);
   };
@@ -279,11 +290,15 @@ document.addEventListener("DOMContentLoaded", () => {
         onProgress(status);
         
         // Check terminal states
-        if (status.status === "completed") {
+        if (status.status === "completed" || status.status === "SUCCEEDED") {
           onComplete(status);
-        } else if (status.status === "failed") {
+        } else if (status.status === "failed" || status.status === "FAILED" || status.status === "TIMED_OUT" || status.status === "ABORTED") {
           // Extract error message from nested error object
-          const errorMsg = status.error?.cause || status.error?.error || "Job failed with unknown error";
+          const errorMsg = status.error?.cause || 
+                          status.error?.error || 
+                          status.error?.Error || 
+                          status.error || 
+                          `Job ${status.status.toLowerCase()}`;
           onError(errorMsg);
         } else {
           // Still processing - continue polling
@@ -374,17 +389,42 @@ document.addEventListener("DOMContentLoaded", () => {
         jobId,
         // onProgress - update UI as job progresses
         (status) => {
-          renderTimeline([
+          // Map Step Functions states to user-friendly steps
+          const stepMapping = {
+            'GetMetadata': 'Document Analysis',
+            'CalculateChunks': 'Preparing Chunks', 
+            'AnalyzeChunk': 'Policy Validation',
+            'AggregateResults': 'Aggregating Results',
+            'LLMRefine': 'LLM Refinement',
+            'GenerateReport': 'Generating Report'
+          };
+          
+          const currentStepName = stepMapping[status.current_step] || status.current_step || 'Processing';
+          const progressPercent = status.progress_percent || 0;
+          
+          // Create dynamic timeline based on actual workflow progress
+          const steps = [
             { title: "Queued", meta: "Submitted.", active: true },
             { 
-              title: "Processing", 
-              meta: `${status.current_step || "Processing"}... ${status.progress_percent || 0}%`, 
+              title: currentStepName, 
+              meta: `${currentStepName}... ${progressPercent}%`, 
               active: true 
             },
-          ]);
+          ];
+          
+          // Add completed step if we're past initial processing
+          if (progressPercent > 20) {
+            steps.splice(1, 0, { 
+              title: "Document Analysis", 
+              meta: "OCR and text extraction completed.", 
+              active: true 
+            });
+          }
+          
+          renderTimeline(steps);
           setOutputs({
             validation: "Processing",
-            exportStatusText: `${status.current_step || "Processing"} (${status.progress_percent || 0}%)`,
+            exportStatusText: `${currentStepName} (${progressPercent}%)`,
             payload: status,
           });
         },
@@ -392,11 +432,13 @@ document.addEventListener("DOMContentLoaded", () => {
         (result) => {
           renderTimeline([
             { title: "Queued", meta: "Submitted.", active: true },
-            { title: "Processing", meta: "Completed.", active: true },
+            { title: "Document Analysis", meta: "OCR and text extraction completed.", active: true },
+            { title: "Policy Validation", meta: "Contract analysis completed.", active: true },
+            { title: "Report Generation", meta: "Export ready for download.", active: true },
           ]);
           setOutputs({
-            validation: "Passed",
-            exportStatusText: "Completed",
+            validation: result.validation_status || "Passed",
+            exportStatusText: "Completed - Report ready for download",
             payload: result,
           });
           setDownloadLink(result);
