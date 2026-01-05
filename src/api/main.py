@@ -457,7 +457,7 @@ async def get_job_status(job_id: str):
                 # Log progress for debugging
                 logger.info("Step Functions progress", extra={"job_id": job_id, "progress": progress_info})
                 
-                # If execution is complete, capture output
+                # If execution is complete, capture output and update DynamoDB
                 if sf_status == 'SUCCEEDED':
                     try:
                         output = json.loads(execution.get('output', '{}'))
@@ -465,15 +465,61 @@ async def get_job_status(job_id: str):
                         job['filled_template_key'] = output.get('filled_template_key')
                         if execution.get('stopDate'):
                             job['completed_at'] = execution['stopDate'].isoformat()
-                    except (json.JSONDecodeError, AttributeError):
-                        pass
+                        
+                        # Update DynamoDB to reflect completion
+                        update_expr = 'SET #status = :status, updated_at = :updated_at'
+                        update_values = {
+                            ':status': 'completed',
+                            ':updated_at': datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        if job.get('result_key'):
+                            update_expr += ', result_key = :result_key'
+                            update_values[':result_key'] = job['result_key']
+                        
+                        if job.get('filled_template_key'):
+                            update_expr += ', filled_template_key = :filled_template_key'
+                            update_values[':filled_template_key'] = job['filled_template_key']
+                        
+                        if job.get('completed_at'):
+                            update_expr += ', completed_at = :completed_at'
+                            update_values[':completed_at'] = job['completed_at']
+                        
+                        jobs_table.update_item(
+                            Key={'job_id': job_id},
+                            UpdateExpression=update_expr,
+                            ExpressionAttributeNames={'#status': 'status'},
+                            ExpressionAttributeValues=update_values
+                        )
+                        logger.info(f"Updated job {job_id} status to completed in DynamoDB")
+                        
+                    except (json.JSONDecodeError, AttributeError) as parse_e:
+                        logger.warning(f"Failed to parse Step Functions output: {parse_e}")
+                    except Exception as update_e:
+                        logger.error(f"Failed to update job completion status: {update_e}")
                 
-                # If execution failed, capture error
+                # If execution failed, capture error and update DynamoDB
                 elif sf_status == 'FAILED':
                     job['error'] = {
                         'cause': execution.get('cause', 'Unknown error'),
                         'error': execution.get('error', 'UNKNOWN'),
                     }
+                    
+                    # Update DynamoDB to reflect the failed status
+                    try:
+                        jobs_table.update_item(
+                            Key={'job_id': job_id},
+                            UpdateExpression='SET #status = :status, error = :error, updated_at = :updated_at',
+                            ExpressionAttributeNames={'#status': 'status'},
+                            ExpressionAttributeValues={
+                                ':status': 'failed',
+                                ':error': job['error'],
+                                ':updated_at': datetime.now(timezone.utc).isoformat()
+                            }
+                        )
+                        logger.info(f"Updated job {job_id} status to failed in DynamoDB")
+                    except Exception as update_e:
+                        logger.error(f"Failed to update job status to failed: {update_e}")
             
             except Exception as e:
                 logger.warning(
