@@ -8,6 +8,9 @@ botocore==1.35.84
 # AI/ML - Core LLM functionality
 openai==1.58.1
 
+# HTTP Client - Re3quired by OpenAI SDK
+httpx==0.28.1
+
 # Data Processing - Essential for document analysis
 pandas==2.2.3
 numpy==1.26.4

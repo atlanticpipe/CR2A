@@ -48,19 +48,3 @@ marshmallow==3.23.2
 
 # HTTP Client - Enhanced features
 httpx==0.28.1
-
-# === DEVELOPMENT DEPENDENCIES (uncomment for local dev) ===
-# Testing
-# pytest==8.3.4
-# pytest-cov==6.0.0
-# pytest-asyncio==0.24.0
-
-# Code Quality
-# black==24.10.0
-# flake8==7.1.1
-# mypy==1.13.0
-# isort==5.13.2
-
-# Development Tools
-# pre-commit==4.0.1
-# bandit==1.8.0
