@@ -34,7 +34,7 @@ env:
   PYTHON_VERSION: '3.11'
   SHARED_CODE_LAYER_NAME: cr2a-shared-code
   DEPENDENCY_LAYER_NAME: cr2a-shared-deps
-  WORKER_LAYER_NAME: cr2a-shared-deps
+  WORKER_LAYER_NAME: cr2a-worker-deps
 
 jobs:
   # Detect what changed to determine which layers to rebuild
@@ -55,6 +55,7 @@ jobs:
       - name: Detect changes
         id: changes
         run: |
+          set -euo pipefail
           # Check for manual workflow dispatch inputs
           FORCE_REBUILD_ALL="${{ github.event.inputs.force_rebuild_all }}"
           REBUILD_SHARED_CODE="${{ github.event.inputs.rebuild_shared_code }}"
@@ -90,14 +91,14 @@ jobs:
           # For push events, detect what files changed
           if [ "${{ github.event_name }}" = "push" ]; then
             # Check if shared code changed (src/, schemas/, templates/)
-            if git diff --name-only HEAD~1 HEAD | grep -E "(src/|schemas/|templates/)"; then
+            if git diff --name-only HEAD~1 HEAD | grep -qE "(src/|schemas/|templates/)"; then
               echo "shared_code_changed=true" >> "$GITHUB_OUTPUT"
             else
               echo "shared_code_changed=false" >> "$GITHUB_OUTPUT"
             fi
             
             # Check if dependencies changed
-            if git diff --name-only HEAD~1 HEAD | grep -E "(requirements.*\.txt|\.github/workflows/publish-layers\.yml|\.github/actions/build-layer/)"; then
+            if git diff --name-only HEAD~1 HEAD | grep -qE "(requirements.*\.txt|\.github/workflows/publish-layers\.yml|\.github/actions/build-layer/)"; then
               echo "dependencies_changed=true" >> "$GITHUB_OUTPUT"
             else
               echo "dependencies_changed=false" >> "$GITHUB_OUTPUT"

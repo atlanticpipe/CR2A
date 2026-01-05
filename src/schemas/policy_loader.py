@@ -5,8 +5,15 @@ from typing import Any, Dict, Optional, Union, cast
 def load_policy(root: Union[str, Path], policy_file: str) -> Dict[str, Any]:
     base = Path(root).expanduser().resolve()
     path = base / "schemas" / policy_file
+    if not path.exists():
+        raise FileNotFoundError(f"Policy file not found: {path}")
+    if not path.is_file():
+        raise ValueError(f"Policy path is not a file: {path}")
     text = path.read_text(encoding="utf-8")
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in policy file {policy_file}: {e}") from e
 
 def load_validation_rules(root: Union[str, Path], file_name: str = "validation_rules.json") -> Dict[str, Any]:
     return load_policy(root, file_name)

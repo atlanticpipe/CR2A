@@ -68,7 +68,8 @@ def _docx_iter_paragraphs(docx_bytes: bytes) -> List[str]:
     with io.BytesIO(docx_bytes) as bio:
         with zipfile.ZipFile(bio) as z:
             xml_bytes = z.read("word/document.xml")
-    root = ET.fromstring(xml_bytes)
+    # Disable entity expansion to prevent XXE attacks
+    root = ET.fromstring(xml_bytes, parser=ET.XMLParser(resolve_entities=False))
     lines: List[str] = []
     for p in root.findall(".//w:p", _DOCX_NS):
         texts = []
@@ -117,7 +118,10 @@ def _pdf_ocr_with_tesseract(pdf_bytes: bytes) -> List[str]:
     return pages_text
 
 def _pdf_extract_pages(pdf_bytes: bytes, ocr_mode: str = "auto") -> List[str]:
-    # 1) Try native text first
+    MAX_PDF_SIZE = 500 * 1024 * 1024
+    if len(pdf_bytes) > MAX_PDF_SIZE:
+        raise AnalyzerError("ValidationError", f"PDF file too large: {len(pdf_bytes)} bytes")
+    
     text_pages = _pdf_text_pages_with_pymupdf(pdf_bytes)
     if any(text_pages):
         return text_pages
@@ -256,6 +260,10 @@ def _find_item_anchor_indices(region_lines: List[str], item_number: int, item_ti
     """
     Return the earliest line index matching either the numbered heading or a title fragment.
     """
+    # Limit title length to prevent ReDoS attacks
+    MAX_TITLE_LENGTH = 500
+    item_title = item_title[:MAX_TITLE_LENGTH]
+    
     tokens = re.findall(r"[A-Za-z][A-Za-z']+", item_title)
     trimmed = tokens[:6]
     title_pattern = re.compile(r".*".join(re.escape(tok) for tok in trimmed), re.I) if trimmed else None
@@ -390,6 +398,13 @@ def _validate_item_spans(payload: Dict[str, Any]) -> None:
 
 def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], ocr: str = "auto") -> Dict[str, Any]:
     input_path = Path(input_path).expanduser().resolve()
+    
+    if not input_path.exists():
+        raise AnalyzerError("FileNotFoundError", f"Input file not found: {input_path}")
+    
+    if not input_path.is_file():
+        raise AnalyzerError("ValidationError", f"Input path is not a file: {input_path}")
+    
     closing_line = _get_policy_closing_line(repo_root)
 
     # Resolve MIME from content so renamed binaries are still classified correctly.
@@ -404,21 +419,42 @@ def analyze_to_json(input_path: Union[str, Path], repo_root: Union[str, Path], o
     )
 
     if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or mime_type == "application/msword":
-        lines = _docx_iter_paragraphs(input_path.read_bytes())
-        payload = _build_from_lines(lines, closing_line)
-        _validate_item_spans(payload)
-        return payload
+        try:
+            lines = _docx_iter_paragraphs(input_path.read_bytes())
+        except Exception as e:
+            raise AnalyzerError("FileReadError", f"Failed to read DOCX file: {e}") from e
+        try:
+            payload = _build_from_lines(lines, closing_line)
+            _validate_item_spans(payload)
+            return payload
+        except AnalyzerError:
+            raise
+        except Exception as e:
+            raise AnalyzerError("ProcessingError", f"Failed to process DOCX content: {e}") from e
 
     if mime_type == "application/pdf":
-        pdf_bytes = input_path.read_bytes()
-        pages = _pdf_extract_pages(pdf_bytes, ocr_mode=ocr)
-        lines: List[str] = []
-        for ptxt in pages:
-            for ln in (ptxt or "").splitlines():
-                lines.append(ln.strip())
-            lines.append("")
-        payload = _build_from_lines(lines, closing_line)
-        _validate_item_spans(payload)
-        return payload
+        try:
+            pdf_bytes = input_path.read_bytes()
+        except Exception as e:
+            raise AnalyzerError("FileReadError", f"Failed to read PDF file: {e}") from e
+        
+        try:
+            pages = _pdf_extract_pages(pdf_bytes, ocr_mode=ocr)
+        except Exception as e:
+            raise AnalyzerError("PDFProcessingError", f"Failed to extract PDF pages: {e}") from e
+        
+        try:
+            lines: List[str] = []
+            for ptxt in pages:
+                for ln in (ptxt or "").splitlines():
+                    lines.append(ln.strip())
+                lines.append("")
+            payload = _build_from_lines(lines, closing_line)
+            _validate_item_spans(payload)
+            return payload
+        except AnalyzerError:
+            raise
+        except Exception as e:
+            raise AnalyzerError("ProcessingError", f"Failed to process PDF content: {e}") from e
 
     raise AnalyzerError("ValidationError", f"Unsupported input type: {mime_type}")

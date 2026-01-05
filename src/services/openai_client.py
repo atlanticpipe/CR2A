@@ -22,7 +22,8 @@ class OpenAIClientError(RuntimeError):
         self.category = category
 
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com")
-OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-5.2")
+# amazonq-ignore-next-line
+OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 DEFAULT_PLACEHOLDER_TEXT = "Not present in contract."
 
 def _get_api_key() -> Optional[str]:
@@ -57,9 +58,8 @@ def _parse_json_payload(raw_text: str) -> Dict[str, Any]:
         # Fast path when the model returned clean JSON.
         return json.loads(raw_text)
     except json.JSONDecodeError as e:
-        # Log the actual error for debugging
-        print(f"JSON parsing failed at line {e.lineno}, column {e.colno}: {e.msg}")
-        print(f"Problematic text near error: {raw_text[max(0, e.pos-100):e.pos+100]}")
+        # Log the actual error for debugging (without exposing full text)
+        logging.warning(f"JSON parsing failed at line {e.lineno}, column {e.colno}: {e.msg}")
         
         # Best-effort salvage: slice the outermost object
         start = raw_text.find("{")
@@ -158,13 +158,20 @@ def _call_openai(body: Dict[str, Any], headers: Dict[str, str], timeout: float) 
         except httpx.HTTPStatusError as exc:
             # Surface actionable error details when the API rejects the request.
             detail = exc.response.text
-            status = exc.response.status.code
+            status = exc.response.status_code
             category = "ValidationError" if 400 <= status < 500 else "ProcessingError"
             raise OpenAIClientError(
                 category,
                 f"OpenAI request failed ({status}): {detail}",
             ) from exc
-        data = resp.json()
+        except httpx.RequestError as exc:
+            raise OpenAIClientError("NetworkError", f"Request failed: {exc}") from exc
+        
+        try:
+            data = resp.json()
+        except json.JSONDecodeError as exc:
+            raise OpenAIClientError("ProcessingError", f"Invalid JSON response: {exc}") from exc
+    
     content = _extract_text(data)
     return _parse_json_payload(content)
 
@@ -381,7 +388,7 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     org_id = os.getenv("OPENAI_ORG_ID")
     if org_id:
         headers["OpenAI-Organization"] = org_id
-    max_output_tokens = int(os.getenv("POENAI_MAX_OUTPUT_TOKENS", "16384"))
+    max_output_tokens = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "16384"))
     base_body = {
         # Responses API payload requesting strict JSON output via the new text.format field.
         "model": model,
@@ -395,105 +402,103 @@ def refine_cr2a(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # Call the Responses API with a strict JSON-only contract to keep structure intact.
         refined = _call_openai(base_body, headers, timeout)
-        refined = _canonicalize_llm_sections(refined, DEFAULT_PLACEHOLDER_TEXT)
-
-        logging.info(f"OpenAI response type: {type(refined)}")
-        logging.info(f"OpenAI response keys: {refined.keys() if isinstance(refined, dict) else 'Not a dict'}")
-
-        default_prov = {"source": "LLM", "page": 0, "span": ""}
-
-        for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
-            for item in refined.get(sec_key, []) or []:
-                for block in item.get("clauses", []) or []:
-                    block.setdefault("search_rationale", "")
-                    block.setdefault("provenance", default_prov.copy())
-
-        _validate_search_rationale(refined)
-        _ensure_clause_rationale(refined)
-
-        # Preserve source metadata and SECTION_I verbatim for downstream validators/exporters.
-        refined["SECTION_I"] = deepcopy(payload.get("SECTION_I", {}))
-        for meta_key in ["_contract_text", "_section_text", "_item_spans"]:
-            if meta_key in payload:
-                refined[meta_key] = payload[meta_key]
-
-        retry_targets: List[Dict[str, Any]] = []
-        item_spans = payload.get("_item_spans", {}) or {}
-        section_text = payload.get("_section_text", {}) or {}
-
-        for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
-            sec_label = sec_key.split("_")[-1]
-            for item in refined.get(sec_key, []) or []:
-                item_number = item.get("item_number", "")
-                span_key = f"SECTION_{sec_label}:{item_number}"
-                focus_span = item_spans.get(span_key) or section_text.get(sec_label, "")
-                clauses = item.get("clauses") or []
-                needs_retry = (not clauses) or any(_is_generic_clause(block) for block in clauses)
-                if needs_retry and focus_span:
-                    retry_targets.append(
-                        {
-                            "section": sec_key,
-                            "item_number": item_number,
-                            "item_title": item.get("item_title", ""),
-                            "focus_span": focus_span,
-                        }
-                    )
-
-        for idx, target in enumerate(retry_targets, start=1):
-            logging.info("Retrying item %s %s (attempt %d)", target["section"], target["item_number"], idx)
-            narrowed_body = json.loads(json.dumps(base_body))
-            narrowed_body["input"] = (
-                f"{user_text}\n\n"
-                f"Retry ONLY for item {target['item_number']} ({target['item_title']}) in {target['section']}. "
-                "Use the provided focus_span as the primary evidence. "
-                f"focus_span:\n{target['focus_span']}\n\n"
-                "Return JSON with only the updated section and item, keeping field names exact. "
-                "Fill all clause fields with specific language from focus_span where possible and include search_rationale."
-            )
-            try:
-                retry_refined = _call_openai(narrowed_body, headers, timeout)
-                retry_scaffolded = {**build_template_scaffold(empty_clauses=True), **retry_refined}
-                retry_refined = _canonicalize_llm_sections(retry_scaffolded, DEFAULT_PLACEHOLDER_TEXT)
-            except httpx.TimeoutException as exc:
-                raise OpenAIClientError("TimeoutError", f"OpenAI retry timed out for {target['section']} {target['item_number']}: {exc}") from exc
-            except httpx.RequestError as exc:
-                raise OpenAIClientError("NetworkError", f"OpenAI retry failed for {target['section']} {target['item_number']}: {exc}") from exc
-
-            for item in retry_refined.get(target["section"], []) or []:
-                for block in item.get("clauses", []) or []:
-                    block.setdefault("search_rationale", "")
-                    block.setdefault("provenance", default_prov.copy())
-                _merge_item_update(refined, target["section"], item, default_prov)
-
-            _validate_search_rationale(refined)
-
-        refined = _canonicalize_llm_sections(refined, DEFAULT_PLACEHOLDER_TEXT)
-
-        # Preserve source text hints for downstream processors.
-        refined["SECTION_I"] = deepcopy(payload.get("SECTION_I", {}))
-        for meta_key in ["_contract_text", "_section_text", "_item_spans"]:
-            if meta_key in payload:
-                refined[meta_key] = payload[meta_key]
-
-        for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
-            for item in refined.get(sec_key, []) or []:
-                for block in item.get("clauses", []) or []:
-                    block.setdefault("search_rationale", "")
-                    block.setdefault("provenance", default_prov.copy())
-
-        _validate_search_rationale(refined)
-        _ensure_clause_rationale(refined)
-
-        return refined
-    except httpx.TimeoutException as exc:
-        # Bubble up a concise timeout message so the caller can retry or bypass refinement.
-        raise OpenAIClientError("TimeoutError", f"OpenAI request timed out: {exc}")
-    except httpx.RequestError as exc:
-        # Network failures should not be silent; expose enough detail without leaking secrets.
-        raise OpenAIClientError("NetworkError", f"OpenAI request failed: {exc}")
     except OpenAIClientError:
-        # Propagate typed errors unchanged for upstream mapping.
         raise
     except Exception as exc:
-        # Catch-all to avoid surfacing raw tracebacks to the API surface.
-        raise OpenAIClientError("ProcessingError", f"OpenAI refinement failed: {exc}")
+        raise OpenAIClientError("ProcessingError", f"Failed to call OpenAI: {exc}") from exc
+    
+    try:
+        refined = _canonicalize_llm_sections(refined, DEFAULT_PLACEHOLDER_TEXT)
+    except OpenAIClientError:
+        raise
+    except Exception as exc:
+        raise OpenAIClientError("ValidationError", f"Failed to canonicalize sections: {exc}") from exc
+
+    logging.info(f"OpenAI response type: {type(refined)}")
+    logging.info(f"OpenAI response keys: {refined.keys() if isinstance(refined, dict) else 'Not a dict'}")
+
+    default_prov = {"source": "LLM", "page": 0, "span": ""}
+
+    for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+        for item in refined.get(sec_key, []) or []:
+            for block in item.get("clauses", []) or []:
+                block.setdefault("search_rationale", "")
+                block.setdefault("provenance", default_prov.copy())
+
+    _validate_search_rationale(refined)
+    _ensure_clause_rationale(refined)
+
+    # Preserve source metadata and SECTION_I verbatim for downstream validators/exporters.
+    refined["SECTION_I"] = deepcopy(payload.get("SECTION_I", {}))
+    for meta_key in ["_contract_text", "_section_text", "_item_spans"]:
+        if meta_key in payload:
+            refined[meta_key] = payload[meta_key]
+
+    retry_targets: List[Dict[str, Any]] = []
+    item_spans = payload.get("_item_spans", {}) or {}
+    section_text = payload.get("_section_text", {}) or {}
+
+    for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+        sec_label = sec_key.split("_")[-1]
+        for item in refined.get(sec_key, []) or []:
+            item_number = item.get("item_number", "")
+            span_key = f"SECTION_{sec_label}:{item_number}"
+            focus_span = item_spans.get(span_key) or section_text.get(sec_label, "")
+            clauses = item.get("clauses") or []
+            needs_retry = (not clauses) or any(_is_generic_clause(block) for block in clauses)
+            if needs_retry and focus_span:
+                retry_targets.append(
+                    {
+                        "section": sec_key,
+                        "item_number": item_number,
+                        "item_title": item.get("item_title", ""),
+                        "focus_span": focus_span,
+                    }
+                )
+
+    for idx, target in enumerate(retry_targets, start=1):
+        logging.info("Retrying item %s %s (attempt %d)", target["section"], target["item_number"], idx)
+        narrowed_body = json.loads(json.dumps(base_body))
+        narrowed_body["input"] = (
+            f"{user_text}\n\n"
+            f"Retry ONLY for item {target['item_number']} ({target['item_title']}) in {target['section']}. "
+            "Use the provided focus_span as the primary evidence. "
+            f"focus_span:\n{target['focus_span']}\n\n"
+            "Return JSON with only the updated section and item, keeping field names exact. "
+            "Fill all clause fields with specific language from focus_span where possible and include search_rationale."
+        )
+        try:
+            retry_refined = _call_openai(narrowed_body, headers, timeout)
+            retry_scaffolded = {**build_template_scaffold(empty_clauses=True), **retry_refined}
+            retry_refined = _canonicalize_llm_sections(retry_scaffolded, DEFAULT_PLACEHOLDER_TEXT)
+        except httpx.TimeoutException as exc:
+            raise OpenAIClientError("TimeoutError", f"OpenAI retry timed out for {target['section']} {target['item_number']}: {exc}") from exc
+        except httpx.RequestError as exc:
+            raise OpenAIClientError("NetworkError", f"OpenAI retry failed for {target['section']} {target['item_number']}: {exc}") from exc
+
+        for item in retry_refined.get(target["section"], []) or []:
+            for block in item.get("clauses", []) or []:
+                block.setdefault("search_rationale", "")
+                block.setdefault("provenance", default_prov.copy())
+            _merge_item_update(refined, target["section"], item, default_prov)
+
+        _validate_search_rationale(refined)
+
+    refined = _canonicalize_llm_sections(refined, DEFAULT_PLACEHOLDER_TEXT)
+
+    # Preserve source text hints for downstream processors.
+    refined["SECTION_I"] = deepcopy(payload.get("SECTION_I", {}))
+    for meta_key in ["_contract_text", "_section_text", "_item_spans"]:
+        if meta_key in payload:
+            refined[meta_key] = payload[meta_key]
+
+    for sec_key in ["SECTION_II", "SECTION_III", "SECTION_IV", "SECTION_V", "SECTION_VI"]:
+        for item in refined.get(sec_key, []) or []:
+            for block in item.get("clauses", []) or []:
+                block.setdefault("search_rationale", "")
+                block.setdefault("provenance", default_prov.copy())
+
+    _validate_search_rationale(refined)
+    _ensure_clause_rationale(refined)
+
+    return refined

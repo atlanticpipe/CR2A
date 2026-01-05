@@ -25,6 +25,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Lambda authorizer guard: ensure Authorization header is always sent.
     if (!AUTHORIZATION) {
       // For MVP: send a dummy token since authorizer allows all requests
+      // WARNING: This is insecure for production - implement proper authentication
+      console.warn("No API authentication token configured - using placeholder");
       return { Authorization: "Bearer mvp-token" };
     }
     return { Authorization: AUTHORIZATION };

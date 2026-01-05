@@ -2,9 +2,14 @@ import json
 import boto3
 import io
 import re
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from PyPDF2 import PdfReader
 from docx import Document
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
@@ -27,20 +32,29 @@ VALIDATION_RULES = {
 
 def lambda_handler(event, context):
     """Worker Lambda for contract analysis"""
-    job_id = event['job_id']
-    s3_key = event['s3_key']
+    try:
+        job_id = event['job_id']
+        s3_key = event['s3_key']
+    except KeyError as e:
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': f'Missing required field: {e}'})
+        }
     
     try:
         # Update status to processing
-        jobs_table.update_item(
-            Key={'job_id': job_id},
-            UpdateExpression='SET #status = :status, started_at = :started',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={
-                ':status': 'processing',
-                ':started': datetime.now().isoformat()
-            }
-        )
+        try:
+            jobs_table.update_item(
+                Key={'job_id': job_id},
+                UpdateExpression='SET #status = :status, started_at = :started',
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':status': 'processing',
+                    ':started': datetime.now(timezone.utc).isoformat()
+                }
+            )
+        except Exception as db_error:
+            logger.warning(f"Failed to update job status: {db_error}")
         
         # Download contract from S3
         response = s3_client.get_object(Bucket='cr2a-upload', Key=s3_key)
@@ -66,7 +80,7 @@ def lambda_handler(event, context):
             'job_id': job_id,
             'analysis': analysis_result,
             'validation': validation_result,
-            'completed_at': datetime.now().isoformat()
+            'completed_at': datetime.now(timezone.utc).isoformat()
         }
         
         # Store in S3
@@ -85,7 +99,7 @@ def lambda_handler(event, context):
             ExpressionAttributeNames={'#status': 'status'},
             ExpressionAttributeValues={
                 ':status': 'completed',
-                ':completed': datetime.now().isoformat(),
+                ':completed': datetime.now(timezone.utc).isoformat(),
                 ':result': result_key,
                 ':progress': 100
             }
@@ -98,15 +112,19 @@ def lambda_handler(event, context):
         
     except Exception as e:
         # Log error and update status
-        jobs_table.update_item(
-            Key={'job_id': job_id},
-            UpdateExpression='SET #status = :status, error = :error',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={
-                ':status': 'failed',
-                ':error': str(e)
-            }
-        )
+        logger.exception(f"Analysis failed for job {job_id}: {str(e)}")
+        try:
+            jobs_table.update_item(
+                Key={'job_id': job_id},
+                UpdateExpression='SET #status = :status, error = :error',
+                ExpressionAttributeNames={'#status': 'status'},
+                ExpressionAttributeValues={
+                    ':status': 'failed',
+                    ':error': str(e)
+                }
+            )
+        except Exception as db_error:
+            logger.error(f"Failed to update error status: {db_error}")
         raise
 
 

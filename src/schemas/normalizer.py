@@ -15,9 +15,18 @@ def load_output_schema(repo_root: Path) -> Dict[str, Any]:
     
     Returns:
         Output schema as a dictionary
+    
+    Raises:
+        FileNotFoundError: If schema file doesn't exist
+        ValueError: If schema file contains invalid JSON
     """
     schema_path = repo_root / "schemas" / "output_schemas.json"
-    return json.loads(schema_path.read_text(encoding="utf-8"))
+    if not schema_path.exists():
+        raise FileNotFoundError(f"Output schema not found: {schema_path}")
+    try:
+        return json.loads(schema_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in output schema: {e}") from e
 
 
 def convert_clause(block: Dict[str, Any]) -> Dict[str, str]:
@@ -127,12 +136,17 @@ def normalize_to_schema(
     section_i: Dict[str, str] = {}
 
     # Case-insensitive key matching with fallback to default value
-    for key in section_i_keys:
-        match = next(
-            (source_i[k] for k in source_i if k.rstrip(":").lower() == key.rstrip(":").lower()),
-            ""
-        )
-        section_i[key] = match or "Not present in contract."
+    try:
+        for key in section_i_keys:
+            match = next(
+                (source_i[k] for k in source_i if k.rstrip(":").lower() == key.rstrip(":").lower()),
+                ""
+            )
+            section_i[key] = match or "Not present in contract."
+    except (AttributeError, TypeError) as e:
+        # Handle cases where source_i keys are not strings or source_i is malformed
+        for key in section_i_keys:
+            section_i[key] = "Not present in contract."
 
     normalized = {"SECTION_I": section_i}
 
@@ -143,8 +157,5 @@ def normalize_to_schema(
             sec,
             closing_line
         )
-
-    # Add document metadata
-    normalized: Dict[str, Any] = {"SECTION_I": section_i}
 
     return normalized

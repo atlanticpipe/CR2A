@@ -148,10 +148,10 @@ temp/
 *.pdf
 *.docx
 *.xlsx
-requirements.txt
 
 # Node modules (if using Node tools)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+python/

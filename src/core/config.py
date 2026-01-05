@@ -42,9 +42,17 @@ def get_secret_env_or_aws(env_name: str, secret_arn_env: str) -> Optional[str]:
     if not secret_arn or boto3 is None:
         return None
 
+    # Validate ARN format to prevent injection
+    if not secret_arn.startswith("arn:aws:secretsmanager:"):
+        raise ValueError(f"Invalid secret ARN format: {secret_arn}")
+
     region = os.getenv("AWS_REGION") or None
-    client = boto3.client("secretsmanager", region_name=region) if region else boto3.client("secretsmanager")
-    resp = client.get_secret_value(SecretId=secret_arn)
+    try:
+        client = boto3.client("secretsmanager", region_name=region) if region else boto3.client("secretsmanager")
+        resp = client.get_secret_value(SecretId=secret_arn)
+    except Exception as e:
+        raise RuntimeError("Failed to retrieve secret from AWS Secrets Manager") from e
+    
     secret = resp.get("SecretString")
     if not secret:
         blob = resp.get("SecretBinary")
@@ -63,8 +71,10 @@ def get_secret_env_or_aws(env_name: str, secret_arn_env: str) -> Optional[str]:
             if key in obj:
                 secret = str(obj[key])
                 break
-    except Exception:
+    except json.JSONDecodeError:
         pass
+    except Exception:
+        return None
 
     # Cache the resolved secret locally so downstream libraries that rely on
     # environment lookups (like openai-python) can reuse it without extra fetches.

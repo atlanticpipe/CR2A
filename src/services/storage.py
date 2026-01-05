@@ -106,8 +106,12 @@ def build_output_key(run_id: str, filename: str) -> str:
     """
     if not re.fullmatch(r"[A-Za-z0-9._-]+", run_id):
         raise _http_error(400, "ValidationError", "Invalid run_id format.")
+    # Sanitize filename to prevent path traversal
+    safe_filename = os.path.basename(filename)
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", safe_filename):
+        raise _http_error(400, "ValidationError", "Invalid filename format.")
     prefix = OUTPUT_PREFIX.strip("/")
-    parts = [part for part in (prefix, run_id, filename) if part]
+    parts = [part for part in (prefix, run_id, safe_filename) if part]
     return "/".join(parts)
 
 def resolve_s3_key_from_uri(contract_uri: str) -> str:

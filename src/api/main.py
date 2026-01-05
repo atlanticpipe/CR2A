@@ -5,6 +5,7 @@ import tempfile                            # Temporary directory creation
 import uuid                                # Generate unique identifiers
 import logging                             # Application logging
 import boto3                               # AWS SDK
+from botocore.exceptions import ClientError
 from datetime import datetime, timezone    # DateTime handling
 from pathlib import Path                   # Path manipulation (cross-platform)
 from typing import Any, Dict, List, Optional  # Type hints
@@ -53,20 +54,34 @@ from src.schemas.template_spec import CR2A_TEMPLATE_SPEC
 # Utility functions
 from src.utils.mime_utils import infer_extension_from_content_type_or_magic, infer_mime_type
 
+# Configure logging
+LOG_LEVEL = os.getenv("CR2A_LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format="%(levelname)s %(name)s: %(message)s")
+logging.getLogger("src.api.main").setLevel(LOG_LEVEL)
+logging.getLogger("src.services.openai_client").setLevel(LOG_LEVEL)
+logger = logging.getLogger(__name__)    # Logger for this module
+
 # AWS SDK Clients
-s3_client = boto3.client('s3')                     # S3 for file storage
-lambda_client = boto3.client('lambda')             # Lambda invocation
-dynamodb = boto3.resource('dynamodb')             # DynamoDB resource
-jobs_table = dynamodb.Table('cr2a-jobs')          # Reference to cr2a-jobs table
-stepfunctions_client = boto3.client('stepfunctions')  # Step Functions orchestration
-STEP_FUNCTIONS_ARN = 'arn:aws:states:us-east-1:143895994429:stateMachine:cr2a-contract-analysis'
+try:
+    s3_client = boto3.client('s3')
+    lambda_client = boto3.client('lambda')
+    dynamodb = boto3.resource('dynamodb')
+    jobs_table = dynamodb.Table('cr2a-jobs')
+    stepfunctions_client = boto3.client('stepfunctions')
+except Exception as e:
+    logger.error(f"Failed to initialize AWS clients: {e}")
+    raise
+
+STEP_FUNCTIONS_ARN = os.getenv('STEP_FUNCTIONS_ARN', 'arn:aws:states:us-east-1:143895994429:stateMachine:cr2a-contract-analysis')
 
 RUN_OUTPUT_ROOT = Path(os.getenv("RUN_OUTPUT_ROOT", "/tmp/cr2a_runs")).expanduser()
 REPO_ROOT = Path(__file__).resolve().parents   # Repository root path
 
 app = FastAPI(title="CR2A API", version="0.1.1")
 allow_origins = os.getenv("CORS_ALLOW_ORIGINS", "https://velmur.info")
-origins: List[str] = [o.strip() for o in allow_origins.split(",")] if allow_origins else ["https://velmur.info"]
+if allow_origins == "*":
+    logger.warning("CORS_ALLOW_ORIGINS set to wildcard (*) - this is insecure for production")
+origins: List[str] = [o.strip() for o in allow_origins.split(",")] if allow_origins and allow_origins != "*" else ["https://velmur.info"]
 
 # Add CORS middleware to app
 app.add_middleware(
@@ -76,13 +91,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["content-type", "authorization", "x-amz-date", "x-api-key", "x-amz-security-token"],
 )
-
-# Configure logging
-LOG_LEVEL = os.getenv("CR2A_LOG_LEVEL", "INFO").upper()
-logging.basicConfig(level=LOG_LEVEL, format="%(levelname)s %(name)s: %(message)s")
-logging.getLogger("src.api.main").setLevel(LOG_LEVEL)
-logging.getLogger("src.services.openai_client").setLevel(LOG_LEVEL)
-logger = logging.getLogger(__name__)    # Logger for this module
 
 class UploadUrlResponse(BaseModel):
     uploadUrl: str              # Presigned S3 PUT URL
@@ -163,7 +171,7 @@ def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
                 step_status = 'running'
 
         elif event_type == 'TaskSucceeded':
-            details = event.get('stateEnteredEventDetails', {})
+            details = event.get('taskSucceededEventDetails', {})
             resource = details.get('resource', '')
             
             if resource:
@@ -174,7 +182,7 @@ def _parse_execution_progress(events: List[Dict]) -> Dict[str, Any]:
                 step_status = 'completed'
 
         elif event_type == 'TaskFailed':
-            details = event.get('stateEnteredEventDetails', {})
+            details = event.get('taskFailedEventDetails', {})
             resource = details.get('resource', '')
             
             if resource:
@@ -246,7 +254,12 @@ async def upload_local(file: UploadFile = File(...), key: str = Query(...)):
     
     size = 0
     dest = RUN_OUTPUT_ROOT / "uploads" / key
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.error(f"Failed to create upload directory: {e}")
+        raise HTTPException(status_code=500, detail=f"Directory creation failed: {e}")
     
     try:
         with dest.open("wb") as fh:
@@ -260,8 +273,20 @@ async def upload_local(file: UploadFile = File(...), key: str = Query(...)):
                     raise _http_error(400, "ValidationError", f"File exceeds {MAX_FILE_MB} MB")
                 
                 fh.write(chunk)
+    except HTTPException:
+        if dest.exists():
+            dest.unlink()
+        raise
+    except Exception as e:
+        logger.error(f"File write failed: {e}")
+        if dest.exists():
+            dest.unlink()
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
     finally:
-        await file.close()
+        try:
+            await file.close()
+        except Exception as e:
+            logger.warning(f"Failed to close upload file: {e}")
     
     return {"location": f"file://{dest}"}
 
@@ -350,7 +375,7 @@ async def analyze_contract(payload: AnalysisRequestPayload):
                 ExpressionAttributeValues={
                     ':arn': response['executionArn'],
                     ':status': 'processing',
-                    ':updated_at': datetime.utcnow().isoformat()
+                    ':updated_at': datetime.now(timezone.utc).isoformat()
                 },
                 ReturnValues='ALL_NEW'  # Verify write succeeded
             )

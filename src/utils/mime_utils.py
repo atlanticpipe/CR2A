@@ -15,7 +15,9 @@ magic = importlib.import_module("magic") if _magic_spec is not None else None
 
 def _detect_signature(path: Path) -> Optional[str]:
     """Inspect file signatures to classify PDFs and DOCX without extensions."""
-    head = path.read_bytes()[:8192]
+    # Limit read size to prevent memory exhaustion attacks
+    MAX_SIGNATURE_BYTES = 8192
+    head = path.read_bytes()[:MAX_SIGNATURE_BYTES]
 
     # PDFs always start with the %PDF- marker
     if head.startswith(b"%PDF-"):
@@ -24,12 +26,18 @@ def _detect_signature(path: Path) -> Optional[str]:
     # DOCX packages are ZIPs; look for expected entries
     if head.startswith(b"PK"):
         try:
+            # Prevent zip bomb attacks by limiting extraction
             with zipfile.ZipFile(path) as zf:
+                # Check file count to prevent zip bombs
+                if len(zf.namelist()) > 10000:
+                    raise ValueError("ZIP file contains too many entries (potential zip bomb)")
                 names = set(zf.namelist())
                 if "word/document.xml" in names or "[Content_Types].xml" in names:
                     return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         except zipfile.BadZipFile:
             return None
+        except ValueError:
+            raise
 
     return None
 

@@ -72,8 +72,16 @@ class LLMAnalyzer:
             api_key: OpenAI API key
             model: Model to use (default: gpt-5.2)
         """
-        self.client = OpenAI(api_key=api_key)
-        self.async_client = AsyncOpenAI(api_key=api_key)
+        if not api_key:
+            raise ValueError("OpenAI API key is required")
+        
+        try:
+            self.client = OpenAI(api_key=api_key)
+            self.async_client = AsyncOpenAI(api_key=api_key)
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI clients: {e}")
+            raise ValueError(f"Failed to initialize OpenAI clients: {e}") from e
+        
         self.model = model
 
     def analyze(
@@ -258,18 +266,20 @@ Contract:
 
 JSON Response:"""
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-        )
-
         try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
             result = json.loads(response.choices[0].message.content)
             return [clause.get("text", "") for clause in result if clause.get("text")]
         except json.JSONDecodeError:
             logger.warning("Failed to parse clauses JSON, returning raw response")
-            return [response.choices[0].message.content]
+            return [response.choices[0].message.content] if response else []
+        except Exception as e:
+            logger.error(f"Failed to extract clauses: {e}")
+            return []
 
     async def _extract_clauses_async(self, contract_text: str) -> list[str]:
         """Extract clauses asynchronously."""
