@@ -21,8 +21,8 @@ def install_missing_dependencies() -> Dict[str, Any]:
     """
     dependencies = [
         "flask", "fastapi", "uvicorn", "mangum", "PyMuPDF", 
-        "pytesseract", "Pillow", "boto3", "httpx", "pydantic",
-        "python-multipart", "jinja2", "requests"
+        "pytesseract", "Pillow", "boto3", "httpx==0.24.1", "pydantic",  # Pin httpx version
+        "python-multipart", "jinja2", "requests", "openai>=1.0.0"      # Ensure compatible OpenAI version
     ]
     
     results = {

@@ -1,0 +1,23 @@
+timestamp,message
+1767186217980,"INIT_START Runtime Version: python:3.11.v109	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:49f733259c7ce7e0deee75ff91c6afe35c7d58b04ed300f32701216263b4590c
+"
+1767186219011,"START RequestId: eab5a6ed-45b0-4ce2-9464-fc59f80c81d7 Version: $LATEST
+"
+1767186219012,"[INFO]	2025-12-31T13:03:39.012Z	eab5a6ed-45b0-4ce2-9464-fc59f80c81d7	Processing job 92e0617d-6db2-4633-abf5-c4e181de8c15 for contract None
+"
+1767186219012,"[INFO]	2025-12-31T13:03:39.012Z	eab5a6ed-45b0-4ce2-9464-fc59f80c81d7	Downloading from s3://cr2a-upload/upload/21a78806-b36d-486b-9ff5-9d2471329de5_Contract%20%231.pdf
+"
+1767186219270,"[INFO]	2025-12-31T13:03:39.269Z	eab5a6ed-45b0-4ce2-9464-fc59f80c81d7	File size: 0.62 MB
+"
+1767186219270,"[INFO]	2025-12-31T13:03:39.270Z	eab5a6ed-45b0-4ce2-9464-fc59f80c81d7	Detected file type: pdf
+"
+1767186219273,"[INFO]	2025-12-31T13:03:39.273Z	eab5a6ed-45b0-4ce2-9464-fc59f80c81d7	PDF page count: 15
+"
+1767186219273,"[INFO]	2025-12-31T13:03:39.273Z	eab5a6ed-45b0-4ce2-9464-fc59f80c81d7	File has 15 pages
+"
+1767186219273,"[INFO]	2025-12-31T13:03:39.273Z	eab5a6ed-45b0-4ce2-9464-fc59f80c81d7	Metadata extracted: {'file_type': 'pdf', 'pages': 15, 'size': 647822, 'file_size_mb': 0.62, 'estimated_chunks': 1, 'chunk_size': 10000}
+"
+1767186219286,"END RequestId: eab5a6ed-45b0-4ce2-9464-fc59f80c81d7
+"
+1767186219286,"REPORT RequestId: eab5a6ed-45b0-4ce2-9464-fc59f80c81d7	Duration: 273.13 ms	Billed Duration: 1301 ms	Memory Size: 512 MB	Max Memory Used: 95 MB	Init Duration: 1027.74 ms	
+"
