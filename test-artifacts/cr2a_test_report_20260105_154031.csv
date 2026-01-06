@@ -1,5 +1,0 @@
-test_suite,test_name,status,message,execution_time,timestamp
-Integration Tests,test_state_machine_exists,PASS,State machine 'cr2a-contract-analysis' found and accessible,0.6418242454528809,2026-01-05T20:40:18.521164+00:00
-Integration Tests,run_manual_execution,FAIL,Manual execution failed with status: FAILED,5.251582860946655,2026-01-05T20:40:23.772745+00:00
-Integration Tests,api_gateway_test,ERROR,Failed to run API Gateway test: 'APIGatewayTester' object has no attribute 'test_api_endpoints',0.0,2026-01-05T20:40:23.773293+00:00
-Integration Tests,test_execution_permissions,ERROR,Test failed with exception: API execution role 'cr2a-api-execution-role' not found,7.88721776008606,2026-01-05T20:40:31.661145+00:00

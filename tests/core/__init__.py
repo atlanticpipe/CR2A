@@ -1,1 +1,0 @@
-# Core testing framework components

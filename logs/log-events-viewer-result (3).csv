@@ -1,0 +1,23 @@
+timestamp,message
+1767186226800,"INIT_START Runtime Version: python:3.11.v109	Runtime Version ARN: arn:aws:lambda:us-east-1::runtime:49f733259c7ce7e0deee75ff91c6afe35c7d58b04ed300f32701216263b4590c
+"
+1767186227682,"START RequestId: 980d3fc4-e612-4cf5-8a05-c0ccd989fc81 Version: $LATEST
+"
+1767186227683,"[INFO]	2025-12-31T13:03:47.683Z	980d3fc4-e612-4cf5-8a05-c0ccd989fc81	Aggregating results for job 92e0617d-6db2-4633-abf5-c4e181de8c15
+"
+1767186227683,"[INFO]	2025-12-31T13:03:47.683Z	980d3fc4-e612-4cf5-8a05-c0ccd989fc81	Processing 1 chunk results out of 0 expected
+"
+1767186227683,"[INFO]	2025-12-31T13:03:47.683Z	980d3fc4-e612-4cf5-8a05-c0ccd989fc81	LLM enabled for this job: True
+"
+1767186227792,"[INFO]	2025-12-31T13:03:47.792Z	980d3fc4-e612-4cf5-8a05-c0ccd989fc81	Aggregated chunk 0: 0 clauses
+"
+1767186227792,"[INFO]	2025-12-31T13:03:47.792Z	980d3fc4-e612-4cf5-8a05-c0ccd989fc81	Successfully processed 1/0 chunks
+"
+1767186227823,"[INFO]	2025-12-31T13:03:47.823Z	980d3fc4-e612-4cf5-8a05-c0ccd989fc81	Stored final analysis at s3://cr2a-output/results/92e0617d-6db2-4633-abf5-c4e181de8c15/final_analysis.json
+"
+1767186227869,"[INFO]	2025-12-31T13:03:47.869Z	980d3fc4-e612-4cf5-8a05-c0ccd989fc81	Updated job 92e0617d-6db2-4633-abf5-c4e181de8c15 status to completed
+"
+1767186227872,"END RequestId: 980d3fc4-e612-4cf5-8a05-c0ccd989fc81
+"
+1767186227872,"REPORT RequestId: 980d3fc4-e612-4cf5-8a05-c0ccd989fc81	Duration: 188.52 ms	Billed Duration: 1068 ms	Memory Size: 512 MB	Max Memory Used: 84 MB	Init Duration: 878.96 ms	
+"
