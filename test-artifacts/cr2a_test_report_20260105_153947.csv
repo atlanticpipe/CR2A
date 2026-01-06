@@ -1,0 +1,4 @@
+test_suite,test_name,status,message,execution_time,timestamp
+Component Tests,dependency_imports,FAIL,Failed to import 4 packages,1.987830638885498,2026-01-05T20:39:46.754260+00:00
+Component Tests,openai_client_initialization,PASS,OpenAI client initialization tests passed,0.017709970474243164,2026-01-05T20:39:46.771978+00:00
+Component Tests,dynamodb_reserved_keywords,ERROR,DynamoDB client error: Requested resource not found,0.0,2026-01-05T20:39:47.371139+00:00

@@ -1,0 +1,71 @@
+{
+  "timestamp": "2026-01-05T15:40:31.674038",
+  "summary": {
+    "overall_status": "ERROR",
+    "total_suites": 1,
+    "total_tests": 4,
+    "total_passed": 1,
+    "total_failed": 1,
+    "total_errors": 2,
+    "total_skipped": 0,
+    "pass_rate": 25.0,
+    "total_time": 13.781924724578857
+  },
+  "test_suites": [
+    {
+      "name": "Integration Tests",
+      "description": "Testing component interactions and workflow orchestration",
+      "overall_status": "ERROR",
+      "execution_time": 13.781924724578857,
+      "timestamp": "2026-01-05T20:40:31.661264+00:00",
+      "pass_rate": 25.0,
+      "tests": [
+        {
+          "test_name": "test_state_machine_exists",
+          "status": "PASS",
+          "message": "State machine 'cr2a-contract-analysis' found and accessible",
+          "details": {
+            "state_machine_arn": "arn:aws:states:us-east-1:143895994429:stateMachine:cr2a-contract-analysis"
+          },
+          "execution_time": 0.6418242454528809,
+          "timestamp": "2026-01-05T20:40:18.521164+00:00"
+        },
+        {
+          "test_name": "run_manual_execution",
+          "status": "FAIL",
+          "message": "Manual execution failed with status: FAILED",
+          "details": {
+            "execution_arn": "arn:aws:states:us-east-1:143895994429:execution:cr2a-contract-analysis:test-execution-1767645618-726afe62",
+            "status": "FAILED",
+            "start_date": "2026-01-05T15:40:18.668000-05:00",
+            "stop_date": "2026-01-05T15:40:18.775000-05:00",
+            "output": null,
+            "error": "States.Runtime",
+            "cause": "An error occurred while executing the state 'GetMetadata' (entered at the event id #2). The JSONPath '$.s3_bucket' specified for the field 's3_bucket.$' could not be found in the input '{\"bucket\": \"test-bucket\", \"key\": \"test-document.pdf\"}'"
+          },
+          "execution_time": 5.251582860946655,
+          "timestamp": "2026-01-05T20:40:23.772745+00:00"
+        },
+        {
+          "test_name": "api_gateway_test",
+          "status": "ERROR",
+          "message": "Failed to run API Gateway test: 'APIGatewayTester' object has no attribute 'test_api_endpoints'",
+          "details": null,
+          "execution_time": 0.0,
+          "timestamp": "2026-01-05T20:40:23.773293+00:00"
+        },
+        {
+          "test_name": "test_execution_permissions",
+          "status": "ERROR",
+          "message": "Test failed with exception: API execution role 'cr2a-api-execution-role' not found",
+          "details": {
+            "exception_type": "ValueError",
+            "exception_args": "(\"API execution role 'cr2a-api-execution-role' not found\",)"
+          },
+          "execution_time": 7.88721776008606,
+          "timestamp": "2026-01-05T20:40:31.661145+00:00"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+<?xml version="1.0" ?>
+<testsuites name="CR2A Testing Framework" timestamp="2026-01-05T15:41:21.865664" tests="3" failures="1" errors="1" time="2.6512820720672607">
+  <testsuite name="Component Tests" tests="3" time="2.6512820720672607" timestamp="2026-01-05T20:41:21.825810+00:00" failures="1" errors="1">
+    <testcase name="dependency_imports" time="2.036790132522583" classname="Component_Tests">
+      <failure message="Failed to import 4 packages">{'failed_imports': ['pandas: Module not found', 'numpy: Module not found', 'python-dotenv: Module not found', 'python-json-logger: Module not found'], 'version_mismatches': ['boto3: expected 1.35.84, got 1.42.21', 'botocore: expected 1.35.84, got 1.42.21', 'openai: expected 1.58.1, got 2.14.0', 'pydantic: expected 2.10.3, got 2.12.5', 'jsonschema: expected 4.23.0, got 4.25.1', 'requests: expected 2.32.3, got 2.32.5'], 'successful_imports': ['boto3', 'botocore', 'openai', 'httpx', 'pydantic', 'jsonschema', 'requests', 'json', 'os', 'logging'], 'total_packages': 14}</failure>
+    </testcase>
+    <testcase name="openai_client_initialization" time="0.016427993774414062" classname="Component_Tests"/>
+    <testcase name="dynamodb_reserved_keywords" time="0.0" classname="Component_Tests">
+      <error message="DynamoDB client error: Requested resource not found">{'error_code': 'ResourceNotFoundException'}</error>
+    </testcase>
+  </testsuite>
+  <testsuite name="Integration Tests" tests="0" time="0.0" timestamp="2026-01-05T20:41:21.826231+00:00" failures="0" errors="0"/>
+</testsuites>
