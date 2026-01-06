@@ -1,9 +1,9 @@
 (() => {
   "use strict";
-  // Local development configuration
+  // Production configuration for deployed CR2A API
   const injected = typeof window !== "undefined" && window._env ? window._env : {};
   window._env = {
-    API_BASE_URL: injected.API_BASE_URL || "http://localhost:8000",
-    API_AUTH_TOKEN: injected.API_AUTH_TOKEN || "Bearer local-dev-token",
+    API_BASE_URL: injected.API_BASE_URL || "https://p6zla1yuxb.execute-api.us-east-1.amazonaws.com/prod",
+    API_AUTH_TOKEN: injected.API_AUTH_TOKEN || "Bearer mvp-token",
   };
 })();
