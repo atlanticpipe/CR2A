@@ -1,0 +1,33 @@
+name: Deploy to coconuts.velmur.info
+
+on:
+  push:
+    branches: ["test"]
+    paths:
+      - 'webapp/**'
+      - '.github/workflows/deploy-coconuts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+        with:
+          ref: test
+      
+      - name: Create CNAME file for coconuts subdomain
+        run: |
+          echo "coconuts.velmur.info" > ./webapp/CNAME
+      
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./webapp
+          publish_branch: gh-pages
+          cname: coconuts.velmur.info

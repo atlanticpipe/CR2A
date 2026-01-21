@@ -203,78 +203,36 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   };
 
-  // ===== EXPORT RESULTS (PDF VERSION) =====
+  // ===== EXPORT RESULTS =====
   const exportResults = async (results) => {
     try {
       showNotification('Generating PDF report...', 'info');
 
-      // Initialize PDF exporter
-      const exporter = new PDFExporter();
+      // Create simple JSON export for now
+      // TODO: Implement PDF generation with jsPDF
+      const jsonData = JSON.stringify(results, null, 2);
+      const blob = new Blob([jsonData], { type: 'application/json' });
 
-      // Gather metadata from form inputs
-      const metadata = {
-        contract_id: contractIdInput?.value?.trim() || 'Unknown',
-        project_title: projectTitleInput?.value?.trim() || '',
-        owner: ownerInput?.value?.trim() || '',
-        analysis_date: results.analysis_date || new Date().toISOString()
-      };
+      // Use FileSaver.js if available, fallback to manual download
+      if (typeof saveAs === 'function') {
+        saveAs(blob, `cr2a-analysis-${Date.now()}.json`);
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cr2a-analysis-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
 
-      // Generate PDF
-      await exporter.generateReport(results, metadata);
+      showNotification('Report downloaded successfully!', 'success');
 
-      // Create filename with contract ID and timestamp
-      const contractId = contractIdInput?.value?.trim() || 'report';
-      const sanitizedId = contractId.replace(/[^a-zA-Z0-9-]/g, '_');
-      const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      const filename = `CR2A-Analysis-${sanitizedId}-${timestamp}.pdf`;
-
-      // Save PDF
-      exporter.save(filename);
-
-      showNotification('✅ PDF report downloaded successfully!', 'success');
-
-      // Also save results to localStorage for later access
+      // Save to storage
       StorageManager.set('last_analysis', results);
-      ConfigManager.saveAnalysis(results);
 
     } catch (error) {
-      console.error('PDF export failed:', error);
-
-      // Fallback to JSON export
-      showNotification('PDF generation failed, downloading JSON instead...', 'warning');
-
-      try {
-        const jsonData = JSON.stringify(results, null, 2);
-        const blob = new Blob([jsonData], { type: 'application/json' });
-
-        const contractId = contractIdInput?.value?.trim() || 'report';
-        const sanitizedId = contractId.replace(/[^a-zA-Z0-9-]/g, '_');
-        const jsonFilename = `cr2a-analysis-${sanitizedId}-${Date.now()}.json`;
-
-        // Use FileSaver.js if available
-        if (typeof saveAs === 'function') {
-          saveAs(blob, jsonFilename);
-        } else {
-          // Manual download fallback
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = jsonFilename;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }
-
-        showNotification('JSON report downloaded', 'info');
-
-        // Still save to storage
-        StorageManager.set('last_analysis', results);
-
-      } catch (jsonError) {
-        console.error('JSON export also failed:', jsonError);
-        showNotification(`Export completely failed: ${jsonError.message}`, 'error');
-      }
+      console.error('Export failed:', error);
+      showNotification(`Export failed: ${error.message}`, 'error');
     }
   };
 

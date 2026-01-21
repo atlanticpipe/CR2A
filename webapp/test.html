@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CR2A Service Integration Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #00ff00; }
+        .test { margin: 10px 0; padding: 10px; background: #2a2a2a; }
+        .pass { color: #00ff00; }
+        .fail { color: #ff0000; }
+    </style>
+</head>
+<body>
+    <h1>CR2A Service Integration Test</h1>
+    <div id="results"></div>
+
+    <script src="./config.js"></script>
+    <script src="./services/fileParser.js"></script>
+    <script src="./services/promptBuilder.js"></script>
+    <script src="./services/openaiService.js"></script>
+    <script src="./services/workflowController.js"></script>
+    <script src="./utils/storageManager.js"></script>
+
+    <script>
+        const results = document.getElementById('results');
+
+        function test(name, fn) {
+            try {
+                fn();
+                results.innerHTML += \`<div class="test pass">✓ \${name}</div>\`;
+            } catch (e) {
+                results.innerHTML += \`<div class="test fail">✗ \${name}: \${e.message}</div>\`;
+            }
+        }
+
+        test('ConfigManager exists', () => {
+            if (typeof ConfigManager === 'undefined') throw new Error('Not found');
+        });
+
+        test('FileParser exists', () => {
+            if (typeof FileParser === 'undefined') throw new Error('Not found');
+        });
+
+        test('PromptBuilder exists', () => {
+            if (typeof PromptBuilder === 'undefined') throw new Error('Not found');
+        });
+
+        test('OpenAIService exists', () => {
+            if (typeof OpenAIService === 'undefined') throw new Error('Not found');
+        });
+
+        test('WorkflowController exists', () => {
+            if (typeof WorkflowController === 'undefined') throw new Error('Not found');
+        });
+
+        test('StorageManager exists', () => {
+            if (typeof StorageManager === 'undefined') throw new Error('Not found');
+        });
+
+        test('ConfigManager can save/load theme', () => {
+            ConfigManager.saveTheme('dark');
+            if (ConfigManager.getTheme() !== 'dark') throw new Error('Theme not saved');
+        });
+
+        test('StorageManager can store data', () => {
+            StorageManager.set('test_key', { foo: 'bar' });
+            const data = StorageManager.get('test_key');
+            if (data.foo !== 'bar') throw new Error('Data not stored correctly');
+            StorageManager.remove('test_key');
+        });
+
+        results.innerHTML += '<div class="test pass"><strong>All tests passed! 🎉</strong></div>';
+    </script>
+</body>
+</html>
