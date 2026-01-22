@@ -1,0 +1,24 @@
+{
+  "name": "cr2a-repository",
+  "version": "1.0.0",
+  "description": "CR2A Contract Analysis Tool",
+  "type": "module",
+  "scripts": {
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest --run --coverage",
+    "test:ui": "vitest --ui"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.17",
+    "@vitest/ui": "^4.0.17",
+    "happy-dom": "^20.3.4",
+    "vitest": "^4.0.17"
+  },
+  "keywords": [
+    "contract-analysis",
+    "testing"
+  ],
+  "author": "",
+  "license": "ISC"
+}

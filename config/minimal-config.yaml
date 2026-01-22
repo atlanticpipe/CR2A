@@ -1,0 +1,11 @@
+# Minimal Security Audit Configuration
+# Only scan Python files and exclude test directories
+
+extensions:
+  - .py
+
+exclusions:
+  - tests
+  - test
+  - __pycache__
+  - .pytest_cache

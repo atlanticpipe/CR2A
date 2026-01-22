@@ -1,0 +1,60 @@
+# Full requirements for local development and CI/CD
+# Production Lambda layers split this into:
+# - requirements-core.txt (essential dependencies for all functions)
+# - requirements-optional.txt (API + advanced features only)
+# - requirements-minimal.txt (lightweight functions)
+
+# === CORE DEPENDENCIES (all functions) ===
+# AWS Integration (keep boto3/botocore versions in sync)
+boto3==1.35.84
+botocore==1.35.84
+
+# AI/ML - Core LLM functionality
+openai==1.58.1
+
+# Data Processing - Essential for document analysis
+pandas==2.2.3
+numpy==1.26.4
+
+# Validation & Serialization - Critical for data integrity
+pydantic==2.10.3
+jsonschema==4.23.0
+
+# HTTP & Utilities - Basic functionality
+requests==2.32.3
+python-dotenv==1.0.1
+
+# Logging - Essential for monitoring
+python-json-logger==2.0.7
+
+# === OPTIONAL DEPENDENCIES (API + advanced features) ===
+# Web Framework - API Lambda only
+fastapi==0.115.6
+Flask==3.0.3
+Flask-CORS==5.0.0
+mangum==0.20.0
+python-multipart==0.0.12
+uvicorn==0.32.1
+
+# PDF Generation & Document Processing - Refine + API functions
+reportlab==4.2.5
+Pillow==11.0.0
+python-docx==1.1.2
+PyPDF2==3.0.1
+pdfplumber==0.11.4
+
+# Additional Validation - API features
+marshmallow==3.23.2
+
+# HTTP Client - Enhanced features
+httpx==0.28.1
+
+# === TESTING DEPENDENCIES ===
+# Testing frameworks
+pytest==8.3.4
+pytest-cov==6.0.0
+hypothesis==6.122.3
+coverage==7.6.9
+
+# Configuration parsing
+PyYAML==6.0.2
