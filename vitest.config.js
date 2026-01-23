@@ -38,7 +38,9 @@ export default defineConfig({
       'frontend/__tests__/**/*.test.js',
       'frontend/__tests__/**/*.spec.js',
       'tests/**/*.test.js',
-      'tests/**/*.spec.js'
+      'tests/**/*.spec.js',
+      '.github/workflows/__tests__/**/*.test.js',
+      '.github/workflows/__tests__/**/*.spec.js'
     ],
     
     // Test timeout

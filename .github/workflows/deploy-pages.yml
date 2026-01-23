@@ -1,0 +1,78 @@
+# GitHub Pages Deployment Workflow
+# Automatically deploys the CR2A static web application to GitHub Pages
+# whenever changes are pushed to the main branch.
+
+name: Deploy to GitHub Pages
+
+# Workflow Triggers:
+# - push: Automatically deploy when code is pushed to the main branch
+# - workflow_dispatch: Allow manual deployment via GitHub Actions UI
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Permissions:
+# This workflow uses minimal required permissions following least-privilege principles
+# - contents: read - Required to read repository files during checkout
+# - pages: write - Required to deploy to GitHub Pages
+# - id-token: write - Required for GitHub Pages deployment verification
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Concurrency Control:
+# Ensures only one deployment runs at a time to prevent conflicts
+# cancel-in-progress: false prevents canceling in-progress deployments
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Deploy to the github-pages environment
+    # The URL will be available after deployment completes
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout repository code
+      # Fetches all source files from the main branch
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      # Step 2: Setup Node.js environment
+      # Installs Node.js 20.x and caches npm dependencies for faster builds
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      # Step 3: Validate required files exist
+      # Ensures all necessary files are present before deployment
+      # Fails the workflow if any required files are missing
+      - name: Validate required files
+        run: bash .github/workflows/validate-files.sh
+      
+      # Step 4: Configure GitHub Pages
+      # Sets up GitHub Pages deployment settings
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      
+      # Step 5: Upload deployment artifact
+      # Packages all static files for deployment
+      # Automatically excludes .git/, node_modules/, and other development files
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      
+      # Step 6: Deploy to GitHub Pages
+      # Deploys the artifact to GitHub Pages and makes the site live
+      # The deployment URL is captured in outputs for reference
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

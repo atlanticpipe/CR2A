@@ -387,7 +387,205 @@ LOG_LEVEL ............... Logging level (DEBUG, INFO, WARNING, ERROR)
 
 ## Deployment
 
-### Deploy to AWS Lambda
+### Deploy to GitHub Pages (Frontend)
+
+The CR2A frontend is automatically deployed to GitHub Pages whenever changes are pushed to the main branch. The deployment workflow validates required files, packages the static site, and publishes it to https://cr2a.atlanticpipe.us.
+
+#### Automatic Deployment
+
+```bash
+# Push frontend changes to main branch
+git add frontend/
+git commit -m "Update frontend"
+git push origin main
+
+# GitHub Actions automatically:
+# 1. Validates required files exist
+# 2. Packages the static site
+# 3. Deploys to GitHub Pages
+# 4. Makes the site live at https://cr2a.atlanticpipe.us
+```
+
+#### Manual Deployment
+
+You can manually trigger a deployment without pushing new code:
+
+1. Go to the repository on GitHub
+2. Click the **Actions** tab
+3. Select **Deploy to GitHub Pages** workflow from the left sidebar
+4. Click **Run workflow** button
+5. Select the **main** branch
+6. Click **Run workflow**
+
+The workflow will deploy the current state of the main branch.
+
+#### View Deployment Status
+
+**Check Current Deployment:**
+1. Go to the repository on GitHub
+2. Click the **Actions** tab
+3. View the most recent **Deploy to GitHub Pages** workflow run
+4. Green checkmark = successful deployment
+5. Red X = failed deployment (click for error details)
+
+**View Deployment History:**
+1. Go to the repository on GitHub
+2. Click the **Environments** section (right sidebar)
+3. Click **github-pages**
+4. View all past deployments with timestamps and status
+
+**Check Live Site:**
+- Visit https://cr2a.atlanticpipe.us
+- The site should reflect your latest deployed changes
+- Check browser console for any loading errors
+
+#### Troubleshooting Deployment Issues
+
+**Deployment Fails with "Missing Required Files"**
+
+The validation step checks for required files before deployment. If this fails:
+
+```bash
+# Check which files are missing
+cat .github/workflows/validate-files.sh
+
+# Ensure these files exist in your repository:
+# - index.html
+# - app_integrated.js
+# - CNAME
+# - frontend/ directory
+# - config/ directory
+
+# Verify files exist locally
+ls -la index.html app_integrated.js CNAME
+ls -la frontend/ config/
+
+# If files are missing, restore them and push again
+git add index.html app_integrated.js CNAME frontend/ config/
+git commit -m "Restore required files"
+git push origin main
+```
+
+**Deployment Fails with "Permission Denied"**
+
+The workflow needs proper permissions to deploy to GitHub Pages:
+
+1. Go to repository **Settings**
+2. Click **Actions** → **General**
+3. Scroll to **Workflow permissions**
+4. Ensure **Read and write permissions** is selected
+5. Check **Allow GitHub Actions to create and approve pull requests**
+6. Click **Save**
+
+Also verify GitHub Pages is enabled:
+
+1. Go to repository **Settings**
+2. Click **Pages** (left sidebar)
+3. Under **Source**, select **GitHub Actions**
+4. Click **Save**
+
+**Deployment Succeeds but Site Shows 404**
+
+If the workflow succeeds but the site doesn't load:
+
+1. Check GitHub Pages is configured correctly:
+   - Go to **Settings** → **Pages**
+   - Verify **Source** is set to **GitHub Actions**
+   - Verify custom domain is set to `cr2a.atlanticpipe.us`
+
+2. Check CNAME file format:
+   ```bash
+   # CNAME should contain only the domain name
+   cat CNAME
+   # Should show: cr2a.atlanticpipe.us
+   # NOT: https://cr2a.atlanticpipe.us
+   # NOT: cr2a.atlanticpipe.us/
+   ```
+
+3. Wait 5-10 minutes for DNS propagation
+
+4. Clear browser cache and try again
+
+**Deployment Succeeds but Changes Don't Appear**
+
+If your changes don't appear on the live site:
+
+1. **Hard refresh the browser:**
+   - Chrome/Firefox: Ctrl+Shift+R (Windows) or Cmd+Shift+R (Mac)
+   - Safari: Cmd+Option+R
+
+2. **Check deployment timestamp:**
+   - Go to **Actions** tab
+   - Verify the workflow completed after your push
+   - Check the deployment URL in the workflow output
+
+3. **Verify files were committed:**
+   ```bash
+   # Check git status
+   git status
+   
+   # Verify files are in the repository
+   git ls-files | grep frontend
+   ```
+
+4. **Check browser console for errors:**
+   - Open browser DevTools (F12)
+   - Check Console tab for JavaScript errors
+   - Check Network tab for failed file loads
+
+**Workflow Stuck or Taking Too Long**
+
+If the deployment workflow doesn't complete:
+
+1. **Check workflow status:**
+   - Go to **Actions** tab
+   - Click on the running workflow
+   - Check which step is running
+
+2. **Cancel and retry:**
+   - Click **Cancel workflow** button
+   - Wait for cancellation to complete
+   - Manually trigger the workflow again
+
+3. **Check GitHub Status:**
+   - Visit https://www.githubstatus.com/
+   - Verify GitHub Actions and Pages are operational
+
+**CNAME File Issues**
+
+If you see errors related to the CNAME file:
+
+```bash
+# Verify CNAME format (domain only, no protocol or paths)
+cat CNAME
+
+# Correct format:
+echo "cr2a.atlanticpipe.us" > CNAME
+
+# Incorrect formats:
+# https://cr2a.atlanticpipe.us  ❌ (has protocol)
+# cr2a.atlanticpipe.us/         ❌ (has trailing slash)
+# cr2a.atlanticpipe.us/path     ❌ (has path)
+
+# Commit the corrected CNAME
+git add CNAME
+git commit -m "Fix CNAME format"
+git push origin main
+```
+
+**Getting Help**
+
+If you continue to experience issues:
+
+1. Check the workflow logs for detailed error messages
+2. Review the validation script output
+3. Verify all required files are present and correctly formatted
+4. Contact the development team with:
+   - Link to the failed workflow run
+   - Error messages from the logs
+   - Steps you've already tried
+
+### Deploy to AWS Lambda (Backend)
 
 ```bash
 # Push to main branch
@@ -397,19 +595,7 @@ git push origin test  # Push to test first
 
 # Create pull request and merge to main
 # GitHub Actions automatically deploys to Lambda
-
-
-### Deploy to GitHub Pages (Frontend)
-
-```bash
-# Push frontend changes
-git add frontend/
-git commit -m "Update frontend"
-git push origin main
-
-# GitHub Actions automatically deploys to GitHub Pages
-# Visit: https://cr2a.atlanticpipe.us
-
+```
 
 ## Troubleshooting
 

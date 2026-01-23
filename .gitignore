@@ -14,6 +14,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py
 *.egg-info/
 *.egg
 .Python
@@ -76,3 +77,13 @@ htmlcov/
 *.cover
 .hypothesis/
 .pytest_cache/
+
+# Test files
+__tests__/
+*.test.js
+*.test.ts
+*.spec.js
+*.spec.ts
+
+# Git directory (for artifact exclusion)
+.git/

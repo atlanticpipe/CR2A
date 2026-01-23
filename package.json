@@ -14,7 +14,8 @@
     "@vitest/ui": "^4.0.17",
     "fast-check": "^4.5.3",
     "happy-dom": "^20.3.4",
-    "vitest": "^4.0.17"
+    "vitest": "^4.0.17",
+    "yaml": "^2.8.2"
   },
   "keywords": [
     "contract-analysis",
