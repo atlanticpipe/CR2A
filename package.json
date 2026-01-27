@@ -1,42 +1,46 @@
 {
-  "name": "cr2a-repository",
+  "name": "cr2a",
   "version": "1.0.0",
-  "description": "CR2A Contract Analysis Tool",
-  "type": "module",
+  "description": "",
+  "main": "src/index.js",
   "scripts": {
-    "test": "vitest --run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest --run --coverage",
-    "test:ui": "vitest --ui",
-    "dev": "node server.js",
-    "start": "node server.js",
-    "build": "your-build-command-here"
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
-  "devDependencies": {
-    "@vitest/coverage-v8": "^4.0.17",
-    "@vitest/ui": "^4.0.17",
-    "fast-check": "^4.5.3",
-    "happy-dom": "^20.3.4",
-    "vitest": "^4.0.17",
-    "yaml": "^2.8.2"
+  "jest": {
+    "testEnvironment": "node",
+    "coverageDirectory": "coverage",
+    "collectCoverageFrom": [
+      "src/**/*.js"
+    ],
+    "testMatch": [
+      "**/tests/**/*.test.js"
+    ]
   },
-  "keywords": [
-    "contract-analysis",
-    "testing"
-  ],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {
-    "dotenv": "^16.6.1",
-    "express": "^4.22.1"
-  },
-  "main": "app_integrated.js",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/atlanticpipe/CR2A.git"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
   "bugs": {
     "url": "https://github.com/atlanticpipe/CR2A/issues"
   },
-  "homepage": "https://github.com/atlanticpipe/CR2A#readme"
+  "homepage": "https://github.com/atlanticpipe/CR2A#readme",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "openai": "^6.16.0"
+  },
+  "devDependencies": {
+    "fast-check": "^4.5.3",
+    "jest": "^30.2.0",
+    "nock": "^14.0.10",
+    "supertest": "^7.2.2"
+  }
 }
