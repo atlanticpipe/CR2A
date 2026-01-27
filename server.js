@@ -1,8 +1,12 @@
-const express = require('express');
-const path = require('path');
-const dotenv = require('dotenv');
+import express from 'express';
+import path from 'path';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,7 +37,8 @@ app.use((req, res, next) => {
 });
 
 // API routes (if you have any)
-// app.use('/api', require('./routes/api'));
+// import apiRoutes from './routes/api.js';
+// app.use('/api', apiRoutes);
 
 // SPA fallback - IMPORTANT: This sends index.html for all non-file routes
 app.get('*', (req, res) => {
