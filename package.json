@@ -7,7 +7,10 @@
     "test": "vitest --run",
     "test:watch": "vitest",
     "test:coverage": "vitest --run --coverage",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "dev": "node server.js",
+    "start": "node server.js",
+    "build": "your-build-command-here"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.0.17",
@@ -22,5 +25,9 @@
     "testing"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.0.3"
+  }
 }
