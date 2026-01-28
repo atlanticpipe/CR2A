@@ -1,10 +1,3 @@
-"""
-OpenAI Client for Contract Analysis
-
-Tiny wrapper that makes exactly one API call to ChatGPT for contract analysis.
-Uses official OpenAI client library and reads API key from environment variables only.
-"""
-
 import os
 import json
 from typing import Dict
@@ -13,20 +6,6 @@ from openai._exceptions import OpenAIError
 
 
 def analyze_contract(contract_text: str, schema_content: str, rules_content: str) -> Dict:
-    """
-    Analyze contract text using OpenAI's ChatGPT API with structured JSON response.
-
-    Args:
-        contract_text: The extracted contract text to analyze
-        schema_content: JSON schema string defining the expected response structure
-        rules_content: Validation rules string for compliance checking
-
-    Returns:
-        Dict: Parsed JSON response from the API
-
-    Raises:
-        OpenAIError: If API key is missing or API call fails
-    """
     # Read API key from environment variable only
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:

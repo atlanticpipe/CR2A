@@ -1,10 +1,3 @@
-"""
-JSON Schema and Policy Validator for Contract Analysis Results
-
-This module provides comprehensive validation for contract analysis output,
-enforcing both JSON schema compliance and company-specific policy rules.
-"""
-
 import json
 import os
 import re
@@ -14,16 +7,6 @@ import jsonschema
 
 
 def load_schema() -> dict:
-    """
-    Load the JSON schema file for contract analysis validation.
-
-    Returns:
-        dict: The loaded JSON schema
-
-    Raises:
-        FileNotFoundError: If schema file doesn't exist
-        json.JSONDecodeError: If schema file contains invalid JSON
-    """
     schema_path = os.path.join(os.path.dirname(__file__), 'output_schemas_v1.json')
 
     with open(schema_path, 'r', encoding='utf-8') as f:
@@ -31,16 +14,6 @@ def load_schema() -> dict:
 
 
 def load_policy_rules() -> dict:
-    """
-    Load the company policy validation rules.
-
-    Returns:
-        dict: The loaded policy rules
-
-    Raises:
-        FileNotFoundError: If policy file doesn't exist
-        json.JSONDecodeError: If policy file contains invalid JSON
-    """
     policy_path = os.path.join(os.path.dirname(__file__), 'validation_rules_v1.json')
 
     with open(policy_path, 'r', encoding='utf-8') as f:
@@ -48,17 +21,6 @@ def load_policy_rules() -> dict:
 
 
 def validate_schema(json_data: dict) -> Tuple[bool, str]:
-    """
-    Validate JSON data against the contract analysis schema using Draft 2020-12.
-
-    Args:
-        json_data: The JSON data to validate
-
-    Returns:
-        Tuple[bool, str]: (is_valid, error_message)
-        - is_valid: True if validation passes, False otherwise
-        - error_message: Empty string if valid, first error message if invalid
-    """
     try:
         schema = load_schema()
         
@@ -96,17 +58,6 @@ def validate_schema(json_data: dict) -> Tuple[bool, str]:
 
 
 def validate_policy_rules(json_data: dict) -> Tuple[bool, str]:
-    """
-    Apply company-specific policy validation rules to the JSON data.
-
-    Args:
-        json_data: The validated JSON data to check against policy rules
-
-    Returns:
-        Tuple[bool, str]: (is_valid, error_message)
-        - is_valid: True if all policy rules pass, False otherwise
-        - error_message: Empty string if valid, first error message if invalid
-    """
     try:
         policy_rules = load_policy_rules()
         validation_config = policy_rules.get('validation', {})
@@ -161,20 +112,6 @@ def validate_policy_rules(json_data: dict) -> Tuple[bool, str]:
 
 
 def validate_analysis_result(json_data: dict) -> Tuple[bool, str]:
-    """
-    Main validation function that performs both schema and policy validation.
-
-    This function implements fail-fast validation - it returns immediately
-    on the first validation failure with a clear error message.
-
-    Args:
-        json_data: The JSON data to validate
-
-    Returns:
-        Tuple[bool, str]: (is_valid, error_message)
-        - is_valid: True if both schema and policy validation pass
-        - error_message: Empty string if valid, first error message if invalid
-    """
     # First validate against JSON schema
     is_valid, error_message = validate_schema(json_data)
     if not is_valid:

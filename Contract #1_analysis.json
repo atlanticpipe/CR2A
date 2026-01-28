@@ -54,15 +54,15 @@
       "Clause Summary": "Contractor must certify its ownership status.",
       "Risk Triggers Identified": "Failure to provide affidavit could lead to contract issues.",
       "Flow-Down Obligations": "",
-      "Redline Recommendations": "Replace 'Contractor shall, in the form attached hereto as Attachment B,' with 'Contractor must provide an affidavit in the form attached hereto as Attachment B.'",
+      "Redline Recommendations": "Delete 'if applicable.'",
       "Harmful Language / Policy Conflicts": ""
     }
   },
   "data_technology_and_deliverables": {
-    "Price Increase Request": {
+    "Price Increase Notification": {
       "Clause Language": "APS is requesting an 8.28% price increase for all line items on the contract.",
       "Clause Summary": "Contractor seeks to adjust pricing due to inflation.",
-      "Risk Triggers Identified": "Potential pushback from the City on price increases.",
+      "Risk Triggers Identified": "Potential pushback from the City regarding price increases.",
       "Flow-Down Obligations": "",
       "Redline Recommendations": "Insert 'for all line items on the contract, other than CIPP Lining.'",
       "Harmful Language / Policy Conflicts": ""
@@ -72,14 +72,14 @@
   "final_analysis": {
     "summary": [
       {
-        "Risk Area": "Financial",
-        "Risk Summary": "Request for price increase due to inflation and material costs.",
-        "Redline Recommendation Summary": "Recommended to clarify the basis for price increase in the contract."
+        "Risk Area": "Contract Compliance",
+        "Risk Summary": "Potential risks associated with compliance to state statutes.",
+        "Redline Recommendation Summary": "Ensure all certifications are current and accurate."
       },
       {
-        "Risk Area": "Compliance",
-        "Risk Summary": "Potential risks associated with human trafficking and scrutinized company certifications.",
-        "Redline Recommendation Summary": "Ensure all certifications are up to date and accurately represented."
+        "Risk Area": "Cost Management",
+        "Risk Summary": "Increased costs due to inflation and material price hikes.",
+        "Redline Recommendation Summary": "Review and negotiate price increases with the City."
       }
     ]
   }

@@ -1,18 +1,4 @@
 #!/usr/bin/env python3
-"""
-Text extraction utility for PDF and DOCX files with OCR support.
-
-This module provides functionality to extract clean, readable text from PDF and DOCX files
-for contract analysis and API processing. It includes file validation, format-specific
-extraction methods, OCR support for scanned PDFs, and graceful error handling.
-
-Features:
-- Text-based PDF extraction using pdfminer.six
-- OCR for scanned/image-based PDFs using Tesseract
-- DOCX text extraction using python-docx
-- Automatic fallback to OCR when text extraction fails
-"""
-
 import os
 import sys
 from pathlib import Path
@@ -45,15 +31,6 @@ except ImportError:
 
 
 def validate_file(file_path: str) -> bool:
-    """
-    Validate file exists, is readable, and has supported extension.
-
-    Args:
-        file_path: Path to the file to validate
-
-    Returns:
-        bool: True if file is valid and supported, False otherwise
-    """
     if not file_path:
         print("Error: No file path provided")
         return False
@@ -88,15 +65,6 @@ def validate_file(file_path: str) -> bool:
 
 
 def extract_text_from_pdf(file_path: str) -> str:
-    """
-    Extract text content from a PDF file using pdfminer.six.
-
-    Args:
-        file_path: Path to the PDF file
-
-    Returns:
-        str: Extracted text content from the PDF
-    """
     try:
         # Use pdfminer.high_level extract_text for simplicity and reliability
         text = pdf_extract_text(file_path)
@@ -116,21 +84,6 @@ def extract_text_from_pdf(file_path: str) -> str:
 
 
 def extract_text_from_pdf_with_ocr(file_path: str, use_ocr: bool = True) -> Tuple[str, bool]:
-    """
-    Extract text from PDF with automatic OCR fallback for scanned documents.
-    
-    This function first attempts standard text extraction. If that fails or returns
-    minimal text, it automatically falls back to OCR if available.
-    
-    Args:
-        file_path: Path to the PDF file
-        use_ocr: Whether to use OCR fallback (default: True)
-    
-    Returns:
-        Tuple[str, bool]: (extracted_text, used_ocr)
-            - extracted_text: The extracted text content
-            - used_ocr: True if OCR was used, False if standard extraction worked
-    """
     # First try standard text extraction
     text = extract_text_from_pdf(file_path)
     
@@ -161,18 +114,6 @@ def extract_text_from_pdf_with_ocr(file_path: str, use_ocr: bool = True) -> Tupl
 
 
 def extract_text_with_ocr(file_path: str) -> str:
-    """
-    Extract text from a PDF using OCR (Optical Character Recognition).
-    
-    This function converts PDF pages to images and uses Tesseract OCR to extract text.
-    Useful for scanned documents or image-based PDFs.
-    
-    Args:
-        file_path: Path to the PDF file
-    
-    Returns:
-        str: Extracted text from OCR
-    """
     if not OCR_AVAILABLE:
         print("Error: OCR libraries not installed")
         return ""
@@ -227,15 +168,6 @@ def extract_text_with_ocr(file_path: str) -> str:
 
 
 def extract_text_from_docx(file_path: str) -> str:
-    """
-    Extract text content from a DOCX file using python-docx.
-
-    Args:
-        file_path: Path to the DOCX file
-
-    Returns:
-        str: Extracted text content from the DOCX
-    """
     try:
         # Load the document
         doc = Document(file_path)
@@ -261,20 +193,6 @@ def extract_text_from_docx(file_path: str) -> str:
 
 
 def extract_text(file_path: str, use_ocr: bool = True) -> str:
-    """
-    Main dispatcher function to extract text from PDF or DOCX files.
-
-    This function validates the file and dispatches to the appropriate
-    extraction method based on file extension. For PDFs, it automatically
-    uses OCR if standard extraction fails.
-
-    Args:
-        file_path: Path to the file to extract text from
-        use_ocr: Whether to use OCR fallback for PDFs (default: True)
-
-    Returns:
-        str: Extracted text content, empty string if extraction fails
-    """
     # Validate file first
     if not validate_file(file_path):
         return ""
