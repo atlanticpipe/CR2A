@@ -1,0 +1,348 @@
+================================================================================
+CONTRACT ANALYSIS TOOL - INSTALLATION GUIDE
+================================================================================
+
+Version: 1.0
+Platform: Windows 10/11
+Build Date: January 28, 2026
+
+================================================================================
+QUICK START (5 MINUTES)
+================================================================================
+
+1. EXTRACT FILES
+   - Extract all files from the release package to a folder
+   - Recommended: C:\ContractAnalysisTool\
+
+2. SET API KEY (REQUIRED)
+   - Get API key from: https://platform.openai.com/api-keys
+   - Open PowerShell as Administrator
+   - Run: [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-your-key-here", "User")
+   - Restart your computer or log out and back in
+
+3. INSTALL OCR SUPPORT (FOR SCANNED PDFs)
+   
+   A. Install Tesseract OCR:
+      - Download: https://github.com/UB-Mannheim/tesseract/wiki
+      - File: tesseract-ocr-w64-setup-5.3.3.exe
+      - Install to: C:\Program Files\Tesseract-OCR
+      - Check "Add to PATH" during installation
+   
+   B. Install Poppler:
+      - Download: https://github.com/oschwartz10612/poppler-windows/releases/
+      - Extract to: C:\Program Files\poppler
+      - Add to PATH: C:\Program Files\poppler\Library\bin
+
+4. RUN THE APPLICATION
+   - Double-click: ContractAnalysisApp.exe
+   - Drag and drop a PDF or DOCX contract file
+   - Wait for analysis (2-5 minutes)
+   - Review the generated report
+
+================================================================================
+SYSTEM REQUIREMENTS
+================================================================================
+
+Operating System:
+  - Windows 10 (64-bit) or Windows 11
+  - 4 GB RAM minimum (8 GB recommended)
+  - 500 MB free disk space
+
+Internet Connection:
+  - Required for OpenAI API calls
+  - Stable connection recommended
+
+External Dependencies:
+  - OpenAI API key (required)
+  - Tesseract OCR (optional, for scanned PDFs)
+  - Poppler (optional, for scanned PDFs)
+
+================================================================================
+DETAILED INSTALLATION STEPS
+================================================================================
+
+STEP 1: OPENAI API KEY SETUP
+-----------------------------
+
+The application requires an OpenAI API key to function.
+
+1. Create OpenAI Account:
+   - Go to: https://platform.openai.com/
+   - Sign up or log in
+
+2. Generate API Key:
+   - Navigate to: https://platform.openai.com/api-keys
+   - Click "Create new secret key"
+   - Name it: "Contract Analysis Tool"
+   - Copy the key (starts with sk-proj- or sk-)
+   - IMPORTANT: Save it securely - you won't see it again!
+
+3. Set Environment Variable:
+   
+   Option A - PowerShell (Recommended):
+   ```powershell
+   [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-your-key-here", "User")
+   ```
+   
+   Option B - Windows GUI:
+   - Search "Environment Variables" in Windows
+   - Click "Edit environment variables for your account"
+   - Click "New" under User variables
+   - Variable name: OPENAI_API_KEY
+   - Variable value: sk-your-key-here
+   - Click OK
+
+4. Restart:
+   - Log out and back in, OR
+   - Restart your computer
+
+5. Verify:
+   - Open PowerShell
+   - Run: $env:OPENAI_API_KEY
+   - Should display your API key
+
+STEP 2: TESSERACT OCR INSTALLATION (OPTIONAL)
+----------------------------------------------
+
+Only needed if you want to analyze scanned PDFs (image-based documents).
+
+1. Download Tesseract:
+   - URL: https://github.com/UB-Mannheim/tesseract/wiki
+   - File: tesseract-ocr-w64-setup-5.3.3.exe (or latest)
+   - Size: ~60 MB
+
+2. Install:
+   - Run the installer
+   - Install location: C:\Program Files\Tesseract-OCR
+   - IMPORTANT: Check "Add to PATH" option
+   - Complete installation
+
+3. Verify:
+   - Open Command Prompt
+   - Run: tesseract --version
+   - Should show: tesseract 5.3.3 (or your version)
+
+STEP 3: POPPLER INSTALLATION (OPTIONAL)
+----------------------------------------
+
+Required for OCR support (works with Tesseract).
+
+1. Download Poppler:
+   - URL: https://github.com/oschwartz10612/poppler-windows/releases/
+   - File: Release-XX.XX.X-X.zip (latest version)
+   - Size: ~20 MB
+
+2. Extract:
+   - Extract to: C:\Program Files\poppler
+   - Or any location you prefer
+
+3. Add to PATH:
+   - Search "Environment Variables" in Windows
+   - Edit "Path" under User variables
+   - Click "New"
+   - Add: C:\Program Files\poppler\Library\bin
+   - Click OK
+
+4. Verify:
+   - Open Command Prompt
+   - Run: pdfinfo -v
+   - Should show: pdfinfo version XX.XX.X
+
+================================================================================
+USAGE INSTRUCTIONS
+================================================================================
+
+BASIC USAGE:
+------------
+
+1. Launch Application:
+   - Double-click ContractAnalysisApp.exe
+   - Application window opens
+
+2. Select Contract:
+   - Drag and drop a PDF or DOCX file, OR
+   - Click "Browse" to select a file
+
+3. Wait for Analysis:
+   - Text extraction: 1-30 seconds (depends on file size)
+   - OCR (if needed): 2-3 minutes for scanned PDFs
+   - AI analysis: 30-60 seconds
+   - Total: 1-5 minutes
+
+4. Review Results:
+   - JSON file: [filename]_analysis.json (structured data)
+   - PDF report: [filename]_analysis.pdf (professional report)
+   - Both saved in same folder as input file
+
+SUPPORTED FILE FORMATS:
+-----------------------
+
+- PDF (text-based): Fast extraction
+- PDF (scanned): OCR extraction (requires Tesseract + Poppler)
+- DOCX: Microsoft Word documents
+
+FILE SIZE LIMITS:
+-----------------
+
+- Maximum file size: 50 MB
+- Maximum pages: 100 pages
+- Recommended: 5-20 pages for best performance
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+PROBLEM: "API key not configured" error
+SOLUTION:
+  1. Verify OPENAI_API_KEY is set: $env:OPENAI_API_KEY
+  2. Restart application after setting key
+  3. Check key format (should start with sk-)
+
+PROBLEM: "Authentication failed" error
+SOLUTION:
+  1. Verify API key is correct
+  2. Check API key hasn't expired
+  3. Verify OpenAI account has credits
+  4. Generate new API key if needed
+
+PROBLEM: OCR not working on scanned PDFs
+SOLUTION:
+  1. Install Tesseract OCR
+  2. Install Poppler
+  3. Verify both are in PATH
+  4. Restart application
+
+PROBLEM: "Tesseract not found" error
+SOLUTION:
+  1. Install Tesseract from link above
+  2. Add to PATH: C:\Program Files\Tesseract-OCR
+  3. Restart application
+
+PROBLEM: "Unable to get page count" error
+SOLUTION:
+  1. Install Poppler
+  2. Add to PATH: C:\Program Files\poppler\Library\bin
+  3. Restart application
+
+PROBLEM: Application won't start
+SOLUTION:
+  1. Check Windows version (requires Windows 10/11)
+  2. Run as Administrator
+  3. Check antivirus isn't blocking
+  4. Reinstall Visual C++ Redistributable
+
+PROBLEM: Slow performance
+SOLUTION:
+  1. Use text-based PDFs instead of scanned
+  2. Reduce file size (split large documents)
+  3. Close other applications
+  4. Check internet connection speed
+
+================================================================================
+COST INFORMATION
+================================================================================
+
+OpenAI API Costs (approximate):
+  - Model: gpt-4o-mini
+  - Cost per contract: $0.01 - $0.05
+  - Based on contract length and complexity
+
+Typical Usage:
+  - 10-page contract: ~$0.02
+  - 20-page contract: ~$0.03
+  - 50-page contract: ~$0.05
+
+Note: Costs may vary based on OpenAI pricing changes.
+Check current pricing: https://openai.com/pricing
+
+================================================================================
+FEATURES
+================================================================================
+
+Contract Analysis:
+  - Automatic text extraction from PDF/DOCX
+  - OCR support for scanned documents
+  - AI-powered contract analysis
+  - Risk assessment and identification
+  - Clause-by-clause review
+  - Compliance checking
+
+Output Formats:
+  - JSON: Structured data for integration
+  - PDF: Professional analysis report
+  - Both include complete analysis results
+
+Supported Contract Types:
+  - Service agreements
+  - Purchase agreements
+  - Employment contracts
+  - Lease agreements
+  - NDAs and confidentiality agreements
+  - Any legal contract document
+
+================================================================================
+SECURITY & PRIVACY
+================================================================================
+
+Data Handling:
+  - Contracts are sent to OpenAI API for analysis
+  - OpenAI's data usage policy applies
+  - API key stored as environment variable (not in files)
+  - No data stored on external servers by this application
+
+Recommendations:
+  - Use for internal review only
+  - Do not use for highly confidential contracts
+  - Review OpenAI's data usage policy
+  - Consider on-premise solutions for sensitive data
+
+================================================================================
+SUPPORT & DOCUMENTATION
+================================================================================
+
+Documentation Files:
+  - QUICK_START.txt: Fast setup guide
+  - API_KEY_SETUP.txt: Detailed API key instructions
+  - OCR_SETUP_GUIDE.txt: OCR installation guide
+  - README.txt: Full project documentation
+
+Online Resources:
+  - OpenAI API: https://platform.openai.com/docs
+  - Tesseract OCR: https://github.com/tesseract-ocr/tesseract
+  - Poppler: https://poppler.freedesktop.org/
+
+================================================================================
+VERSION HISTORY
+================================================================================
+
+Version 1.0 (January 28, 2026):
+  - Initial release
+  - PDF and DOCX support
+  - OCR support for scanned documents
+  - AI-powered analysis with gpt-4o-mini
+  - JSON and PDF output formats
+  - Windows 10/11 support
+
+================================================================================
+LICENSE & CREDITS
+================================================================================
+
+Contract Analysis Tool
+Copyright (c) 2026
+
+Built with:
+  - Python 3.14
+  - OpenAI API (gpt-4o-mini)
+  - Tesseract OCR
+  - Poppler
+  - PyInstaller
+  - And many other open-source libraries
+
+================================================================================
+END OF INSTALLATION GUIDE
+================================================================================
+
+For additional help, refer to the other documentation files included in this
+package or visit the project repository.
+
+Thank you for using Contract Analysis Tool!

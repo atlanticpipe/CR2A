@@ -1,0 +1,34 @@
+Contract Analysis Tool - Quick Start
+=====================================
+
+IMPORTANT: Before running the application, you need:
+
+1. OpenAI API Key
+   - Get from: https://platform.openai.com/api-keys
+   - Set environment variable: OPENAI_API_KEY
+
+2. Tesseract OCR (for scanned PDFs)
+   - Download: https://github.com/UB-Mannheim/tesseract/wiki
+   - Install and add to PATH
+
+3. Poppler (for scanned PDFs)
+   - Included in OCR_SETUP_GUIDE.txt
+
+USAGE:
+------
+1. Double-click ContractAnalysisApp.exe
+2. Drag and drop a PDF or DOCX contract file
+3. Wait for analysis to complete
+4. Review the generated report
+
+For detailed setup instructions, see:
+- API_KEY_SETUP.txt
+- OCR_SETUP_GUIDE.txt
+- README.txt
+
+TROUBLESHOOTING:
+----------------
+- If API key error: Set OPENAI_API_KEY environment variable
+- If OCR fails: Install Tesseract and Poppler
+- Check error.log for detailed error messages
+

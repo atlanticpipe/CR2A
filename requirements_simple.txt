@@ -1,0 +1,3 @@
+# Basic requirements for simple contract analyzer
+tkinter  # Built into Python, no installation needed
+requests  # For API calls (if needed)

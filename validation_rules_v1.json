@@ -1,0 +1,28 @@
+{
+  "validation": {
+    "strict_string_match_headers": true,
+    "strict_headers": {
+      "headers": [
+        "schema_version",
+        "contract_overview",
+        "administrative_and_commercial_terms",
+        "technical_and_performance_terms",
+        "legal_risk_and_enforcement",
+        "regulatory_and_compliance_terms",
+        "data_technology_and_deliverables",
+        "supplemental_operational_risks",
+        "final_analysis"
+      ]
+    },
+    "mandatory_fields": {
+      "contract_overview_count": 8
+    },
+    "clause_requirements": {
+      "min_one_redline": true,
+      "redline_closing_regex": "(?<!\\w)(proposed|recommended)\\s+final\\s+position[:\\-]\\s"
+    },
+    "audit_logging": {
+      "record_provenance": false
+    }
+  }
+}

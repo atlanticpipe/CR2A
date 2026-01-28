@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlanticpipeservices.com/schemas/contract-analysis-v1.json",
+  "title": "Contract Analysis Output Schema",
+  "description": "JSON Schema for APS Contract Risk & Compliance Summary output",
+  "version": "1.0",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "contract_overview",
+    "administrative_and_commercial_terms",
+    "technical_and_performance_terms",
+    "legal_risk_and_enforcement",
+    "regulatory_and_compliance_terms",
+    "data_technology_and_deliverables",
+    "supplemental_operational_risks",
+    "final_analysis"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v1.0",
+      "description": "Schema version identifier"
+    },
+    "contract_overview": {
+      "type": "object",
+      "description": "Section I: High-level contract information",
+      "required": [
+        "Project Title",
+        "Solicitation No.",
+        "Owner",
+        "Contractor",
+        "Scope",
+        "General Risk Level",
+        "Bid Model",
+        "Notes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "Project Title": {
+          "type": "string",
+          "description": "Name of the project or contract"
+        },
+        "Solicitation No.": {
+          "type": "string",
+          "description": "Solicitation or contract number"
+        },
+        "Owner": {
+          "type": "string",
+          "description": "Contract owner or agency"
+        },
+        "Contractor": {
+          "type": "string",
+          "description": "Contractor name (typically APS)"
+        },
+        "Scope": {
+          "type": "string",
+          "description": "Brief description of work scope"
+        },
+        "General Risk Level": {
+          "type": "string",
+          "enum": ["Low", "Medium", "High", "Critical"],
+          "description": "Overall risk assessment"
+        },
+        "Bid Model": {
+          "type": "string",
+          "description": "Type of bid or contract model"
+        },
+        "Notes": {
+          "type": "string",
+          "description": "Additional notes or observations"
+        }
+      }
+    },
+    "administrative_and_commercial_terms": {
+      "type": "object",
+      "description": "Section II: Administrative and commercial contract terms",
+      "additionalProperties": {
+        "$ref": "#/$defs/ClauseBlock"
+      }
+    },
+    "technical_and_performance_terms": {
+      "type": "object",
+      "description": "Section III: Technical and performance requirements",
+      "additionalProperties": {
+        "$ref": "#/$defs/ClauseBlock"
+      }
+    },
+    "legal_risk_and_enforcement": {
+      "type": "object",
+      "description": "Section IV: Legal risks and enforcement provisions",
+      "additionalProperties": {
+        "$ref": "#/$defs/ClauseBlock"
+      }
+    },
+    "regulatory_and_compliance_terms": {
+      "type": "object",
+      "description": "Section V: Regulatory and compliance requirements",
+      "additionalProperties": {
+        "$ref": "#/$defs/ClauseBlock"
+      }
+    },
+    "data_technology_and_deliverables": {
+      "type": "object",
+      "description": "Section VI: Data, technology, and deliverable requirements",
+      "additionalProperties": {
+        "$ref": "#/$defs/ClauseBlock"
+      }
+    },
+    "supplemental_operational_risks": {
+      "type": "array",
+      "description": "Section VII: Additional operational risks identified",
+      "items": {
+        "$ref": "#/$defs/ClauseBlock"
+      }
+    },
+    "final_analysis": {
+      "type": "object",
+      "description": "Section VIII: Final risk summary and recommendations",
+      "required": ["summary"],
+      "properties": {
+        "summary": {
+          "type": "array",
+          "description": "Final redline risk summary table",
+          "items": {
+            "type": "object",
+            "required": ["Risk Area", "Risk Summary", "Redline Recommendation Summary"],
+            "properties": {
+              "Risk Area": {
+                "type": "string",
+                "description": "Category of risk"
+              },
+              "Risk Summary": {
+                "type": "string",
+                "description": "Summary of identified risks"
+              },
+              "Redline Recommendation Summary": {
+                "type": "string",
+                "description": "Recommended contract modifications"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ClauseBlock": {
+      "type": "object",
+      "description": "Standard clause analysis block",
+      "required": [
+        "Clause Language",
+        "Clause Summary",
+        "Risk Triggers Identified",
+        "Flow-Down Obligations",
+        "Redline Recommendations",
+        "Harmful Language / Policy Conflicts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "Clause Language": {
+          "type": "string",
+          "description": "Exact text of the contract clause"
+        },
+        "Clause Summary": {
+          "type": "string",
+          "description": "Plain language summary of the clause"
+        },
+        "Risk Triggers Identified": {
+          "type": "string",
+          "description": "Specific risks identified in this clause"
+        },
+        "Flow-Down Obligations": {
+          "type": "string",
+          "description": "Requirements that must be passed to subcontractors"
+        },
+        "Redline Recommendations": {
+          "type": "string",
+          "description": "Recommended changes to the contract language (must include at least one recommendation)"
+        },
+        "Harmful Language / Policy Conflicts": {
+          "type": "string",
+          "description": "Language that conflicts with company policy or creates unacceptable risk"
+        },
+        "provenance": {
+          "type": "object",
+          "description": "Optional source tracking information",
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Source document name"
+            },
+            "page": {
+              "type": "integer",
+              "description": "Page number in source document"
+            },
+            "span": {
+              "type": "string",
+              "description": "Text span or location identifier"
+            }
+          }
+        }
+      }
+    }
+  }
+}

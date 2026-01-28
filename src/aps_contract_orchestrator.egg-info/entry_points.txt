@@ -1,2 +1,0 @@
-[console_scripts]
-aps-analyze = orchestrator.cli:main
