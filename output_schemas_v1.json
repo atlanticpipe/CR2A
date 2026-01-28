@@ -13,8 +13,7 @@
     "legal_risk_and_enforcement",
     "regulatory_and_compliance_terms",
     "data_technology_and_deliverables",
-    "supplemental_operational_risks",
-    "final_analysis"
+    "supplemental_operational_risks"
   ],
   "additionalProperties": false,
   "properties": {
@@ -113,35 +112,6 @@
       "description": "Section VII: Additional operational risks identified",
       "items": {
         "$ref": "#/$defs/ClauseBlock"
-      }
-    },
-    "final_analysis": {
-      "type": "object",
-      "description": "Section VIII: Final risk summary and recommendations",
-      "required": ["summary"],
-      "properties": {
-        "summary": {
-          "type": "array",
-          "description": "Final redline risk summary table",
-          "items": {
-            "type": "object",
-            "required": ["Risk Area", "Risk Summary", "Redline Recommendation Summary"],
-            "properties": {
-              "Risk Area": {
-                "type": "string",
-                "description": "Category of risk"
-              },
-              "Risk Summary": {
-                "type": "string",
-                "description": "Summary of identified risks"
-              },
-              "Redline Recommendation Summary": {
-                "type": "string",
-                "description": "Recommended contract modifications"
-              }
-            }
-          }
-        }
       }
     }
   },

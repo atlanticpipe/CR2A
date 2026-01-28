@@ -109,8 +109,7 @@ class ContractAnalysisClient:
                     "legal_risk_and_enforcement": {...},
                     "regulatory_and_compliance_terms": {...},
                     "data_technology_and_deliverables": {...},
-                    "supplemental_operational_risks": [...],
-                    "final_analysis": {...}
+                    "supplemental_operational_risks": [...]
                 },
                 "metadata": {...}
             }
@@ -184,8 +183,7 @@ class ContractAnalysisClient:
             'legal_risk_and_enforcement',
             'regulatory_and_compliance_terms',
             'data_technology_and_deliverables',
-            'supplemental_operational_risks',
-            'final_analysis'
+            'supplemental_operational_risks'
         ]
         
         for section in required_sections:

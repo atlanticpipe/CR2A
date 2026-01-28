@@ -1,11 +1,3 @@
-"""
-PDF Renderer for Contract Analysis Reports
-
-This module provides PDF generation functionality using reportlab library
-to create contract risk and compliance summary reports following the exact
-template structure defined in the Clause Risk & Compliance Summary template.
-"""
-
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
@@ -15,15 +7,6 @@ import textwrap
 
 
 def format_field_value(value):
-    """
-    Format different data types for display in PDF.
-
-    Args:
-        value: The value to format (string, list, dict, or None)
-
-    Returns:
-        str: Formatted string representation of the value
-    """
     if value is None or value == "":
         return ""
 
@@ -51,17 +34,6 @@ def format_field_value(value):
 
 
 def add_section_heading(canvas, text, y_position):
-    """
-    Add a section heading to the PDF.
-
-    Args:
-        canvas: ReportLab canvas object
-        text: Heading text
-        y_position: Current Y position on the page
-
-    Returns:
-        float: Updated Y position after adding the heading
-    """
     # Set font for heading
     canvas.setFont("Helvetica-Bold", 14)
 
@@ -73,19 +45,6 @@ def add_section_heading(canvas, text, y_position):
 
 
 def add_field_label_and_value(canvas, label, value, y_position, max_width=6.5):
-    """
-    Add a field label and its value to the PDF with proper formatting.
-
-    Args:
-        canvas: ReportLab canvas object
-        label: Field label text
-        value: Field value (will be formatted by format_field_value)
-        y_position: Current Y position on the page
-        max_width: Maximum width for text wrapping in inches
-
-    Returns:
-        float: Updated Y position after adding the field
-    """
     formatted_value = format_field_value(value)
 
     if not formatted_value.strip():
@@ -126,17 +85,6 @@ def add_field_label_and_value(canvas, label, value, y_position, max_width=6.5):
 
 
 def render_pdf(data, output_path):
-    """
-    Main PDF generation function that creates a contract analysis report
-    following the exact template structure.
-
-    Args:
-        data: Dictionary containing all contract analysis data
-        output_path: File path where the PDF will be saved
-
-    Returns:
-        None
-    """
     # Create document template
     doc = SimpleDocTemplate(
         output_path,
@@ -170,16 +118,19 @@ def render_pdf(data, output_path):
         content.append(Paragraph("<b>I. Contract Overview</b>", styles['Heading1']))
         content.append(Spacer(1, 0.2 * inch))
 
+        # Get contract overview data from nested structure
+        overview_data = data.get("contract_overview", {})
+        
         # Contract Overview fields - use exact field names from schema
         overview_fields = [
-            ("Project Title:", data.get("Project Title", "")),
-            ("Solicitation No.:", data.get("Solicitation No.", "")),
-            ("Owner:", data.get("Owner", "")),
-            ("Contractor:", data.get("Contractor", "")),
-            ("Scope:", data.get("Scope", "")),
-            ("General Risk Level:", data.get("General Risk Level", "")),
-            ("Bid Model:", data.get("Bid Model", "")),
-            ("Notes:", data.get("Notes", ""))
+            ("Project Title:", overview_data.get("Project Title", "")),
+            ("Solicitation No.:", overview_data.get("Solicitation No.", "")),
+            ("Owner:", overview_data.get("Owner", "")),
+            ("Contractor:", overview_data.get("Contractor", "")),
+            ("Scope:", overview_data.get("Scope", "")),
+            ("General Risk Level:", overview_data.get("General Risk Level", "")),
+            ("Bid Model:", overview_data.get("Bid Model", "")),
+            ("Notes:", overview_data.get("Notes", ""))
         ]
 
         for label, value in overview_fields:
@@ -219,12 +170,12 @@ def render_pdf(data, output_path):
         ]
 
         for subsection in subsections:
-            content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-            content.append(Spacer(1, 0.1 * inch))
-
             # Get subsection data
             subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and")
-            subsection_data = data.get("administrative_commercial", {}).get(subsection_key, {})
+            subsection_data = data.get("administrative_and_commercial_terms", {}).get(subsection_key, {})
+
+            content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
+            content.append(Spacer(1, 0.1 * inch))
 
             # Add each field for the subsection
             fields = [
@@ -282,11 +233,11 @@ def render_pdf(data, output_path):
         ]
 
         for subsection in subsections:
+            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and")
+            subsection_data = data.get("technical_and_performance_terms", {}).get(subsection_key, {})
+
             content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
             content.append(Spacer(1, 0.1 * inch))
-
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and")
-            subsection_data = data.get("technical_performance", {}).get(subsection_key, {})
 
             fields = [
                 ("Clause Language:", subsection_data.get("Clause Language", "")),
@@ -337,11 +288,11 @@ def render_pdf(data, output_path):
         ]
 
         for subsection in subsections:
+            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and")
+            subsection_data = data.get("legal_risk_and_enforcement", {}).get(subsection_key, {})
+
             content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
             content.append(Spacer(1, 0.1 * inch))
-
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and")
-            subsection_data = data.get("legal_risk", {}).get(subsection_key, {})
 
             fields = [
                 ("Clause Language:", subsection_data.get("Clause Language", "")),
@@ -387,11 +338,11 @@ def render_pdf(data, output_path):
         ]
 
         for subsection in subsections:
+            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and").replace("/", "_")
+            subsection_data = data.get("regulatory_and_compliance_terms", {}).get(subsection_key, {})
+
             content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
             content.append(Spacer(1, 0.1 * inch))
-
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and").replace("/", "_")
-            subsection_data = data.get("regulatory_compliance", {}).get(subsection_key, {})
 
             fields = [
                 ("Clause Language:", subsection_data.get("Clause Language", "")),
@@ -436,11 +387,11 @@ def render_pdf(data, output_path):
         ]
 
         for subsection in subsections:
+            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and").replace("/", "_")
+            subsection_data = data.get("data_technology_and_deliverables", {}).get(subsection_key, {})
+
             content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
             content.append(Spacer(1, 0.1 * inch))
-
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and").replace("/", "_")
-            subsection_data = data.get("data_technology", {}).get(subsection_key, {})
 
             fields = [
                 ("Clause Language:", subsection_data.get("Clause Language", "")),
@@ -476,7 +427,7 @@ def render_pdf(data, output_path):
 
         # This section appears to have multiple blank subsections in the template
         # We'll handle up to 10 supplemental risk entries
-        supplemental_risks = data.get("supplemental_risks", [])
+        supplemental_risks = data.get("supplemental_operational_risks", [])
 
         for i, risk in enumerate(supplemental_risks[:10]):  # Limit to 10 to prevent overflow
             content.append(Paragraph(f"<b>Supplemental Risk {i+1}</b>", styles['Heading2']))
@@ -507,42 +458,6 @@ def render_pdf(data, output_path):
 
     except Exception as e:
         print(f"Error rendering Supplemental Operational Risks: {e}")
-
-    # VIII. Final Analysis Section
-    try:
-        content.append(PageBreak())
-        content.append(Paragraph("<b>VIII. Final Analysis</b>", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
-
-        content.append(Paragraph("<b>Final Redline Risk Summary and Recommendations</b>", styles['Heading2']))
-        content.append(Spacer(1, 0.1 * inch))
-
-        # Table headers
-        content.append(Paragraph("<b>Risk Area</b>", styles['Normal']))
-        content.append(Spacer(1, 0.05 * inch))
-        content.append(Paragraph("<b>Risk Summary</b>", styles['Normal']))
-        content.append(Spacer(1, 0.05 * inch))
-        content.append(Paragraph("<b>APS Redline Position</b>", styles['Normal']))
-        content.append(Spacer(1, 0.1 * inch))
-
-        # Get final analysis data
-        final_analysis = data.get("final_analysis", {}).get("Final Redline Risk Summary and Recommendations", [])
-
-        for item in final_analysis:
-            risk_area = format_field_value(item.get("Risk Area", ""))
-            risk_summary = format_field_value(item.get("Risk Summary", ""))
-            redline_position = format_field_value(item.get("APS Redline Position", ""))
-
-            if risk_area.strip():
-                content.append(Paragraph(f"<b>Risk Area:</b> {risk_area}", styles['Normal']))
-            if risk_summary.strip():
-                content.append(Paragraph(f"<b>Risk Summary:</b> {risk_summary}", styles['Normal']))
-            if redline_position.strip():
-                content.append(Paragraph(f"<b>APS Redline Position:</b> {redline_position}", styles['Normal']))
-            content.append(Spacer(1, 0.1 * inch))
-
-    except Exception as e:
-        print(f"Error rendering Final Analysis: {e}")
 
     # Build PDF
     try:

@@ -71,7 +71,12 @@ IV. Legal Risk & Enforcement
 V. Regulatory & Compliance Terms
 VI. Data, Technology & Deliverables
 VII. Supplemental Operational Risks
-VIII. Final Analysis
+
+IMPORTANT INSTRUCTIONS:
+- Only analyze and populate sections I through VII
+- For sections II-VII, only include clauses that have at least moderate risk (i.e., clauses with Risk Triggers, Harmful Language, or Redline Recommendations)
+- Skip any clauses that do not apply to the contract or have less than moderate risk
+- Do not include any clauses with empty or minimal content
 
 CONTRACT TEXT:
 <<<CONTRACT_START
