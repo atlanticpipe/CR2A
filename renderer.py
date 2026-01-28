@@ -169,38 +169,40 @@ def render_pdf(data, output_path):
             "Notice Requirements & Claim Timeframes (Notice to Cure, Delay Notices, Termination Notices, etc.)"
         ]
 
+        admin_terms = data.get("administrative_and_commercial_terms", {})
+        
         for subsection in subsections:
-            # Get subsection data
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and")
-            subsection_data = data.get("administrative_and_commercial_terms", {}).get(subsection_key, {})
+            # Check if this subsection exists in the JSON
+            if subsection in admin_terms:
+                subsection_data = admin_terms[subsection]
+                
+                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
+                content.append(Spacer(1, 0.1 * inch))
 
-            content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-            content.append(Spacer(1, 0.1 * inch))
+                # Add each field for the subsection
+                fields = [
+                    ("Clause Language:", subsection_data.get("Clause Language", "")),
+                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
+                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
+                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
+                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
+                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
+                ]
 
-            # Add each field for the subsection
-            fields = [
-                ("Clause Language:", subsection_data.get("Clause Language", "")),
-                ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", [])),
-                ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", [])),
-                ("Redline Recommendations:", subsection_data.get("Redline Recommendations", [])),
-                ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", []))
-            ]
+                for label, value in fields:
+                    formatted_value = format_field_value(value)
+                    if formatted_value.strip():
+                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
+                        # Handle multi-line content
+                        if '\n' in formatted_value:
+                            for line in formatted_value.split('\n'):
+                                if line.strip():
+                                    content.append(Paragraph(f"  {line}", styles['Normal']))
+                        else:
+                            content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
+                        content.append(Spacer(1, 0.05 * inch))
 
-            for label, value in fields:
-                formatted_value = format_field_value(value)
-                if formatted_value.strip():
-                    content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                    # Handle multi-line content
-                    if '\n' in formatted_value:
-                        for line in formatted_value.split('\n'):
-                            if line.strip():
-                                content.append(Paragraph(f"  {line}", styles['Normal']))
-                    else:
-                        content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
-                    content.append(Spacer(1, 0.05 * inch))
-
-            content.append(Spacer(1, 0.1 * inch))
+                content.append(Spacer(1, 0.1 * inch))
 
     except Exception as e:
         print(f"Error rendering Administrative & Commercial Terms: {e}")
@@ -232,35 +234,38 @@ def render_pdf(data, output_path):
             "Deliverables, Digital Submissions & Documentation Standards"
         ]
 
+        tech_terms = data.get("technical_and_performance_terms", {})
+        
         for subsection in subsections:
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and")
-            subsection_data = data.get("technical_and_performance_terms", {}).get(subsection_key, {})
+            # Check if this subsection exists in the JSON
+            if subsection in tech_terms:
+                subsection_data = tech_terms[subsection]
+                
+                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
+                content.append(Spacer(1, 0.1 * inch))
 
-            content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-            content.append(Spacer(1, 0.1 * inch))
+                fields = [
+                    ("Clause Language:", subsection_data.get("Clause Language", "")),
+                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
+                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
+                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
+                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
+                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
+                ]
 
-            fields = [
-                ("Clause Language:", subsection_data.get("Clause Language", "")),
-                ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", [])),
-                ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", [])),
-                ("Redline Recommendations:", subsection_data.get("Redline Recommendations", [])),
-                ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", []))
-            ]
+                for label, value in fields:
+                    formatted_value = format_field_value(value)
+                    if formatted_value.strip():
+                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
+                        if '\n' in formatted_value:
+                            for line in formatted_value.split('\n'):
+                                if line.strip():
+                                    content.append(Paragraph(f"  {line}", styles['Normal']))
+                        else:
+                            content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
+                        content.append(Spacer(1, 0.05 * inch))
 
-            for label, value in fields:
-                formatted_value = format_field_value(value)
-                if formatted_value.strip():
-                    content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                    if '\n' in formatted_value:
-                        for line in formatted_value.split('\n'):
-                            if line.strip():
-                                content.append(Paragraph(f"  {line}", styles['Normal']))
-                    else:
-                        content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
-                    content.append(Spacer(1, 0.05 * inch))
-
-            content.append(Spacer(1, 0.1 * inch))
+                content.append(Spacer(1, 0.1 * inch))
 
     except Exception as e:
         print(f"Error rendering Technical & Performance Terms: {e}")
@@ -287,35 +292,38 @@ def render_pdf(data, output_path):
             "Setoff & Withholding Rights (Owner's Right to Deduct or Withhold Payment)"
         ]
 
+        legal_risk = data.get("legal_risk_and_enforcement", {})
+        
         for subsection in subsections:
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and")
-            subsection_data = data.get("legal_risk_and_enforcement", {}).get(subsection_key, {})
+            # Check if this subsection exists in the JSON
+            if subsection in legal_risk:
+                subsection_data = legal_risk[subsection]
+                
+                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
+                content.append(Spacer(1, 0.1 * inch))
 
-            content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-            content.append(Spacer(1, 0.1 * inch))
+                fields = [
+                    ("Clause Language:", subsection_data.get("Clause Language", "")),
+                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
+                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
+                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
+                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
+                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
+                ]
 
-            fields = [
-                ("Clause Language:", subsection_data.get("Clause Language", "")),
-                ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", [])),
-                ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", [])),
-                ("Redline Recommendations:", subsection_data.get("Redline Recommendations", [])),
-                ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", []))
-            ]
+                for label, value in fields:
+                    formatted_value = format_field_value(value)
+                    if formatted_value.strip():
+                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
+                        if '\n' in formatted_value:
+                            for line in formatted_value.split('\n'):
+                                if line.strip():
+                                    content.append(Paragraph(f"  {line}", styles['Normal']))
+                        else:
+                            content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
+                        content.append(Spacer(1, 0.05 * inch))
 
-            for label, value in fields:
-                formatted_value = format_field_value(value)
-                if formatted_value.strip():
-                    content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                    if '\n' in formatted_value:
-                        for line in formatted_value.split('\n'):
-                            if line.strip():
-                                content.append(Paragraph(f"  {line}", styles['Normal']))
-                    else:
-                        content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
-                    content.append(Spacer(1, 0.05 * inch))
-
-            content.append(Spacer(1, 0.1 * inch))
+                content.append(Spacer(1, 0.1 * inch))
 
     except Exception as e:
         print(f"Error rendering Legal Risk & Enforcement: {e}")
@@ -337,35 +345,38 @@ def render_pdf(data, output_path):
             "Drug-Free Workplace Programs & Substance Testing Requirements"
         ]
 
+        regulatory_terms = data.get("regulatory_and_compliance_terms", {})
+        
         for subsection in subsections:
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and").replace("/", "_")
-            subsection_data = data.get("regulatory_and_compliance_terms", {}).get(subsection_key, {})
+            # Check if this subsection exists in the JSON
+            if subsection in regulatory_terms:
+                subsection_data = regulatory_terms[subsection]
+                
+                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
+                content.append(Spacer(1, 0.1 * inch))
 
-            content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-            content.append(Spacer(1, 0.1 * inch))
+                fields = [
+                    ("Clause Language:", subsection_data.get("Clause Language", "")),
+                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
+                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
+                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
+                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
+                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
+                ]
 
-            fields = [
-                ("Clause Language:", subsection_data.get("Clause Language", "")),
-                ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", [])),
-                ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", [])),
-                ("Redline Recommendations:", subsection_data.get("Redline Recommendations", [])),
-                ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", []))
-            ]
+                for label, value in fields:
+                    formatted_value = format_field_value(value)
+                    if formatted_value.strip():
+                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
+                        if '\n' in formatted_value:
+                            for line in formatted_value.split('\n'):
+                                if line.strip():
+                                    content.append(Paragraph(f"  {line}", styles['Normal']))
+                        else:
+                            content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
+                        content.append(Spacer(1, 0.05 * inch))
 
-            for label, value in fields:
-                formatted_value = format_field_value(value)
-                if formatted_value.strip():
-                    content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                    if '\n' in formatted_value:
-                        for line in formatted_value.split('\n'):
-                            if line.strip():
-                                content.append(Paragraph(f"  {line}", styles['Normal']))
-                    else:
-                        content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
-                    content.append(Spacer(1, 0.05 * inch))
-
-            content.append(Spacer(1, 0.1 * inch))
+                content.append(Spacer(1, 0.1 * inch))
 
     except Exception as e:
         print(f"Error rendering Regulatory & Compliance Terms: {e}")
@@ -386,35 +397,38 @@ def render_pdf(data, output_path):
             "Cybersecurity Standards, Breach Notification & IT System Use Policies"
         ]
 
+        data_tech = data.get("data_technology_and_deliverables", {})
+        
         for subsection in subsections:
-            subsection_key = subsection.lower().replace(", ", "_").replace(" ", "_").replace("&", "and").replace("/", "_")
-            subsection_data = data.get("data_technology_and_deliverables", {}).get(subsection_key, {})
+            # Check if this subsection exists in the JSON
+            if subsection in data_tech:
+                subsection_data = data_tech[subsection]
+                
+                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
+                content.append(Spacer(1, 0.1 * inch))
 
-            content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-            content.append(Spacer(1, 0.1 * inch))
+                fields = [
+                    ("Clause Language:", subsection_data.get("Clause Language", "")),
+                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
+                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
+                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
+                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
+                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
+                ]
 
-            fields = [
-                ("Clause Language:", subsection_data.get("Clause Language", "")),
-                ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", [])),
-                ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", [])),
-                ("Redline Recommendations:", subsection_data.get("Redline Recommendations", [])),
-                ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", []))
-            ]
+                for label, value in fields:
+                    formatted_value = format_field_value(value)
+                    if formatted_value.strip():
+                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
+                        if '\n' in formatted_value:
+                            for line in formatted_value.split('\n'):
+                                if line.strip():
+                                    content.append(Paragraph(f"  {line}", styles['Normal']))
+                        else:
+                            content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
+                        content.append(Spacer(1, 0.05 * inch))
 
-            for label, value in fields:
-                formatted_value = format_field_value(value)
-                if formatted_value.strip():
-                    content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                    if '\n' in formatted_value:
-                        for line in formatted_value.split('\n'):
-                            if line.strip():
-                                content.append(Paragraph(f"  {line}", styles['Normal']))
-                    else:
-                        content.append(Paragraph(f"  {formatted_value}", styles['Normal']))
-                    content.append(Spacer(1, 0.05 * inch))
-
-            content.append(Spacer(1, 0.1 * inch))
+                content.append(Spacer(1, 0.1 * inch))
 
     except Exception as e:
         print(f"Error rendering Data, Technology & Deliverables: {e}")

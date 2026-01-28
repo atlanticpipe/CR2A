@@ -63,20 +63,99 @@ COMPANY RULES (do not echo; you must comply): <<<RULES_START
 {rules_content}
 RULES_END>>>
 
-TEMPLATE HEADINGS (for your reference only; do not echo):
-I. Contract Overview
-II. Administrative & Commercial Terms
-III. Technical & Performance Terms
-IV. Legal Risk & Enforcement
-V. Regulatory & Compliance Terms
-VI. Data, Technology & Deliverables
-VII. Supplemental Operational Risks
+CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE EXACTLY:
 
-IMPORTANT INSTRUCTIONS:
-- Only analyze and populate sections I through VII
-- For sections II-VII, only include clauses that have at least moderate risk (i.e., clauses with Risk Triggers, Harmful Language, or Redline Recommendations)
-- Skip any clauses that do not apply to the contract or have less than moderate risk
-- Do not include any clauses with empty or minimal content
+1. Use ONLY the predefined subsection names listed below - DO NOT create custom names
+2. Only include subsections that:
+   - Appear in the contract AND
+   - Have at least moderate risk (Risk Triggers, Harmful Language, or Redline Recommendations)
+3. If a subsection doesn't appear in the contract or has no moderate risk, OMIT it entirely
+4. Use the exact subsection names as keys in the JSON - do not modify them
+
+SECTION I - CONTRACT OVERVIEW (always include all 8 fields):
+- Project Title
+- Solicitation No.
+- Owner
+- Contractor
+- Scope
+- General Risk Level
+- Bid Model
+- Notes
+
+SECTION II - ADMINISTRATIVE & COMMERCIAL TERMS (use these exact names as keys):
+- Contract Term, Renewal & Extensions
+- Bonding, Surety, & Insurance Obligations
+- Retainage, Progress Payments & Final Payment Terms
+- Pay-When-Paid, Pay-If-Paid, or Owner Payment Contingencies
+- Price Escalation Clauses (Labor, Materials, Fuel, Inflation Adjustments)
+- Fuel Price Adjustment / Fuel Cost Caps
+- Change Orders, Scope Adjustments & Modifications
+- Termination for Convenience (Owner/Agency Right to Terminate Without Cause)
+- Termination for Cause / Default by Contractor
+- Bid Protest Procedures & Claims of Improper Award
+- Bid Tabulation, Competition & Award Process Requirements
+- Contractor Qualification, Licensing & Certification Requirements
+- Release Orders, Task Orders & Work Authorization Protocols
+- Assignment & Novation Restrictions (Transfer of Contract Rights)
+- Audit Rights, Recordkeeping & Document Retention Obligations
+- Notice Requirements & Claim Timeframes (Notice to Cure, Delay Notices, Termination Notices, etc.)
+
+SECTION III - TECHNICAL & PERFORMANCE TERMS (use these exact names as keys):
+- Scope of Work (Work Inclusions, Exclusions & Defined Deliverables)
+- Performance Schedule, Time for Completion & Critical Path Obligations
+- Delays of Any Kind (Force Majeure, Acts of God, Weather, Owner-Caused, Unforeseen Events)
+- Suspension of Work, Work Stoppages & Agency Directives
+- Submittals, Documentation & Approval Requirements
+- Emergency & Contingency Work Obligations
+- Permits, Licensing & Regulatory Approvals for Work
+- Warranty, Guarantee & Defects Liability Periods
+- Use of APS Tools, Equipment, Materials or Supplies
+- Owner-Supplied Support, Utilities & Site Access Provisions
+- Field Ticket, Daily Work Log & Documentation Requirements
+- Mobilization & Demobilization Provisions
+- Utility Coordination, Locate Risk & Conflict Avoidance
+- Delivery Deadlines, Milestone Dates, Substantial & Final Completion Standards
+- Punch List, Closeout Procedures & Acceptance of Work
+- Worksite Coordination, Access Restrictions & Sequencing Obligations
+- Deliverables, Digital Submissions & Documentation Standards
+
+SECTION IV - LEGAL RISK & ENFORCEMENT (use these exact names as keys):
+- Indemnification, Defense & Hold Harmless Provisions
+- Duty to Defend vs. Indemnify Scope Clarifications
+- Limitations of Liability, Damage Caps & Waivers of Consequential Damages
+- Insurance Coverage, Additional Insured & Waiver of Subrogation Clauses
+- Dispute Resolution (Mediation, Arbitration, Litigation)
+- Flow-Down Clauses (Prime-to-Subcontract Risk Pass-Through)
+- Subcontracting Restrictions, Approval & Substitution Requirements
+- Background Screening, Security Clearance & Worker Eligibility Requirements
+- Safety Standards, OSHA Compliance & Site-Specific Safety Obligations
+- Site Conditions, Differing Site Conditions & Changed Circumstances Clauses
+- Environmental Hazards, Waste Disposal & Hazardous Materials Provisions
+- Conflicting Documents / Order of Precedence Clauses
+- Setoff & Withholding Rights (Owner's Right to Deduct or Withhold Payment)
+
+SECTION V - REGULATORY & COMPLIANCE TERMS (use these exact names as keys):
+- Certified Payroll, Recordkeeping & Reporting Obligations
+- Prevailing Wage, Davis-Bacon & Federal/State Wage Compliance
+- EEO, Non-Discrimination, MWBE/DBE Participation Requirements
+- Anti-Lobbying / Cone of Silence Provisions
+- Apprenticeship, Training & Workforce Development Requirements
+- Immigration / E-Verify Compliance Obligations
+- Worker Classification & Independent Contractor Restrictions
+- Drug-Free Workplace Programs & Substance Testing Requirements
+
+SECTION VI - DATA, TECHNOLOGY & DELIVERABLES (use these exact names as keys):
+- Data Ownership, Access & Rights to Digital Deliverables
+- AI / Technology Use Restrictions (Automation, Digital Tools, Proprietary Systems)
+- Digital Surveillance, GIS-Tagged Deliverables & Monitoring Requirements
+- GIS, Digital Workflow Integration & Electronic Submittals
+- Confidentiality, Data Security & Records Retention Obligations
+- Intellectual Property, Licensing & Ownership of Work Product
+- Cybersecurity Standards, Breach Notification & IT System Use Policies
+
+SECTION VII - SUPPLEMENTAL OPERATIONAL RISKS:
+- Use this section for any significant risks that don't fit in sections II-VI
+- Each risk should be a separate object in the array
 
 CONTRACT TEXT:
 <<<CONTRACT_START
