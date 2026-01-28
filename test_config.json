@@ -1,9 +1,0 @@
-{
-  "aws_region": "us-east-1",
-  "lambda_timeout": 30,
-  "max_retries": 3,
-  "parallel_execution": false,
-  "verbose_logging": true,
-  "save_artifacts": true,
-  "artifact_path": "./test-artifacts"
-}
