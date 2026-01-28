@@ -1,20 +1,32 @@
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
 from reportlab.lib.units import inch
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib import colors
 import textwrap
 
 def format_field_value(value):
+    """Format values for display in PDF"""
     if value is None or value == "":
         return ""
     if isinstance(value, str):
         return value
     if isinstance(value, list):
-        # Format arrays as bullet points
+        # Handle lists of strings (simple bullet points)
         if not value:
             return ""
-        return "\n".join(f"• {item}" if not str(item).startswith("•") else str(item) for item in value)
+        formatted_items = []
+        for item in value:
+            if isinstance(item, dict):
+                # Skip dicts - they need special handling
+                continue
+            item_str = str(item).strip()
+            if item_str and not item_str.startswith("•"):
+                formatted_items.append(f"• {item_str}")
+            elif item_str:
+                formatted_items.append(item_str)
+        return "\n".join(formatted_items) if formatted_items else ""
     if isinstance(value, dict):
         # Format dictionaries as key-value pairs
         if not value:
@@ -23,12 +35,98 @@ def format_field_value(value):
         for key, val in value.items():
             if val is not None and val != "":
                 pairs.append(f"{key}: {val}")
-        return "\n".join(pairs)
+        return "\n".join(pairs) if pairs else ""
     # Convert other types to string
     return str(value)
 
+def format_redline_recommendations(recommendations):
+    """Format redline recommendations which are objects with action/text/reference"""
+    if not recommendations or not isinstance(recommendations, list):
+        return ""
+    
+    formatted = []
+    for item in recommendations:
+        if isinstance(item, dict):
+            action = item.get("action", "").upper()
+            text = item.get("text", "").strip()
+            reference = item.get("reference", "").strip()
+            
+            if text:
+                line = f"[{action}] {text}"
+                if reference:
+                    line += f" (ref: {reference})"
+                formatted.append(line)
+    
+    return "\n".join(formatted) if formatted else ""
+
+def render_clause_block(content, label_prefix, clause_data, styles):
+    """Render a single ClauseBlock from the schema"""
+    if not clause_data or not isinstance(clause_data, dict):
+        return
+    
+    # Fields in order as per schema
+    clause_language = clause_data.get("Clause Language", "").strip()
+    clause_summary = clause_data.get("Clause Summary", "").strip()
+    risk_triggers = clause_data.get("Risk Triggers Identified", [])
+    flow_down = clause_data.get("Flow-Down Obligations", [])
+    redlines = clause_data.get("Redline Recommendations", [])
+    harmful_lang = clause_data.get("Harmful Language / Policy Conflicts", [])
+    
+    # Only render if there's content
+    has_content = any([clause_language, clause_summary, risk_triggers, flow_down, redlines, harmful_lang])
+    if not has_content:
+        return
+    
+    if clause_language:
+        content.append(Paragraph("<b>Clause Language:</b>", styles['Normal']))
+        content.append(Paragraph(f"&nbsp;&nbsp;<i>{clause_language}</i>", styles['Normal']))
+        content.append(Spacer(1, 0.05 * inch))
+    
+    if clause_summary:
+        content.append(Paragraph("<b>Clause Summary:</b>", styles['Normal']))
+        content.append(Paragraph(f"&nbsp;&nbsp;{clause_summary}", styles['Normal']))
+        content.append(Spacer(1, 0.05 * inch))
+    
+    if risk_triggers:
+        formatted = format_field_value(risk_triggers)
+        if formatted.strip():
+            content.append(Paragraph("<b>Risk Triggers Identified:</b>", styles['Normal']))
+            for line in formatted.split('\n'):
+                if line.strip():
+                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
+            content.append(Spacer(1, 0.05 * inch))
+    
+    if flow_down:
+        formatted = format_field_value(flow_down)
+        if formatted.strip():
+            content.append(Paragraph("<b>Flow-Down Obligations:</b>", styles['Normal']))
+            for line in formatted.split('\n'):
+                if line.strip():
+                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
+            content.append(Spacer(1, 0.05 * inch))
+    
+    if redlines:
+        formatted = format_redline_recommendations(redlines)
+        if formatted.strip():
+            content.append(Paragraph("<b>Redline Recommendations:</b>", styles['Normal']))
+            for line in formatted.split('\n'):
+                if line.strip():
+                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
+            content.append(Spacer(1, 0.05 * inch))
+    
+    if harmful_lang:
+        formatted = format_field_value(harmful_lang)
+        if formatted.strip():
+            content.append(Paragraph("<b>Harmful Language / Policy Conflicts:</b>", styles['Normal']))
+            for line in formatted.split('\n'):
+                if line.strip():
+                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
+            content.append(Spacer(1, 0.05 * inch))
+
 def render_pdf(data, output_path):
-    # Create document template - FIXED: Added closing parenthesis
+    """Main PDF rendering function that matches output_schemas_v1.json structure"""
+    
+    # Create document template
     doc = SimpleDocTemplate(
         output_path,
         pagesize=letter,
@@ -41,7 +139,6 @@ def render_pdf(data, output_path):
     # Get styles
     styles = getSampleStyleSheet()
     
-    # FIXED: Added closing parenthesis
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Title'],
@@ -63,10 +160,8 @@ def render_pdf(data, output_path):
         content.append(Paragraph("I. Contract Overview", styles['Heading1']))
         content.append(Spacer(1, 0.2 * inch))
         
-        # Get contract overview data from nested structure
         overview_data = data.get("contract_overview", {})
         
-        # Contract Overview fields - use exact field names from schema
         overview_fields = [
             ("Project Title:", overview_data.get("Project Title", "")),
             ("Solicitation No.:", overview_data.get("Solicitation No.", "")),
@@ -79,9 +174,8 @@ def render_pdf(data, output_path):
         ]
         
         for label, value in overview_fields:
-            formatted_value = format_field_value(value)
-            if formatted_value.strip():
-                content.append(Paragraph(f"<b>{label}</b> {formatted_value}", styles['Normal']))
+            if value and str(value).strip():
+                content.append(Paragraph(f"<b>{label}</b> {value}", styles['Normal']))
                 content.append(Spacer(1, 0.1 * inch))
         
         content.append(Spacer(1, 0.2 * inch))
@@ -93,7 +187,6 @@ def render_pdf(data, output_path):
         content.append(Paragraph("II. Administrative & Commercial Terms", styles['Heading1']))
         content.append(Spacer(1, 0.2 * inch))
         
-        # Define all subsections for Administrative & Commercial Terms
         subsections = [
             "Contract Term, Renewal & Extensions",
             "Bonding, Surety, & Insurance Obligations",
@@ -115,35 +208,12 @@ def render_pdf(data, output_path):
         
         admin_terms = data.get("administrative_and_commercial_terms", {})
         for subsection in subsections:
-            # Check if this subsection exists in the JSON
             if subsection in admin_terms:
                 subsection_data = admin_terms[subsection]
                 content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
                 content.append(Spacer(1, 0.1 * inch))
                 
-                # Add each field for the subsection
-                fields = [
-                    ("Clause Language:", subsection_data.get("Clause Language", "")),
-                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
-                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
-                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
-                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
-                ]
-                
-                for label, value in fields:
-                    formatted_value = format_field_value(value)
-                    if formatted_value.strip():
-                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                        # Handle multi-line content
-                        if '\n' in formatted_value:
-                            for line in formatted_value.split('\n'):
-                                if line.strip():
-                                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
-                        else:
-                            content.append(Paragraph(f"&nbsp;&nbsp;{formatted_value}", styles['Normal']))
-                        content.append(Spacer(1, 0.05 * inch))
-                
+                render_clause_block(content, subsection, subsection_data, styles)
                 content.append(Spacer(1, 0.1 * inch))
     except Exception as e:
         print(f"Error rendering Administrative & Commercial Terms: {e}")
@@ -154,7 +224,6 @@ def render_pdf(data, output_path):
         content.append(Paragraph("III. Technical & Performance Terms", styles['Heading1']))
         content.append(Spacer(1, 0.2 * inch))
         
-        # Define subsections for Technical & Performance Terms
         subsections = [
             "Scope of Work (Work Inclusions, Exclusions & Defined Deliverables)",
             "Performance Schedule, Time for Completion & Critical Path Obligations",
@@ -177,33 +246,12 @@ def render_pdf(data, output_path):
         
         tech_terms = data.get("technical_and_performance_terms", {})
         for subsection in subsections:
-            # Check if this subsection exists in the JSON
             if subsection in tech_terms:
                 subsection_data = tech_terms[subsection]
                 content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
                 content.append(Spacer(1, 0.1 * inch))
                 
-                fields = [
-                    ("Clause Language:", subsection_data.get("Clause Language", "")),
-                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
-                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
-                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
-                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
-                ]
-                
-                for label, value in fields:
-                    formatted_value = format_field_value(value)
-                    if formatted_value.strip():
-                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                        if '\n' in formatted_value:
-                            for line in formatted_value.split('\n'):
-                                if line.strip():
-                                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
-                        else:
-                            content.append(Paragraph(f"&nbsp;&nbsp;{formatted_value}", styles['Normal']))
-                        content.append(Spacer(1, 0.05 * inch))
-                
+                render_clause_block(content, subsection, subsection_data, styles)
                 content.append(Spacer(1, 0.1 * inch))
     except Exception as e:
         print(f"Error rendering Technical & Performance Terms: {e}")
@@ -232,33 +280,12 @@ def render_pdf(data, output_path):
         
         legal_risk = data.get("legal_risk_and_enforcement", {})
         for subsection in subsections:
-            # Check if this subsection exists in the JSON
             if subsection in legal_risk:
                 subsection_data = legal_risk[subsection]
                 content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
                 content.append(Spacer(1, 0.1 * inch))
                 
-                fields = [
-                    ("Clause Language:", subsection_data.get("Clause Language", "")),
-                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
-                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
-                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
-                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
-                ]
-                
-                for label, value in fields:
-                    formatted_value = format_field_value(value)
-                    if formatted_value.strip():
-                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                        if '\n' in formatted_value:
-                            for line in formatted_value.split('\n'):
-                                if line.strip():
-                                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
-                        else:
-                            content.append(Paragraph(f"&nbsp;&nbsp;{formatted_value}", styles['Normal']))
-                        content.append(Spacer(1, 0.05 * inch))
-                
+                render_clause_block(content, subsection, subsection_data, styles)
                 content.append(Spacer(1, 0.1 * inch))
     except Exception as e:
         print(f"Error rendering Legal Risk & Enforcement: {e}")
@@ -282,33 +309,12 @@ def render_pdf(data, output_path):
         
         regulatory_terms = data.get("regulatory_and_compliance_terms", {})
         for subsection in subsections:
-            # Check if this subsection exists in the JSON
             if subsection in regulatory_terms:
                 subsection_data = regulatory_terms[subsection]
                 content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
                 content.append(Spacer(1, 0.1 * inch))
                 
-                fields = [
-                    ("Clause Language:", subsection_data.get("Clause Language", "")),
-                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
-                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
-                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
-                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
-                ]
-                
-                for label, value in fields:
-                    formatted_value = format_field_value(value)
-                    if formatted_value.strip():
-                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                        if '\n' in formatted_value:
-                            for line in formatted_value.split('\n'):
-                                if line.strip():
-                                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
-                        else:
-                            content.append(Paragraph(f"&nbsp;&nbsp;{formatted_value}", styles['Normal']))
-                        content.append(Spacer(1, 0.05 * inch))
-                
+                render_clause_block(content, subsection, subsection_data, styles)
                 content.append(Spacer(1, 0.1 * inch))
     except Exception as e:
         print(f"Error rendering Regulatory & Compliance Terms: {e}")
@@ -331,33 +337,12 @@ def render_pdf(data, output_path):
         
         data_tech = data.get("data_technology_and_deliverables", {})
         for subsection in subsections:
-            # Check if this subsection exists in the JSON
             if subsection in data_tech:
                 subsection_data = data_tech[subsection]
                 content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
                 content.append(Spacer(1, 0.1 * inch))
                 
-                fields = [
-                    ("Clause Language:", subsection_data.get("Clause Language", "")),
-                    ("Clause Summary:", subsection_data.get("Clause Summary", "")),
-                    ("Risk Triggers Identified:", subsection_data.get("Risk Triggers Identified", "")),
-                    ("Flow-Down Obligations:", subsection_data.get("Flow-Down Obligations", "")),
-                    ("Redline Recommendations:", subsection_data.get("Redline Recommendations", "")),
-                    ("Harmful Language / Policy Conflicts:", subsection_data.get("Harmful Language / Policy Conflicts", ""))
-                ]
-                
-                for label, value in fields:
-                    formatted_value = format_field_value(value)
-                    if formatted_value.strip():
-                        content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                        if '\n' in formatted_value:
-                            for line in formatted_value.split('\n'):
-                                if line.strip():
-                                    content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
-                        else:
-                            content.append(Paragraph(f"&nbsp;&nbsp;{formatted_value}", styles['Normal']))
-                        content.append(Spacer(1, 0.05 * inch))
-                
+                render_clause_block(content, subsection, subsection_data, styles)
                 content.append(Spacer(1, 0.1 * inch))
     except Exception as e:
         print(f"Error rendering Data, Technology & Deliverables: {e}")
@@ -368,36 +353,60 @@ def render_pdf(data, output_path):
         content.append(Paragraph("VII. Supplemental Operational Risks", styles['Heading1']))
         content.append(Spacer(1, 0.2 * inch))
         
-        # We'll handle up to 10 supplemental risk entries
         supplemental_risks = data.get("supplemental_operational_risks", [])
-        for i, risk in enumerate(supplemental_risks[:10]):  # Limit to 10 to prevent overflow
+        for i, risk in enumerate(supplemental_risks[:9]):  # Max 9 per schema
             content.append(Paragraph(f"<b>Supplemental Risk {i+1}</b>", styles['Heading2']))
             content.append(Spacer(1, 0.1 * inch))
             
-            fields = [
-                ("Clause Language:", risk.get("Clause Language", "")),
-                ("Clause Summary:", risk.get("Clause Summary", "")),
-                ("Risk Triggers Identified:", risk.get("Risk Triggers Identified", [])),
-                ("Flow-Down Obligations:", risk.get("Flow-Down Obligations", [])),
-                ("Redline Recommendations:", risk.get("Redline Recommendations", [])),
-                ("Harmful Language / Policy Conflicts:", risk.get("Harmful Language / Policy Conflicts", []))
-            ]
-            
-            for label, value in fields:
-                formatted_value = format_field_value(value)
-                if formatted_value.strip():
-                    content.append(Paragraph(f"<b>{label}</b>", styles['Normal']))
-                    if '\n' in formatted_value:
-                        for line in formatted_value.split('\n'):
-                            if line.strip():
-                                content.append(Paragraph(f"&nbsp;&nbsp;{line}", styles['Normal']))
-                    else:
-                        content.append(Paragraph(f"&nbsp;&nbsp;{formatted_value}", styles['Normal']))
-                    content.append(Spacer(1, 0.05 * inch))
-            
+            render_clause_block(content, f"Risk {i+1}", risk, styles)
             content.append(Spacer(1, 0.1 * inch))
     except Exception as e:
         print(f"Error rendering Supplemental Operational Risks: {e}")
+    
+    # VIII. Final Analysis Section
+    try:
+        content.append(PageBreak())
+        content.append(Paragraph("VIII. Final Analysis", styles['Heading1']))
+        content.append(Spacer(1, 0.2 * inch))
+        
+        final_analysis = data.get("final_analysis", {})
+        risk_summary_data = final_analysis.get("Final Redline Risk Summary and Recommendations", [])
+        
+        if risk_summary_data and isinstance(risk_summary_data, list):
+            content.append(Paragraph("<b>Final Redline Risk Summary and Recommendations</b>", styles['Normal']))
+            content.append(Spacer(1, 0.1 * inch))
+            
+            # Build table data
+            table_data = [["Risk Area", "Risk Summary", "APS Redline Position"]]
+            
+            for row in risk_summary_data:
+                if isinstance(row, dict):
+                    risk_area = row.get("Risk Area", "")
+                    risk_summary = row.get("Risk Summary", "")
+                    redline_pos = row.get("APS Redline Position", "")
+                    
+                    table_data.append([risk_area, risk_summary, redline_pos])
+            
+            if len(table_data) > 1:  # Only create table if there's data
+                # Create table with proper styling
+                table = Table(table_data, colWidths=[1.5*inch, 2.5*inch, 2*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+                ]))
+                content.append(table)
+            
+            content.append(Spacer(1, 0.2 * inch))
+    except Exception as e:
+        print(f"Error rendering Final Analysis: {e}")
     
     # Build PDF
     try:
@@ -409,25 +418,58 @@ def render_pdf(data, output_path):
 
 # Example usage and testing
 if __name__ == "__main__":
-    # Sample data for testing - FIXED: Proper nested structure
+    # Sample data following the output_schemas_v1.json structure
     sample_data = {
+        "schema_version": "v1.0.0",
         "contract_overview": {
-            "Project Title": "Sample Construction Project",
-            "Solicitation No.": "SOL-2024-001",
-            "Owner": "City of Sample",
-            "Contractor": "ABC Construction LLC",
-            "Scope": "Construction of municipal building",
-            "General Risk Level": "Medium",
-            "Bid Model": "Competitive Bid",
-            "Notes": "This is a test contract for PDF generation"
+            "Project Title": "Highway Reconstruction Project",
+            "Solicitation No.": "SOL-2024-1001",
+            "Owner": "State DOT",
+            "Contractor": "Smith Construction Inc.",
+            "Scope": "Resurfacing 5 miles of US Route 1",
+            "General Risk Level": "High",
+            "Bid Model": "Unit Price",
+            "Notes": "Prevailing wage required"
         },
-        "administrative_and_commercial_terms": {},
+        "administrative_and_commercial_terms": {
+            "Contract Term, Renewal & Extensions": {
+                "Clause Language": "The initial term shall be 18 months from the date of notice to proceed.",
+                "Clause Summary": "Fixed 18-month contract with optional 6-month extensions up to 2 years total",
+                "Risk Triggers Identified": [
+                    "Extensions are at owner's sole discretion",
+                    "No guaranteed renewal provision"
+                ],
+                "Flow-Down Obligations": [
+                    "Pass contract term limits to subcontractors"
+                ],
+                "Redline Recommendations": [
+                    {
+                        "action": "replace",
+                        "text": "Add: 'Extensions shall be offered with 30 days written notice'",
+                        "reference": "APS Policy Section 3.2"
+                    }
+                ],
+                "Harmful Language / Policy Conflicts": [
+                    "Sole discretion language limits business planning certainty"
+                ]
+            }
+        },
         "technical_and_performance_terms": {},
         "legal_risk_and_enforcement": {},
         "regulatory_and_compliance_terms": {},
         "data_technology_and_deliverables": {},
-        "supplemental_operational_risks": []
+        "supplemental_operational_risks": [],
+        "final_analysis": {
+            "Final Redline Risk Summary and Recommendations": [
+                {
+                    "Risk Area": "Contract Term",
+                    "Risk Summary": "18-month fixed term with discretionary extensions creates business continuity risk",
+                    "APS Redline Position": "Request 2-year guaranteed term with documented extension procedure"
+                }
+            ]
+        }
     }
     
     # Generate sample PDF
     render_pdf(sample_data, "test_contract_analysis.pdf")
+    print("Test complete!")
