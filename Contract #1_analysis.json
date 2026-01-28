@@ -13,7 +13,7 @@
   "administrative_and_commercial_terms": {
     "Term of Agreement": {
       "Clause Language": "The Term of the Agreement is hereby renewed from July, 18, 2025 to July, 17, 2026.",
-      "Clause Summary": "The contract term has been extended by one year.",
+      "Clause Summary": "The contract term is extended by one year.",
       "Risk Triggers Identified": "Potential for increased costs due to extended term.",
       "Flow-Down Obligations": "",
       "Redline Recommendations": "Replace 'July, 18, 2025' with 'July 18, 2025'.",
@@ -34,7 +34,7 @@
       "Clause Summary": "Contractor must verify work authorization of employees.",
       "Risk Triggers Identified": "Non-compliance could lead to penalties.",
       "Flow-Down Obligations": "Subcontractors must also comply with E-Verify requirements.",
-      "Redline Recommendations": "Insert 'and shall continue to do so at all times during the term of the contract.'",
+      "Redline Recommendations": "Delete 'and shall continue to do so at all times during the term of the contract.'",
       "Harmful Language / Policy Conflicts": ""
     }
   },
@@ -54,7 +54,7 @@
       "Clause Summary": "Contractor must certify its ownership status.",
       "Risk Triggers Identified": "Failure to provide affidavit could lead to contract issues.",
       "Flow-Down Obligations": "",
-      "Redline Recommendations": "Insert 'and shall re-execute and provide such an affidavit within a reasonable time after any renewal or extension of this Agreement, if applicable.'",
+      "Redline Recommendations": "Replace 'Contractor shall, in the form attached hereto as Attachment B,' with 'Contractor must provide an affidavit in the form attached hereto as Attachment B.'",
       "Harmful Language / Policy Conflicts": ""
     }
   },
@@ -64,7 +64,7 @@
       "Clause Summary": "Contractor seeks to adjust pricing due to inflation.",
       "Risk Triggers Identified": "Potential pushback from the City on price increases.",
       "Flow-Down Obligations": "",
-      "Redline Recommendations": "Insert 'for the CIPP Lining line items, APS is requesting a 20% increase.'",
+      "Redline Recommendations": "Insert 'for all line items on the contract, other than CIPP Lining.'",
       "Harmful Language / Policy Conflicts": ""
     }
   },
@@ -72,14 +72,14 @@
   "final_analysis": {
     "summary": [
       {
-        "Risk Area": "Contract Compliance",
-        "Risk Summary": "Potential risks associated with compliance to state statutes.",
-        "Redline Recommendation Summary": "Recommended to clarify compliance obligations in the contract."
+        "Risk Area": "Financial",
+        "Risk Summary": "Request for price increase due to inflation and material costs.",
+        "Redline Recommendation Summary": "Recommended to clarify the basis for price increase in the contract."
       },
       {
-        "Risk Area": "Cost Management",
-        "Risk Summary": "Increased costs due to inflation and material price hikes.",
-        "Redline Recommendation Summary": "Recommended to include a clause for future price adjustments."
+        "Risk Area": "Compliance",
+        "Risk Summary": "Potential risks associated with human trafficking and scrutinized company certifications.",
+        "Redline Recommendation Summary": "Ensure all certifications are up to date and accurately represented."
       }
     ]
   }

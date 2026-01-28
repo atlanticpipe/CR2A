@@ -4,7 +4,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, 
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib import colors
-import textwrap
 
 def format_field_value(value):
     """Format values for display in PDF"""
@@ -59,7 +58,21 @@ def format_redline_recommendations(recommendations):
     
     return "\n".join(formatted) if formatted else ""
 
-def render_clause_block(content, label_prefix, clause_data, styles):
+def has_clause_content(clause_data):
+    """Check if a ClauseBlock has any actual content"""
+    if not clause_data or not isinstance(clause_data, dict):
+        return False
+    
+    return any([
+        clause_data.get("Clause Language", "").strip(),
+        clause_data.get("Clause Summary", "").strip(),
+        clause_data.get("Risk Triggers Identified", []),
+        clause_data.get("Flow-Down Obligations", []),
+        clause_data.get("Redline Recommendations", []),
+        clause_data.get("Harmful Language / Policy Conflicts", [])
+    ])
+
+def render_clause_block(content, clause_data, styles):
     """Render a single ClauseBlock from the schema"""
     if not clause_data or not isinstance(clause_data, dict):
         return
@@ -71,11 +84,6 @@ def render_clause_block(content, label_prefix, clause_data, styles):
     flow_down = clause_data.get("Flow-Down Obligations", [])
     redlines = clause_data.get("Redline Recommendations", [])
     harmful_lang = clause_data.get("Harmful Language / Policy Conflicts", [])
-    
-    # Only render if there's content
-    has_content = any([clause_language, clause_summary, risk_triggers, flow_down, redlines, harmful_lang])
-    if not has_content:
-        return
     
     if clause_language:
         content.append(Paragraph("<b>Clause Language:</b>", styles['Normal']))
@@ -124,7 +132,7 @@ def render_clause_block(content, label_prefix, clause_data, styles):
             content.append(Spacer(1, 0.05 * inch))
 
 def render_pdf(data, output_path):
-    """Main PDF rendering function that matches output_schemas_v1.json structure"""
+    """Data-driven PDF renderer - renders JSON structure as-is without hardcoded template"""
     
     # Create document template
     doc = SimpleDocTemplate(
@@ -155,258 +163,114 @@ def render_pdf(data, output_path):
     content.append(title)
     content.append(Spacer(1, 0.3 * inch))
     
-    # I. Contract Overview Section
-    try:
-        content.append(Paragraph("I. Contract Overview", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
-        
-        overview_data = data.get("contract_overview", {})
-        
-        overview_fields = [
-            ("Project Title:", overview_data.get("Project Title", "")),
-            ("Solicitation No.:", overview_data.get("Solicitation No.", "")),
-            ("Owner:", overview_data.get("Owner", "")),
-            ("Contractor:", overview_data.get("Contractor", "")),
-            ("Scope:", overview_data.get("Scope", "")),
-            ("General Risk Level:", overview_data.get("General Risk Level", "")),
-            ("Bid Model:", overview_data.get("Bid Model", "")),
-            ("Notes:", overview_data.get("Notes", ""))
-        ]
-        
-        for label, value in overview_fields:
-            if value and str(value).strip():
-                content.append(Paragraph(f"<b>{label}</b> {value}", styles['Normal']))
-                content.append(Spacer(1, 0.1 * inch))
-        
-        content.append(Spacer(1, 0.2 * inch))
-    except Exception as e:
-        print(f"Error rendering Contract Overview: {e}")
+    # Define section order (in case you want it, but actually render what's in data)
+    section_names = {
+        "contract_overview": "I. Contract Overview",
+        "administrative_and_commercial_terms": "II. Administrative & Commercial Terms",
+        "technical_and_performance_terms": "III. Technical & Performance Terms",
+        "legal_risk_and_enforcement": "IV. Legal Risk & Enforcement",
+        "regulatory_and_compliance_terms": "V. Regulatory & Compliance Terms",
+        "data_technology_and_deliverables": "VI. Data, Technology & Deliverables",
+        "supplemental_operational_risks": "VII. Supplemental Operational Risks",
+        "final_analysis": "VIII. Final Analysis"
+    }
     
-    # II. Administrative & Commercial Terms Section
-    try:
-        content.append(Paragraph("II. Administrative & Commercial Terms", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
-        
-        subsections = [
-            "Contract Term, Renewal & Extensions",
-            "Bonding, Surety, & Insurance Obligations",
-            "Retainage, Progress Payments & Final Payment Terms",
-            "Pay-When-Paid, Pay-If-Paid, or Owner Payment Contingencies",
-            "Price Escalation Clauses (Labor, Materials, Fuel, Inflation Adjustments)",
-            "Fuel Price Adjustment / Fuel Cost Caps",
-            "Change Orders, Scope Adjustments & Modifications",
-            "Termination for Convenience (Owner/Agency Right to Terminate Without Cause)",
-            "Termination for Cause / Default by Contractor",
-            "Bid Protest Procedures & Claims of Improper Award",
-            "Bid Tabulation, Competition & Award Process Requirements",
-            "Contractor Qualification, Licensing & Certification Requirements",
-            "Release Orders, Task Orders & Work Authorization Protocols",
-            "Assignment & Novation Restrictions (Transfer of Contract Rights)",
-            "Audit Rights, Recordkeeping & Document Retention Obligations",
-            "Notice Requirements & Claim Timeframes (Notice to Cure, Delay Notices, Termination Notices, etc.)"
-        ]
-        
-        admin_terms = data.get("administrative_and_commercial_terms", {})
-        for subsection in subsections:
-            if subsection in admin_terms:
-                subsection_data = admin_terms[subsection]
-                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-                content.append(Spacer(1, 0.1 * inch))
-                
-                render_clause_block(content, subsection, subsection_data, styles)
-                content.append(Spacer(1, 0.1 * inch))
-    except Exception as e:
-        print(f"Error rendering Administrative & Commercial Terms: {e}")
+    # Iterate through section_names to maintain order, but only render if data exists
+    first_section = True
     
-    # III. Technical & Performance Terms Section
-    try:
-        content.append(PageBreak())
-        content.append(Paragraph("III. Technical & Performance Terms", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
+    for section_key, section_title in section_names.items():
+        section_data = data.get(section_key)
         
-        subsections = [
-            "Scope of Work (Work Inclusions, Exclusions & Defined Deliverables)",
-            "Performance Schedule, Time for Completion & Critical Path Obligations",
-            "Delays of Any Kind (Force Majeure, Acts of God, Weather, Owner-Caused, Unforeseen Events)",
-            "Suspension of Work, Work Stoppages & Agency Directives",
-            "Submittals, Documentation & Approval Requirements",
-            "Emergency & Contingency Work Obligations",
-            "Permits, Licensing & Regulatory Approvals for Work",
-            "Warranty, Guarantee & Defects Liability Periods",
-            "Use of APS Tools, Equipment, Materials or Supplies",
-            "Owner-Supplied Support, Utilities & Site Access Provisions",
-            "Field Ticket, Daily Work Log & Documentation Requirements",
-            "Mobilization & Demobilization Provisions",
-            "Utility Coordination, Locate Risk & Conflict Avoidance",
-            "Delivery Deadlines, Milestone Dates, Substantial & Final Completion Standards",
-            "Punch List, Closeout Procedures & Acceptance of Work",
-            "Worksite Coordination, Access Restrictions & Sequencing Obligations",
-            "Deliverables, Digital Submissions & Documentation Standards"
-        ]
+        # Skip sections that don't exist or are empty
+        if section_data is None or (isinstance(section_data, (dict, list)) and not section_data):
+            continue
         
-        tech_terms = data.get("technical_and_performance_terms", {})
-        for subsection in subsections:
-            if subsection in tech_terms:
-                subsection_data = tech_terms[subsection]
-                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-                content.append(Spacer(1, 0.1 * inch))
-                
-                render_clause_block(content, subsection, subsection_data, styles)
-                content.append(Spacer(1, 0.1 * inch))
-    except Exception as e:
-        print(f"Error rendering Technical & Performance Terms: {e}")
-    
-    # IV. Legal Risk & Enforcement Section
-    try:
-        content.append(PageBreak())
-        content.append(Paragraph("IV. Legal Risk & Enforcement", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
+        # Add page break before sections (except first)
+        if not first_section:
+            content.append(PageBreak())
+        first_section = False
         
-        subsections = [
-            "Indemnification, Defense & Hold Harmless Provisions",
-            "Duty to Defend vs. Indemnify Scope Clarifications",
-            "Limitations of Liability, Damage Caps & Waivers of Consequential Damages",
-            "Insurance Coverage, Additional Insured & Waiver of Subrogation Clauses",
-            "Dispute Resolution (Mediation, Arbitration, Litigation)",
-            "Flow-Down Clauses (Prime-to-Subcontract Risk Pass-Through)",
-            "Subcontracting Restrictions, Approval & Substitution Requirements",
-            "Background Screening, Security Clearance & Worker Eligibility Requirements",
-            "Safety Standards, OSHA Compliance & Site-Specific Safety Obligations",
-            "Site Conditions, Differing Site Conditions & Changed Circumstances Clauses",
-            "Environmental Hazards, Waste Disposal & Hazardous Materials Provisions",
-            "Conflicting Documents / Order of Precedence Clauses",
-            "Setoff & Withholding Rights (Owner's Right to Deduct or Withhold Payment)"
-        ]
-        
-        legal_risk = data.get("legal_risk_and_enforcement", {})
-        for subsection in subsections:
-            if subsection in legal_risk:
-                subsection_data = legal_risk[subsection]
-                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-                content.append(Spacer(1, 0.1 * inch))
-                
-                render_clause_block(content, subsection, subsection_data, styles)
-                content.append(Spacer(1, 0.1 * inch))
-    except Exception as e:
-        print(f"Error rendering Legal Risk & Enforcement: {e}")
-    
-    # V. Regulatory & Compliance Terms Section
-    try:
-        content.append(PageBreak())
-        content.append(Paragraph("V. Regulatory & Compliance Terms", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
-        
-        subsections = [
-            "Certified Payroll, Recordkeeping & Reporting Obligations",
-            "Prevailing Wage, Davis-Bacon & Federal/State Wage Compliance",
-            "EEO, Non-Discrimination, MWBE/DBE Participation Requirements",
-            "Anti-Lobbying / Cone of Silence Provisions",
-            "Apprenticeship, Training & Workforce Development Requirements",
-            "Immigration / E-Verify Compliance Obligations",
-            "Worker Classification & Independent Contractor Restrictions",
-            "Drug-Free Workplace Programs & Substance Testing Requirements"
-        ]
-        
-        regulatory_terms = data.get("regulatory_and_compliance_terms", {})
-        for subsection in subsections:
-            if subsection in regulatory_terms:
-                subsection_data = regulatory_terms[subsection]
-                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-                content.append(Spacer(1, 0.1 * inch))
-                
-                render_clause_block(content, subsection, subsection_data, styles)
-                content.append(Spacer(1, 0.1 * inch))
-    except Exception as e:
-        print(f"Error rendering Regulatory & Compliance Terms: {e}")
-    
-    # VI. Data, Technology & Deliverables Section
-    try:
-        content.append(PageBreak())
-        content.append(Paragraph("VI. Data, Technology & Deliverables", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
-        
-        subsections = [
-            "Data Ownership, Access & Rights to Digital Deliverables",
-            "AI / Technology Use Restrictions (Automation, Digital Tools, Proprietary Systems)",
-            "Digital Surveillance, GIS-Tagged Deliverables & Monitoring Requirements",
-            "GIS, Digital Workflow Integration & Electronic Submittals",
-            "Confidentiality, Data Security & Records Retention Obligations",
-            "Intellectual Property, Licensing & Ownership of Work Product",
-            "Cybersecurity Standards, Breach Notification & IT System Use Policies"
-        ]
-        
-        data_tech = data.get("data_technology_and_deliverables", {})
-        for subsection in subsections:
-            if subsection in data_tech:
-                subsection_data = data_tech[subsection]
-                content.append(Paragraph(f"<b>{subsection}</b>", styles['Heading2']))
-                content.append(Spacer(1, 0.1 * inch))
-                
-                render_clause_block(content, subsection, subsection_data, styles)
-                content.append(Spacer(1, 0.1 * inch))
-    except Exception as e:
-        print(f"Error rendering Data, Technology & Deliverables: {e}")
-    
-    # VII. Supplemental Operational Risks Section
-    try:
-        content.append(PageBreak())
-        content.append(Paragraph("VII. Supplemental Operational Risks", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
-        
-        supplemental_risks = data.get("supplemental_operational_risks", [])
-        for i, risk in enumerate(supplemental_risks[:9]):  # Max 9 per schema
-            content.append(Paragraph(f"<b>Supplemental Risk {i+1}</b>", styles['Heading2']))
-            content.append(Spacer(1, 0.1 * inch))
-            
-            render_clause_block(content, f"Risk {i+1}", risk, styles)
-            content.append(Spacer(1, 0.1 * inch))
-    except Exception as e:
-        print(f"Error rendering Supplemental Operational Risks: {e}")
-    
-    # VIII. Final Analysis Section
-    try:
-        content.append(PageBreak())
-        content.append(Paragraph("VIII. Final Analysis", styles['Heading1']))
-        content.append(Spacer(1, 0.2 * inch))
-        
-        final_analysis = data.get("final_analysis", {})
-        risk_summary_data = final_analysis.get("Final Redline Risk Summary and Recommendations", [])
-        
-        if risk_summary_data and isinstance(risk_summary_data, list):
-            content.append(Paragraph("<b>Final Redline Risk Summary and Recommendations</b>", styles['Normal']))
-            content.append(Spacer(1, 0.1 * inch))
-            
-            # Build table data
-            table_data = [["Risk Area", "Risk Summary", "APS Redline Position"]]
-            
-            for row in risk_summary_data:
-                if isinstance(row, dict):
-                    risk_area = row.get("Risk Area", "")
-                    risk_summary = row.get("Risk Summary", "")
-                    redline_pos = row.get("APS Redline Position", "")
-                    
-                    table_data.append([risk_area, risk_summary, redline_pos])
-            
-            if len(table_data) > 1:  # Only create table if there's data
-                # Create table with proper styling
-                table = Table(table_data, colWidths=[1.5*inch, 2.5*inch, 2*inch])
-                table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 10),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                    ('FONTSIZE', (0, 1), (-1, -1), 9),
-                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
-                ]))
-                content.append(table)
-            
+        try:
+            # Render section title
+            content.append(Paragraph(section_title, styles['Heading1']))
             content.append(Spacer(1, 0.2 * inch))
-    except Exception as e:
-        print(f"Error rendering Final Analysis: {e}")
+            
+            # Handle special cases
+            if section_key == "contract_overview":
+                # Contract overview is simple key-value pairs
+                if isinstance(section_data, dict):
+                    for key, value in section_data.items():
+                        if value and str(value).strip():
+                            content.append(Paragraph(f"<b>{key}:</b> {value}", styles['Normal']))
+                            content.append(Spacer(1, 0.1 * inch))
+            
+            elif section_key == "supplemental_operational_risks":
+                # Supplemental risks is an array of ClauseBlocks
+                if isinstance(section_data, list):
+                    for i, risk_item in enumerate(section_data[:9]):
+                        if not has_clause_content(risk_item):
+                            continue
+                        
+                        content.append(Paragraph(f"<b>Supplemental Risk {i+1}</b>", styles['Heading2']))
+                        content.append(Spacer(1, 0.1 * inch))
+                        render_clause_block(content, risk_item, styles)
+                        content.append(Spacer(1, 0.1 * inch))
+            
+            elif section_key == "final_analysis":
+                # Final analysis is a special structure with a table
+                risk_summary_data = section_data.get("Final Redline Risk Summary and Recommendations", [])
+                
+                if risk_summary_data and isinstance(risk_summary_data, list):
+                    content.append(Paragraph("<b>Final Redline Risk Summary and Recommendations</b>", styles['Normal']))
+                    content.append(Spacer(1, 0.1 * inch))
+                    
+                    # Build table data
+                    table_data = [["Risk Area", "Risk Summary", "APS Redline Position"]]
+                    
+                    for row in risk_summary_data:
+                        if isinstance(row, dict):
+                            risk_area = row.get("Risk Area", "")
+                            risk_summary = row.get("Risk Summary", "")
+                            redline_pos = row.get("APS Redline Position", "")
+                            
+                            if any([risk_area, risk_summary, redline_pos]):
+                                table_data.append([risk_area, risk_summary, redline_pos])
+                    
+                    if len(table_data) > 1:  # Only create table if there's data
+                        # Create table with proper styling
+                        table = Table(table_data, colWidths=[1.5*inch, 2.5*inch, 2*inch])
+                        table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0, 0), (-1, 0), 10),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                            ('FONTSIZE', (0, 1), (-1, -1), 9),
+                            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
+                        ]))
+                        content.append(table)
+                    
+                    content.append(Spacer(1, 0.2 * inch))
+            
+            else:
+                # Standard sections with subsections containing ClauseBlocks
+                if isinstance(section_data, dict):
+                    for subsection_key, subsection_item in section_data.items():
+                        if not has_clause_content(subsection_item):
+                            continue
+                        
+                        # Render subsection header only if there's content
+                        content.append(Paragraph(f"<b>{subsection_key}</b>", styles['Heading2']))
+                        content.append(Spacer(1, 0.1 * inch))
+                        
+                        render_clause_block(content, subsection_item, styles)
+                        content.append(Spacer(1, 0.1 * inch))
+        
+        except Exception as e:
+            print(f"Error rendering {section_title}: {e}")
     
     # Build PDF
     try:
@@ -452,9 +316,26 @@ if __name__ == "__main__":
                 "Harmful Language / Policy Conflicts": [
                     "Sole discretion language limits business planning certainty"
                 ]
+            },
+            "Bonding, Surety, & Insurance Obligations": {}
+        },
+        "technical_and_performance_terms": {
+            "Scope of Work (Work Inclusions, Exclusions & Defined Deliverables)": {
+                "Clause Language": "Contractor shall perform all work as shown on the Plans and as described in the Specifications.",
+                "Clause Summary": "Standard scope of work clause requiring adherence to contract documents",
+                "Risk Triggers Identified": [
+                    "Undefined scope can lead to disputes"
+                ],
+                "Flow-Down Obligations": [],
+                "Redline Recommendations": [
+                    {
+                        "action": "insert",
+                        "text": "Add detailed list of deliverables and acceptance criteria"
+                    }
+                ],
+                "Harmful Language / Policy Conflicts": []
             }
         },
-        "technical_and_performance_terms": {},
         "legal_risk_and_enforcement": {},
         "regulatory_and_compliance_terms": {},
         "data_technology_and_deliverables": {},
@@ -465,6 +346,11 @@ if __name__ == "__main__":
                     "Risk Area": "Contract Term",
                     "Risk Summary": "18-month fixed term with discretionary extensions creates business continuity risk",
                     "APS Redline Position": "Request 2-year guaranteed term with documented extension procedure"
+                },
+                {
+                    "Risk Area": "Scope of Work",
+                    "Risk Summary": "Generic scope language could lead to interpretation disputes",
+                    "APS Redline Position": "Add detailed deliverables and acceptance criteria"
                 }
             ]
         }
