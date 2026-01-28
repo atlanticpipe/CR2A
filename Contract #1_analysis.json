@@ -5,66 +5,66 @@
     "Solicitation No.": "IFB22-0161-3",
     "Owner": "City of Orlando",
     "Contractor": "ATLANTIC PIPE SERVICES, LLC",
-    "Scope": "Amendment to Agreement for sewer lining and rehabilitation services.",
+    "Scope": "Amendment to Agreement for sanitary sewer lining and manhole rehabilitation services.",
     "General Risk Level": "Medium",
-    "Bid Model": "",
-    "Notes": "Price increase requested due to inflation and material costs."
+    "Bid Model": "Amendment",
+    "Notes": "Includes price increase due to inflation and material costs."
   },
   "administrative_and_commercial_terms": {
     "Term of Agreement": {
-      "Clause Language": "The Term of the Agreement is hereby renewed from July, 18, 2025 to July, 17, 2026.",
-      "Clause Summary": "The contract term is extended by one year.",
-      "Risk Triggers Identified": "Potential for increased costs due to extended term.",
+      "Clause Language": "The Term of the Agreement is hereby renewed from July, 18, 2025 to July, 17, 2026, with price increase as seen in Exhibit “1”.",
+      "Clause Summary": "The agreement term is extended by one year with a price increase.",
+      "Risk Triggers Identified": "Potential for disputes over price increases.",
       "Flow-Down Obligations": "",
       "Redline Recommendations": "Replace 'July, 18, 2025' with 'July 18, 2025'.",
       "Harmful Language / Policy Conflicts": ""
     },
     "Human Trafficking Affidavit": {
-      "Clause Language": "Contractor hereby represents, warrants, and certifies that Contractor does not use coercion for labor or services.",
-      "Clause Summary": "Contractor certifies compliance with human trafficking laws.",
-      "Risk Triggers Identified": "Risk of contract termination if false certification is submitted.",
-      "Flow-Down Obligations": "",
-      "Redline Recommendations": "Insert 'and has provided the Human Trafficking Affidavit attached hereto as Attachment A.'",
+      "Clause Language": "This Contract is subject to the terms, conditions, provisions and requirements of Section 787.06 of the Florida Statutes.",
+      "Clause Summary": "Contractor must comply with human trafficking laws.",
+      "Risk Triggers Identified": "Non-compliance could lead to contract termination.",
+      "Flow-Down Obligations": "Contractor must ensure subcontractors comply.",
+      "Redline Recommendations": "Insert 'and must provide proof of compliance' after 'requirements of Section 787.06'.",
       "Harmful Language / Policy Conflicts": ""
     }
   },
   "technical_and_performance_terms": {
     "E-Verify": {
-      "Clause Language": "Contractor represents and warrants that it has registered with and uses the E-Verify System.",
-      "Clause Summary": "Contractor must verify work authorization of employees.",
-      "Risk Triggers Identified": "Non-compliance could lead to penalties.",
-      "Flow-Down Obligations": "Subcontractors must also comply with E-Verify requirements.",
-      "Redline Recommendations": "Insert 'and shall continue to do so at all times during the term of the contract.'",
+      "Clause Language": "Contractor represents and warrants that it has registered with and uses the E-Verify System to verify the work authorization status of all newly hired employees.",
+      "Clause Summary": "Contractor must use E-Verify for employee verification.",
+      "Risk Triggers Identified": "Failure to use E-Verify could result in penalties.",
+      "Flow-Down Obligations": "Subcontractors must also use E-Verify.",
+      "Redline Recommendations": "Delete 'and shall continue to do so at all times during the term of the contract.'",
       "Harmful Language / Policy Conflicts": ""
     }
   },
   "legal_risk_and_enforcement": {
     "Scrutinized Company Prohibition": {
       "Clause Language": "Contractor certifies that it is not on the Scrutinized Companies that Boycott Israel List.",
-      "Clause Summary": "Contractor must not engage in boycotts against Israel.",
-      "Risk Triggers Identified": "Risk of contract termination if found in violation.",
+      "Clause Summary": "Contractor must not be on certain prohibited lists.",
+      "Risk Triggers Identified": "Being on the list could lead to contract termination.",
       "Flow-Down Obligations": "",
-      "Redline Recommendations": "Delete 'and is not engaged in a boycott of Israel.'",
+      "Redline Recommendations": "Insert 'and must provide evidence of compliance' after 'not on the Scrutinized Companies'.",
       "Harmful Language / Policy Conflicts": ""
     }
   },
   "regulatory_and_compliance_terms": {
     "Entities of Foreign Countries of Concern Affidavit": {
       "Clause Language": "Contractor shall provide the City with an affidavit signed by an officer attesting that Contractor is not owned by the government of a foreign country of concern.",
-      "Clause Summary": "Contractor must certify its ownership status.",
-      "Risk Triggers Identified": "False certification could lead to contract termination.",
+      "Clause Summary": "Contractor must certify it is not owned by a foreign government.",
+      "Risk Triggers Identified": "Non-compliance could lead to contract invalidation.",
       "Flow-Down Obligations": "",
-      "Redline Recommendations": "Insert 'and that Contractor is not organized under the laws of and does not have its principal place of business in a foreign country of concern.'",
+      "Redline Recommendations": "Replace 'shall provide' with 'must provide'.",
       "Harmful Language / Policy Conflicts": ""
     }
   },
   "data_technology_and_deliverables": {
-    "Price Increase Notification": {
+    "Price Increase List": {
       "Clause Language": "APS is requesting an 8.28% price increase for all line items on the contract.",
-      "Clause Summary": "Contractor requests a price adjustment due to inflation.",
-      "Risk Triggers Identified": "Potential pushback from the City regarding price increases.",
+      "Clause Summary": "Contractor is requesting a price increase due to inflation.",
+      "Risk Triggers Identified": "Potential pushback from the City on price increases.",
       "Flow-Down Obligations": "",
-      "Redline Recommendations": "Insert 'for all line items on the contract, other than CIPP Lining.'",
+      "Redline Recommendations": "Insert 'due to increased material costs' after 'price increase'.",
       "Harmful Language / Policy Conflicts": ""
     }
   },
@@ -74,12 +74,12 @@
       {
         "Risk Area": "Financial",
         "Risk Summary": "Price increases may affect contract viability.",
-        "Redline Recommendation Summary": "Recommended to negotiate terms for price adjustments."
+        "Redline Recommendation Summary": "Consider capping price increases to a certain percentage."
       },
       {
         "Risk Area": "Compliance",
-        "Risk Summary": "Potential risks associated with false certifications.",
-        "Redline Recommendation Summary": "Recommended to enhance verification processes."
+        "Risk Summary": "Non-compliance with statutory requirements could lead to termination.",
+        "Redline Recommendation Summary": "Ensure all compliance clauses are clearly defined."
       }
     ]
   }

@@ -1,21 +1,15 @@
+# ============================================================================
+# Contract Analysis Tool - .gitignore
+# ============================================================================
+
+# ============================================================================
 # Python
+# ============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -28,49 +22,140 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE
+# ============================================================================
+# Build Artifacts - DO NOT COMMIT
+# ============================================================================
+# PyInstaller outputs
+build/
+dist/
+*.spec
+
+# Executables - DO NOT COMMIT (distribute via GitHub Releases)
+*.exe
+*.dll
+*.so
+*.dylib
+*.msi
+*.app
+
+# Installers
+installers/
+release/
+
+# ============================================================================
+# IDE and Editor
+# ============================================================================
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+Thumbs.db
 
-# Logs
+# ============================================================================
+# Logs and Temporary Files
+# ============================================================================
 *.log
 error.log
-
-# PyInstaller
-*.spec
-build/
-dist/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Project Specific
-contracts/*.pdf
-*.bak
-
-# Temporary files
 *.tmp
 *.temp
 ~$*
 
-# API Keys (safety check - should be in env vars)
+# ============================================================================
+# API Keys and Secrets - NEVER COMMIT
+# ============================================================================
 .env
 .env.local
+.env.*.local
 *.key
+secrets.json
+config.local.json
 
-# Output files
-output/*.pdf
-output/*.json
+# ============================================================================
+# Test and Sample Files
+# ============================================================================
+# Sample contracts (keep one for testing, ignore others)
+Contract*.pdf
+!Contract\ #1.pdf
+Contract*_analysis.json
+Contract*_analysis.pdf
+
+# Test outputs
+test_*.pdf
+test_*.json
+sample_*.pdf
+sample_*.json
+
+# ============================================================================
+# Output Directories
+# ============================================================================
+output/
 results/
+reports/
+contracts/
 
-# Build artifacts
-*.exe
-*.msi
-*.nsi.bak
+# ============================================================================
+# Testing
+# ============================================================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+.hypothesis/
+
+# ============================================================================
+# Documentation Build
+# ============================================================================
+docs/_build/
+site/
+
+# ============================================================================
+# OS Generated
+# ============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ============================================================================
+# Backup Files
+# ============================================================================
+*.bak
+*.backup
+*~
+*.swp
+*.swo
+
+# ============================================================================
+# Compressed Files (if used for distribution)
+# ============================================================================
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# ============================================================================
+# Project Specific
+# ============================================================================
+# Keep the CLI spec file if you want to version it
+# Uncomment the line below to ignore it:
+# ContractAnalysisCLI.spec
+
+# Ignore all analysis outputs except the sample
+*_analysis.json
+*_analysis.pdf
+
+# ============================================================================
+# Development Tools
+# ============================================================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/

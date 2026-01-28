@@ -1,124 +1,251 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://atlanticpipeservices.com/schemas/contract-analysis-v1.json",
-  "title": "Contract Analysis Output Schema",
-  "description": "JSON Schema for APS Contract Risk & Compliance Summary output",
-  "version": "1.0",
+  "$id": "https://your-org/schemas/output_schemas_v1.json",
+  "title": "Clause Risk & Compliance Summary (Full Document)",
   "type": "object",
-  "required": [
-    "schema_version",
-    "contract_overview",
-    "administrative_and_commercial_terms",
-    "technical_and_performance_terms",
-    "legal_risk_and_enforcement",
-    "regulatory_and_compliance_terms",
-    "data_technology_and_deliverables",
-    "supplemental_operational_risks"
-  ],
   "additionalProperties": false,
+  "required": ["schema_version", "contract_overview", "administrative_and_commercial_terms", "technical_and_performance_terms", "legal_risk_and_enforcement", "regulatory_and_compliance_terms", "data_technology_and_deliverables", "supplemental_operational_risks", "final_analysis"],
+  "$comment": "Enforces Sections I–VIII exactly as in the provided template.",
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "v1.0",
-      "description": "Schema version identifier"
+      "pattern": "^v1\\.\\d+\\.\\d+$",
+      "default": "v1.0.0",
+      "$comment": "Semantic versioning for downstream validation gates."
     },
+
     "contract_overview": {
       "type": "object",
-      "description": "Section I: High-level contract information",
-      "required": [
-        "Project Title",
-        "Solicitation No.",
-        "Owner",
-        "Contractor",
-        "Scope",
-        "General Risk Level",
-        "Bid Model",
-        "Notes"
-      ],
       "additionalProperties": false,
+      "$comment": "Section I. Contract Overview",
+      "required": ["Project Title", "Solicitation No.", "Owner", "Contractor", "Scope", "General Risk Level", "Bid Model", "Notes"],
       "properties": {
-        "Project Title": {
-          "type": "string",
-          "description": "Name of the project or contract"
-        },
-        "Solicitation No.": {
-          "type": "string",
-          "description": "Solicitation or contract number"
-        },
-        "Owner": {
-          "type": "string",
-          "description": "Contract owner or agency"
-        },
-        "Contractor": {
-          "type": "string",
-          "description": "Contractor name (typically APS)"
-        },
-        "Scope": {
-          "type": "string",
-          "description": "Brief description of work scope"
-        },
+        "Project Title": { "type": "string", "minLength": 1 },
+        "Solicitation No.": { "type": "string" },
+        "Owner": { "type": "string", "minLength": 1 },
+        "Contractor": { "type": "string", "minLength": 1 },
+        "Scope": { "type": "string", "minLength": 1 },
         "General Risk Level": {
           "type": "string",
-          "enum": ["Low", "Medium", "High", "Critical"],
-          "description": "Overall risk assessment"
+          "enum": ["Low", "Medium", "High", "Critical"]
         },
         "Bid Model": {
           "type": "string",
-          "description": "Type of bid or contract model"
+          "enum": ["Lump Sum", "Unit Price", "Cost Plus", "Time & Materials", "GMP", "Design-Build", "Other"]
         },
-        "Notes": {
-          "type": "string",
-          "description": "Additional notes or observations"
-        }
+        "Notes": { "type": "string" }
       }
     },
+
     "administrative_and_commercial_terms": {
       "type": "object",
-      "description": "Section II: Administrative and commercial contract terms",
-      "additionalProperties": {
-        "$ref": "#/$defs/ClauseBlock"
+      "additionalProperties": false,
+      "$comment": "Section II. Administrative & Commercial Terms",
+      "required": [
+        "Contract Term, Renewal & Extensions",
+        "Bonding, Surety, & Insurance Obligations",
+        "Retainage, Progress Payments & Final Payment Terms",
+        "Pay-When-Paid, Pay-If-Paid, or Owner Payment Contingencies",
+        "Price Escalation Clauses (Labor, Materials, Fuel, Inflation Adjustments)",
+        "Fuel Price Adjustment / Fuel Cost Caps",
+        "Change Orders, Scope Adjustments & Modifications",
+        "Termination for Convenience (Owner/Agency Right to Terminate Without Cause)",
+        "Termination for Cause / Default by Contractor",
+        "Bid Protest Procedures & Claims of Improper Award",
+        "Bid Tabulation, Competition & Award Process Requirements",
+        "Contractor Qualification, Licensing & Certification Requirements",
+        "Release Orders, Task Orders & Work Authorization Protocols",
+        "Assignment & Novation Restrictions (Transfer of Contract Rights)",
+        "Audit Rights, Recordkeeping & Document Retention Obligations",
+        "Notice Requirements & Claim Timeframes (Notice to Cure, Delay Notices, Termination Notices, etc.)"
+      ],
+      "properties": {
+        "Contract Term, Renewal & Extensions": { "$ref": "#/$defs/ClauseBlock" },
+        "Bonding, Surety, & Insurance Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Retainage, Progress Payments & Final Payment Terms": { "$ref": "#/$defs/ClauseBlock" },
+        "Pay-When-Paid, Pay-If-Paid, or Owner Payment Contingencies": { "$ref": "#/$defs/ClauseBlock" },
+        "Price Escalation Clauses (Labor, Materials, Fuel, Inflation Adjustments)": { "$ref": "#/$defs/ClauseBlock" },
+        "Fuel Price Adjustment / Fuel Cost Caps": { "$ref": "#/$defs/ClauseBlock" },
+        "Change Orders, Scope Adjustments & Modifications": { "$ref": "#/$defs/ClauseBlock" },
+        "Termination for Convenience (Owner/Agency Right to Terminate Without Cause)": { "$ref": "#/$defs/ClauseBlock" },
+        "Termination for Cause / Default by Contractor": { "$ref": "#/$defs/ClauseBlock" },
+        "Bid Protest Procedures & Claims of Improper Award": { "$ref": "#/$defs/ClauseBlock" },
+        "Bid Tabulation, Competition & Award Process Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "Contractor Qualification, Licensing & Certification Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "Release Orders, Task Orders & Work Authorization Protocols": { "$ref": "#/$defs/ClauseBlock" },
+        "Assignment & Novation Restrictions (Transfer of Contract Rights)": { "$ref": "#/$defs/ClauseBlock" },
+        "Audit Rights, Recordkeeping & Document Retention Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Notice Requirements & Claim Timeframes (Notice to Cure, Delay Notices, Termination Notices, etc.)": { "$ref": "#/$defs/ClauseBlock" }
       }
     },
+
     "technical_and_performance_terms": {
       "type": "object",
-      "description": "Section III: Technical and performance requirements",
-      "additionalProperties": {
-        "$ref": "#/$defs/ClauseBlock"
+      "additionalProperties": false,
+      "$comment": "Section III. Technical & Performance Terms",
+      "required": [
+        "Scope of Work (Work Inclusions, Exclusions & Defined Deliverables)",
+        "Performance Schedule, Time for Completion & Critical Path Obligations",
+        "Delays of Any Kind (Force Majeure, Acts of God, Weather, Owner-Caused, Unforeseen Events)",
+        "Suspension of Work, Work Stoppages & Agency Directives",
+        "Submittals, Documentation & Approval Requirements",
+        "Emergency & Contingency Work Obligations",
+        "Permits, Licensing & Regulatory Approvals for Work",
+        "Warranty, Guarantee & Defects Liability Periods",
+        "Use of APS Tools, Equipment, Materials or Supplies",
+        "Owner-Supplied Support, Utilities & Site Access Provisions",
+        "Field Ticket, Daily Work Log & Documentation Requirements",
+        "Mobilization & Demobilization Provisions",
+        "Utility Coordination, Locate Risk & Conflict Avoidance",
+        "Delivery Deadlines, Milestone Dates, Substantial & Final Completion Standards",
+        "Punch List, Closeout Procedures & Acceptance of Work",
+        "Worksite Coordination, Access Restrictions & Sequencing Obligations",
+        "Deliverables, Digital Submissions & Documentation Standards"
+      ],
+      "properties": {
+        "Scope of Work (Work Inclusions, Exclusions & Defined Deliverables)": { "$ref": "#/$defs/ClauseBlock" },
+        "Performance Schedule, Time for Completion & Critical Path Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Delays of Any Kind (Force Majeure, Acts of God, Weather, Owner-Caused, Unforeseen Events)": { "$ref": "#/$defs/ClauseBlock" },
+        "Suspension of Work, Work Stoppages & Agency Directives": { "$ref": "#/$defs/ClauseBlock" },
+        "Submittals, Documentation & Approval Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "Emergency & Contingency Work Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Permits, Licensing & Regulatory Approvals for Work": { "$ref": "#/$defs/ClauseBlock" },
+        "Warranty, Guarantee & Defects Liability Periods": { "$ref": "#/$defs/ClauseBlock" },
+        "Use of APS Tools, Equipment, Materials or Supplies": { "$ref": "#/$defs/ClauseBlock" },
+        "Owner-Supplied Support, Utilities & Site Access Provisions": { "$ref": "#/$defs/ClauseBlock" },
+        "Field Ticket, Daily Work Log & Documentation Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "Mobilization & Demobilization Provisions": { "$ref": "#/$defs/ClauseBlock" },
+        "Utility Coordination, Locate Risk & Conflict Avoidance": { "$ref": "#/$defs/ClauseBlock" },
+        "Delivery Deadlines, Milestone Dates, Substantial & Final Completion Standards": { "$ref": "#/$defs/ClauseBlock" },
+        "Punch List, Closeout Procedures & Acceptance of Work": { "$ref": "#/$defs/ClauseBlock" },
+        "Worksite Coordination, Access Restrictions & Sequencing Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Deliverables, Digital Submissions & Documentation Standards": { "$ref": "#/$defs/ClauseBlock" }
       }
     },
+
     "legal_risk_and_enforcement": {
       "type": "object",
-      "description": "Section IV: Legal risks and enforcement provisions",
-      "additionalProperties": {
-        "$ref": "#/$defs/ClauseBlock"
+      "additionalProperties": false,
+      "$comment": "Section IV. Legal Risk & Enforcement",
+      "required": [
+        "Indemnification, Defense & Hold Harmless Provisions",
+        "Duty to Defend vs. Indemnify Scope Clarifications",
+        "Limitations of Liability, Damage Caps & Waivers of Consequential Damages",
+        "Insurance Coverage, Additional Insured & Waiver of Subrogation Clauses",
+        "Dispute Resolution (Mediation, Arbitration, Litigation)",
+        "Flow-Down Clauses (Prime-to-Subcontract Risk Pass-Through)",
+        "Subcontracting Restrictions, Approval & Substitution Requirements",
+        "Background Screening, Security Clearance & Worker Eligibility Requirements",
+        "Safety Standards, OSHA Compliance & Site-Specific Safety Obligations",
+        "Site Conditions, Differing Site Conditions & Changed Circumstances Clauses",
+        "Environmental Hazards, Waste Disposal & Hazardous Materials Provisions",
+        "Conflicting Documents / Order of Precedence Clauses",
+        "Setoff & Withholding Rights (Owner’s Right to Deduct or Withhold Payment)"
+      ],
+      "properties": {
+        "Indemnification, Defense & Hold Harmless Provisions": { "$ref": "#/$defs/ClauseBlock" },
+        "Duty to Defend vs. Indemnify Scope Clarifications": { "$ref": "#/$defs/ClauseBlock" },
+        "Limitations of Liability, Damage Caps & Waivers of Consequential Damages": { "$ref": "#/$defs/ClauseBlock" },
+        "Insurance Coverage, Additional Insured & Waiver of Subrogation Clauses": { "$ref": "#/$defs/ClauseBlock" },
+        "Dispute Resolution (Mediation, Arbitration, Litigation)": { "$ref": "#/$defs/ClauseBlock" },
+        "Flow-Down Clauses (Prime-to-Subcontract Risk Pass-Through)": { "$ref": "#/$defs/ClauseBlock" },
+        "Subcontracting Restrictions, Approval & Substitution Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "Background Screening, Security Clearance & Worker Eligibility Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "Safety Standards, OSHA Compliance & Site-Specific Safety Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Site Conditions, Differing Site Conditions & Changed Circumstances Clauses": { "$ref": "#/$defs/ClauseBlock" },
+        "Environmental Hazards, Waste Disposal & Hazardous Materials Provisions": { "$ref": "#/$defs/ClauseBlock" },
+        "Conflicting Documents / Order of Precedence Clauses": { "$ref": "#/$defs/ClauseBlock" },
+        "Setoff & Withholding Rights (Owner’s Right to Deduct or Withhold Payment)": { "$ref": "#/$defs/ClauseBlock" }
       }
     },
+
     "regulatory_and_compliance_terms": {
       "type": "object",
-      "description": "Section V: Regulatory and compliance requirements",
-      "additionalProperties": {
-        "$ref": "#/$defs/ClauseBlock"
+      "additionalProperties": false,
+      "$comment": "Section V. Regulatory & Compliance Terms",
+      "required": [
+        "Certified Payroll, Recordkeeping & Reporting Obligations",
+        "Prevailing Wage, Davis-Bacon & Federal/State Wage Compliance",
+        "EEO, Non-Discrimination, MWBE/DBE Participation Requirements",
+        "Anti-Lobbying / Cone of Silence Provisions",
+        "Apprenticeship, Training & Workforce Development Requirements",
+        "Immigration / E-Verify Compliance Obligations",
+        "Worker Classification & Independent Contractor Restrictions",
+        "Drug-Free Workplace Programs & Substance Testing Requirements"
+      ],
+      "properties": {
+        "Certified Payroll, Recordkeeping & Reporting Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Prevailing Wage, Davis-Bacon & Federal/State Wage Compliance": { "$ref": "#/$defs/ClauseBlock" },
+        "EEO, Non-Discrimination, MWBE/DBE Participation Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "Anti-Lobbying / Cone of Silence Provisions": { "$ref": "#/$defs/ClauseBlock" },
+        "Apprenticeship, Training & Workforce Development Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "Immigration / E-Verify Compliance Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Worker Classification & Independent Contractor Restrictions": { "$ref": "#/$defs/ClauseBlock" },
+        "Drug-Free Workplace Programs & Substance Testing Requirements": { "$ref": "#/$defs/ClauseBlock" }
       }
     },
+
     "data_technology_and_deliverables": {
       "type": "object",
-      "description": "Section VI: Data, technology, and deliverable requirements",
-      "additionalProperties": {
-        "$ref": "#/$defs/ClauseBlock"
+      "additionalProperties": false,
+      "$comment": "Section VI. Data, Technology & Deliverables",
+      "required": [
+        "Data Ownership, Access & Rights to Digital Deliverables",
+        "AI / Technology Use Restrictions (Automation, Digital Tools, Proprietary Systems)",
+        "Digital Surveillance, GIS-Tagged Deliverables & Monitoring Requirements",
+        "GIS, Digital Workflow Integration & Electronic Submittals",
+        "Confidentiality, Data Security & Records Retention Obligations",
+        "Intellectual Property, Licensing & Ownership of Work Product",
+        "Cybersecurity Standards, Breach Notification & IT System Use Policies"
+      ],
+      "properties": {
+        "Data Ownership, Access & Rights to Digital Deliverables": { "$ref": "#/$defs/ClauseBlock" },
+        "AI / Technology Use Restrictions (Automation, Digital Tools, Proprietary Systems)": { "$ref": "#/$defs/ClauseBlock" },
+        "Digital Surveillance, GIS-Tagged Deliverables & Monitoring Requirements": { "$ref": "#/$defs/ClauseBlock" },
+        "GIS, Digital Workflow Integration & Electronic Submittals": { "$ref": "#/$defs/ClauseBlock" },
+        "Confidentiality, Data Security & Records Retention Obligations": { "$ref": "#/$defs/ClauseBlock" },
+        "Intellectual Property, Licensing & Ownership of Work Product": { "$ref": "#/$defs/ClauseBlock" },
+        "Cybersecurity Standards, Breach Notification & IT System Use Policies": { "$ref": "#/$defs/ClauseBlock" }
       }
     },
+
     "supplemental_operational_risks": {
       "type": "array",
-      "description": "Section VII: Additional operational risks identified",
-      "items": {
-        "$ref": "#/$defs/ClauseBlock"
+      "maxItems": 9,
+      "$comment": "Section VII. Supplemental Operational Risks – up to 9 entries as per template placeholders.",
+      "items": { "$ref": "#/$defs/ClauseBlock" }
+    },
+
+    "final_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "$comment": "Section VIII. Final Analysis",
+      "required": ["Final Redline Risk Summary and Recommendations"],
+      "properties": {
+        "Final Redline Risk Summary and Recommendations": {
+          "type": "array",
+          "minItems": 1,
+          "$comment": "Each row in the table: Risk Area, Risk Summary, APS Redline Position.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["Risk Area", "Risk Summary", "APS Redline Position"],
+            "properties": {
+              "Risk Area": { "type": "string", "minLength": 1 },
+              "Risk Summary": { "type": "string", "minLength": 1 },
+              "APS Redline Position": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
       }
     }
   },
+
   "$defs": {
     "ClauseBlock": {
       "type": "object",
-      "description": "Standard clause analysis block",
+      "additionalProperties": false,
+      "$comment": "Reusable block used for every clause in the template.",
       "required": [
         "Clause Language",
         "Clause Summary",
@@ -127,51 +254,53 @@
         "Redline Recommendations",
         "Harmful Language / Policy Conflicts"
       ],
-      "additionalProperties": false,
       "properties": {
         "Clause Language": {
           "type": "string",
-          "description": "Exact text of the contract clause"
+          "minLength": 1,
+          "$comment": "Verbatim or quoted clause text."
         },
         "Clause Summary": {
           "type": "string",
-          "description": "Plain language summary of the clause"
+          "minLength": 1,
+          "$comment": "Plain-English summary of the clause."
         },
         "Risk Triggers Identified": {
-          "type": "string",
-          "description": "Specific risks identified in this clause"
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": false
         },
         "Flow-Down Obligations": {
-          "type": "string",
-          "description": "Requirements that must be passed to subcontractors"
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         },
         "Redline Recommendations": {
-          "type": "string",
-          "description": "Recommended changes to the contract language (must include at least one recommendation)"
-        },
-        "Harmful Language / Policy Conflicts": {
-          "type": "string",
-          "description": "Language that conflicts with company policy or creates unacceptable risk"
-        },
-        "provenance": {
-          "type": "object",
-          "description": "Optional source tracking information",
-          "properties": {
-            "source": {
-              "type": "string",
-              "description": "Source document name"
-            },
-            "page": {
-              "type": "integer",
-              "description": "Page number in source document"
-            },
-            "span": {
-              "type": "string",
-              "description": "Text span or location identifier"
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "text"],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["insert", "replace", "delete"],
+                "$comment": "Keeps redlines machine-actionable."
+              },
+              "text": { "type": "string", "minLength": 1 },
+              "reference": { "type": "string", "$comment": "Optional citation to policy/rule." }
             }
           }
+        },
+        "Harmful Language / Policy Conflicts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         }
-      }
+      },
+      "allOf": [
+        {
+          "$comment": "If there is clause language, a summary must be present (already required)."
+        }
+      ]
     }
   }
 }
