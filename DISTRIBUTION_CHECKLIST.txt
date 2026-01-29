@@ -1,0 +1,187 @@
+================================================================================
+DISTRIBUTION CHECKLIST
+================================================================================
+
+Use this checklist when preparing the application for distribution.
+
+
+BEFORE YOU SEND
+================================================================================
+
+[ ] Step 1: Create config.txt
+    - Create a new file named "config.txt"
+    - Put your OpenAI API key on the first line
+    - Example: sk-proj-abc123def456...
+    - Save the file
+
+[ ] Step 2: Test Locally
+    - Place config.txt in the same folder as ContractAnalysisCLI.exe
+    - Drag a test contract onto the .exe
+    - Verify it works correctly
+    - Check that the JSON output is created
+
+[ ] Step 3: Verify API Key
+    - Make sure the API key in config.txt is correct
+    - Check that your OpenAI account has sufficient credits
+    - Consider setting usage limits in OpenAI dashboard
+
+[ ] Step 4: Prepare Distribution Package
+    - Create a new folder (e.g., "ContractAnalyzer")
+    - Copy ContractAnalysisCLI.exe to the folder
+    - Copy config.txt to the folder
+    - Optional: Add USER_GUIDE.txt
+    - Optional: Add QUICK_REFERENCE.txt
+
+
+WHAT TO SEND
+================================================================================
+
+REQUIRED (2 files):
+  ✓ ContractAnalysisCLI.exe    (from dist folder)
+  ✓ config.txt                  (with your API key)
+
+OPTIONAL (helpful for users):
+  ○ USER_GUIDE.txt             (comprehensive instructions)
+  ○ QUICK_REFERENCE.txt        (one-page quick start)
+
+DO NOT SEND:
+  ✗ Source code files (.py files)
+  ✗ Build scripts (.bat files)
+  ✗ requirements_simple.txt
+  ✗ JSON schema files
+  ✗ Any other files from the repository
+
+
+PACKAGE STRUCTURE
+================================================================================
+
+Your distribution folder should look like this:
+
+  ContractAnalyzer/
+  ├── ContractAnalysisCLI.exe
+  ├── config.txt
+  ├── USER_GUIDE.txt          (optional)
+  └── QUICK_REFERENCE.txt     (optional)
+
+
+HOW TO SEND
+================================================================================
+
+[ ] Step 5: Create ZIP File
+    - Right-click on the ContractAnalyzer folder
+    - Select "Send to" → "Compressed (zipped) folder"
+    - Name it: ContractAnalyzer.zip
+
+[ ] Step 6: Choose Secure Distribution Method
+    - OneDrive / SharePoint (recommended)
+    - Secure file sharing service
+    - Direct transfer (USB drive)
+    - DO NOT email if possible (API key security)
+
+[ ] Step 7: Send with Instructions
+    - Send the ZIP file
+    - Include a message like:
+      
+      "Attached is the Contract Analysis Tool. Extract the ZIP file
+       and see USER_GUIDE.txt for complete instructions. The basic
+       usage is: drag a contract PDF onto ContractAnalysisCLI.exe
+       and wait for the analysis to complete."
+
+
+AFTER YOU SEND
+================================================================================
+
+[ ] Step 8: Monitor Usage
+    - Check OpenAI usage dashboard regularly
+    - Watch for unusual activity
+    - Ensure usage stays within expected limits
+
+[ ] Step 9: Be Available for Support
+    - Respond to questions promptly
+    - Help troubleshoot any issues
+    - Refer users to USER_GUIDE.txt
+
+[ ] Step 10: Track Distribution
+    - Keep a list of who has the application
+    - Note when you sent it
+    - Track any issues reported
+
+
+SECURITY REMINDERS
+================================================================================
+
+⚠️  IMPORTANT:
+
+[ ] The config.txt file contains your API key in plain text
+[ ] Only share with trusted users
+[ ] Use secure channels for distribution
+[ ] Set usage limits in OpenAI dashboard
+[ ] Monitor usage regularly
+[ ] Consider using a separate API key for distribution
+[ ] Rotate the key periodically
+
+
+UPDATING THE API KEY
+================================================================================
+
+If you need to change the API key later:
+
+[ ] Step 1: Create new config.txt with new key
+[ ] Step 2: Send only the new config.txt file
+[ ] Step 3: Instruct users to replace their old config.txt
+[ ] Step 4: No need to send the .exe again
+
+
+TROUBLESHOOTING SUPPORT
+================================================================================
+
+Common issues users may report:
+
+"Window closes immediately"
+  → Tell them to run from Command Prompt to see the error
+  → Check that config.txt is in the same folder as .exe
+
+"API key not found"
+  → Verify config.txt is in the same folder as .exe
+  → Check that config.txt contains the API key on first line
+
+"Authentication failed"
+  → Check if API key is still valid
+  → Verify OpenAI account has credits
+  → May need to send new config.txt with updated key
+
+"Takes too long"
+  → Normal for scanned PDFs (3-4 minutes)
+  → Check their internet connection
+  → Verify contract file isn't corrupted
+
+
+CHECKLIST SUMMARY
+================================================================================
+
+Quick checklist for distribution:
+
+[ ] Created config.txt with API key
+[ ] Tested locally - works correctly
+[ ] Created distribution folder with 2 required files
+[ ] Added optional documentation files
+[ ] Created ZIP file
+[ ] Chose secure distribution method
+[ ] Sent with clear instructions
+[ ] Monitoring usage
+[ ] Available for support
+
+
+YOU'RE READY TO DISTRIBUTE!
+================================================================================
+
+Once all items are checked, you're ready to share the application.
+
+Remember: Only 2 files are required:
+  1. ContractAnalysisCLI.exe
+  2. config.txt
+
+Everything else is optional but helpful for users.
+
+
+================================================================================
