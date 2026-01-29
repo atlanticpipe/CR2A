@@ -1,21 +1,71 @@
 import os
+import sys
 import json
 from typing import Dict
+from pathlib import Path
 from openai import OpenAI
 from openai._exceptions import OpenAIError
 
 
-def analyze_contract(contract_text: str, schema_content: str, rules_content: str) -> Dict:
-    # Read API key from environment variable only
+def get_api_key() -> str:
+    """
+    Get OpenAI API key from environment variable or config file.
+    
+    Priority:
+    1. OPENAI_API_KEY environment variable
+    2. config.txt file next to the executable
+    3. Raise error if neither is found
+    
+    Returns:
+        str: The API key
+        
+    Raises:
+        OpenAIError: If no API key is found
+    """
+    # First, try environment variable
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise OpenAIError(
-            "OPENAI_API_KEY environment variable is not set.\n\n"
-            "To set it:\n"
-            "  Windows: setx OPENAI_API_KEY \"sk-your-key-here\"\n"
-            "  Linux/Mac: export OPENAI_API_KEY=\"sk-your-key-here\"\n\n"
-            "Get your API key from: https://platform.openai.com/api-keys"
-        )
+    if api_key:
+        return api_key.strip()
+    
+    # Second, try config.txt file next to the executable
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        exe_dir = os.path.dirname(sys.executable)
+    else:
+        # Running as script
+        exe_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    config_file = os.path.join(exe_dir, 'config.txt')
+    
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                # Read first non-empty line as API key
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        return line
+        except Exception as e:
+            raise OpenAIError(f"Error reading config.txt: {str(e)}")
+    
+    # No API key found
+    raise OpenAIError(
+        "OpenAI API key not found.\n\n"
+        "Option 1: Set environment variable\n"
+        "  Windows PowerShell:\n"
+        "    [System.Environment]::SetEnvironmentVariable(\"OPENAI_API_KEY\", \"sk-your-key\", \"User\")\n"
+        "  Windows CMD:\n"
+        "    setx OPENAI_API_KEY \"sk-your-key\"\n\n"
+        "Option 2: Create config.txt file\n"
+        f"  Create a file named 'config.txt' in: {exe_dir}\n"
+        "  Put your API key on the first line: sk-your-key-here\n\n"
+        "Get your API key from: https://platform.openai.com/api-keys"
+    )
+
+
+def analyze_contract(contract_text: str, schema_content: str, rules_content: str) -> Dict:
+    # Get API key from environment variable or config file
+    api_key = get_api_key()
     
     # Validate API key format
     if not api_key.startswith('sk-'):

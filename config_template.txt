@@ -1,0 +1,4 @@
+# OpenAI API Key Configuration
+# Replace the line below with your actual API key
+
+sk-your-api-key-here

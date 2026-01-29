@@ -1,393 +1,153 @@
-# Contract Analysis Tool
+# Contract Analysis CLI
 
-**Version:** 1.0  
-**Status:** Production Ready  
-**Platform:** Windows 10/11 (64-bit)  
-**Build Date:** January 28, 2026
-
-AI-powered contract analysis application with OCR support for scanned documents. Standalone Windows executable - no Python installation required for end users.
-
----
-
-## Quick Links
-
-- **For End Users:** See `release/INSTALLATION_GUIDE.txt`
-- **For Developers:** See sections below
-- **Build Status:** See `BUILD_COMPLETE.md`
-- **OCR Setup:** See `API_KEY_SETUP.md` and `OCR_SETUP_GUIDE.md`
-
----
-
-## Distribution Package
-
-### Ready-to-Use Executable
-
-**Location:** `release/ContractAnalysisApp.exe`
-
-**Size:** 45.7 MB (standalone, includes all dependencies)
-
-**Requirements:**
-- Windows 10/11 (64-bit)
-- OpenAI API key (required)
-- Tesseract OCR (optional, for scanned PDFs)
-- Poppler (optional, for scanned PDFs)
-
-**Distribution Files:**
-```
-release/
-├── ContractAnalysisApp.exe      # Main application
-├── INSTALLATION_GUIDE.txt       # Complete setup guide
-├── QUICK_START.txt              # 5-minute setup
-├── API_KEY_SETUP.txt            # API key configuration
-└── OCR_SETUP_GUIDE.txt          # OCR installation
-```
-
----
+AI-powered contract analysis tool with drag-and-drop interface for Windows.
 
 ## Features
 
-### Core Functionality
-- **PDF Analysis** - Text-based PDFs (instant extraction)
-- **OCR Support** - Scanned/image-based PDFs (2-3 min per 15 pages)
-- **DOCX Support** - Microsoft Word documents
-- **AI Analysis** - OpenAI gpt-4o-mini powered analysis
-- **Dual Output** - JSON (structured data) + PDF (professional report)
-- **Drag & Drop** - Simple GUI interface
-
-### Technical Features
-- Automatic document type detection
-- OCR fallback for scanned documents
-- Schema validation (JSON Schema Draft 2020-12)
-- Comprehensive error handling
-- Progress indicators
-- Detailed logging
-
----
+- **Drag & Drop Interface** - Drop PDF or DOCX files onto the executable
+- **AI Analysis** - Powered by OpenAI gpt-4o-mini
+- **OCR Support** - Handles scanned PDFs (requires Tesseract & Poppler)
+- **JSON Output** - Structured analysis data
+- **Standalone** - No Python installation required (42.5 MB)
 
 ## Quick Start
 
 ### For End Users
 
 1. **Get the executable:**
-   - Download `release/ContractAnalysisApp.exe`
+   - Download `dist/ContractAnalysisCLI.exe`
 
-2. **Set API key:**
+2. **Set up API key:**
+   
+   **Option A: Config File (Easiest for distribution)**
+   - Create `config.txt` in the same folder as the .exe
+   - Put your OpenAI API key on the first line:
+     ```
+     sk-your-api-key-here
+     ```
+   
+   **Option B: Environment Variable**
    ```powershell
-   [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-your-key-here", "User")
+   [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-your-key", "User")
    ```
 
-3. **Run:**
-   - Double-click `ContractAnalysisApp.exe`
-   - Drag and drop a contract file
-   - Wait for analysis (1-5 minutes)
-   - Review generated reports
+3. **Use it:**
+   - Drag a contract file onto `ContractAnalysisCLI.exe`
+   - Wait for analysis (1-4 minutes)
+   - Find `<filename>_analysis.json` in the same folder
 
 ### For Developers
 
-1. **Clone repository:**
-   ```bash
-   git clone <repository-url>
-   cd CR2A
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Set API key:**
-   ```powershell
-   .\set_api_key.ps1
-   ```
-
-4. **Run from source:**
-   ```bash
-   python main.py
-   ```
-
-5. **Build executable:**
-   ```bash
-   build_installer.bat
-   ```
-
----
-
-## Building from Source
-
-### Prerequisites
-- Python 3.10+ (tested with 3.14.2)
-- pip (Python package manager)
-- PyInstaller (installed automatically)
-
-### Build Steps
-
 1. **Install dependencies:**
    ```bash
-   pip install -r requirements.txt
-   pip install pyinstaller
+   pip install -r requirements_simple.txt
    ```
 
-2. **Run build script:**
+2. **Run from source:**
    ```bash
-   build_installer.bat
+   python contract_analysis_cli.py "contract.pdf"
    ```
 
-3. **Output:**
-   - Executable: `dist/ContractAnalysisApp.exe`
-   - Distribution: `release/`
+3. **Build executable:**
+   ```bash
+   build_cli.bat
+   ```
 
-### Build Configuration
+## Requirements
 
-**PyInstaller Options:**
-- `--onefile` - Single executable
-- `--windowed` - GUI application (no console)
-- `--add-data` - Include JSON schemas
-- `--hidden-import` - Include OCR libraries
+**Required:**
+- Windows 10/11 (64-bit)
+- OpenAI API key
+- Internet connection
 
-**Build Time:** ~2-3 minutes
+**Optional (for scanned PDFs):**
+- Tesseract OCR v5.3.3+
+- Poppler v24.08.0+
 
+## Output
 
-## Development
+The tool generates a JSON file with:
+- Contract overview
+- Parties involved
+- Financial terms
+- Timeline and milestones
+- Risk assessment
+- Key clauses and provisions
+- Recommendations
 
-### Running from Source
+## Processing Times
 
-**GUI Mode:**
-```bash
-python main.py
+| Document Type | Pages | Time |
+|--------------|-------|------|
+| Text PDF | 10 | ~1 min |
+| Scanned PDF | 15 | 3-4 min |
+| DOCX | 10 | ~1 min |
+
+## Distribution
+
+To share with others:
+
+1. Copy `dist/ContractAnalysisCLI.exe`
+2. Create `config.txt` with your API key
+3. Share both files together
+4. Users just drag and drop - no setup needed!
+
+See `QUICK_START.txt` for detailed instructions.
+
+## Project Structure
+
 ```
-
-**CLI Mode:**
-```bash
-python run_api_mode.py "contract.pdf"
+.
+├── dist/
+│   └── ContractAnalysisCLI.exe    # Standalone executable
+├── contract_analysis_cli.py       # Main CLI script
+├── extract.py                     # PDF/DOCX text extraction
+├── openai_client.py              # OpenAI API integration
+├── validator.py                   # JSON schema validation
+├── output_schemas_v1.json        # Output schema definition
+├── validation_rules_v1.json      # Validation rules
+├── build_cli.bat                 # Build script
+├── config_template.txt           # API key config template
+├── requirements_simple.txt       # Python dependencies
+├── QUICK_START.txt              # User guide
+└── README.md                     # This file
 ```
-
-**API Server Mode:**
-```bash
-python contract_analysis_api.py
-```
-
-### Testing
-
-**Run tests:**
-```bash
-python -m pytest tests/
-```
-
-**Test OCR:**
-```bash
-python extract.py "Contract #1.pdf"
-```
-
-**Validate fixes:**
-```bash
-python validate_fixes.py
-```
-
-### Dependencies
-
-**Core Libraries:**
-- `openai>=2.16.0` - OpenAI API client
-- `jsonschema==4.17.0` - Schema validation
-- `pdfminer.six==20221105` - PDF text extraction
-- `python-docx==1.1.0` - DOCX extraction
-- `reportlab==4.0.0` - PDF report generation
-- `PySimpleGUI==5.0.8.3` - GUI framework
-
-**OCR Libraries:**
-- `pytesseract==0.3.13` - Tesseract wrapper
-- `pdf2image==1.17.0` - PDF to image conversion
-- `pillow==12.1.0` - Image processing
-
-**External Tools (not bundled):**
-- Tesseract OCR v5.3.3+ (for scanned PDFs)
-- Poppler v24.08.0+ (for PDF rendering)
-
----
-
-## Performance
-
-### Processing Times
-
-| Document Type | Pages | Extraction | AI Analysis | Total |
-|--------------|-------|------------|-------------|-------|
-| Text PDF | 10 | < 1 sec | 30-60 sec | ~1 min |
-| Text PDF | 20 | < 1 sec | 30-60 sec | ~1 min |
-| Scanned PDF | 10 | 1-2 min | 30-60 sec | 2-3 min |
-| Scanned PDF | 15 | 2-3 min | 30-60 sec | 3-4 min |
-| DOCX | 10 | < 1 sec | 30-60 sec | ~1 min |
-
-### OCR Performance
-- **Speed:** ~10-12 seconds per page
-- **Accuracy:** 95-99% (depends on scan quality)
-- **DPI:** 200 (configurable in `extract.py`)
-- **Language:** English (configurable)
-
-### API Costs (gpt-4o-mini)
-- 10-page contract: ~$0.01-0.02
-- 20-page contract: ~$0.02-0.03
-- 50-page contract: ~$0.03-0.05
-
----
-
-## Security & Privacy
-
-### Data Handling
-- Contracts sent to OpenAI API for analysis
-- OpenAI's data usage policy applies
-- API key stored as environment variable (not in files)
-- No data stored by this application
-
-### Recommendations
-- Review OpenAI's data usage policy
-- Use for internal review only
-- Consider on-premise solutions for highly sensitive contracts
-- Rotate API keys regularly
-
----
 
 ## Troubleshooting
 
-### Common Issues
-
-**"API key not configured"**
-- Set OPENAI_API_KEY environment variable
-- Restart application after setting
-- Verify key format (starts with sk-)
+**"API key not found"**
+- Create `config.txt` with your API key, or
+- Set `OPENAI_API_KEY` environment variable
 
 **"Authentication failed"**
 - Check API key is correct
-- Verify API key hasn't expired
-- Check OpenAI account has credits
+- Verify OpenAI account has credits
 
-**"Tesseract not found"**
+**Window closes immediately**
+- Run from Command Prompt to see errors
+- Check that config.txt exists and contains valid key
+
+**"Tesseract not found" (scanned PDFs only)**
 - Install Tesseract OCR
 - Add to PATH: `C:\Program Files\Tesseract-OCR`
-- Restart application
 
-**"Unable to get page count"**
-- Install Poppler
-- Add to PATH: `C:\Program Files\poppler\Library\bin`
-- Restart application
+## Security Notes
 
-### Debug Mode
+⚠️ **Important:**
+- The `config.txt` file contains your API key in plain text
+- Only share with trusted users
+- Use secure channels for distribution
+- Set usage limits in OpenAI dashboard
+- Monitor usage regularly
 
-Enable detailed logging:
-```python
-# In main.py, set:
-logging.basicConfig(level=logging.DEBUG)
-```
+## Version
 
-Check logs:
-```bash
-type error.log
-```
-
----
-
-## Documentation
-
-### User Documentation
-- `release/INSTALLATION_GUIDE.txt` - Complete setup guide
-- `release/QUICK_START.txt` - 5-minute setup
-- `release/API_KEY_SETUP.txt` - API key configuration
-- `release/OCR_SETUP_GUIDE.txt` - OCR installation
-
-### Developer Documentation
-- `BUILD_COMPLETE.md` - Build status and details
-- `FINAL_STATUS.md` - Complete implementation status
-- `OCR_TEST_RESULTS.md` - OCR testing results
-- `SETUP_STATUS.md` - Setup progress tracking
-
-### Technical Documentation
-- `docs/IMPLEMENTATION_PLAN.md` - Implementation details
-- `docs/CRITICAL_FIXES_COMPLETED.md` - Critical fixes
-- `tests/README.md` - Testing guide
-
----
-
-## Project Status
-
-### Completed
-- [x] Critical fixes implementation
-- [x] OCR support (Tesseract + Poppler)
-- [x] Standalone executable build
-- [x] Distribution package creation
-- [x] Complete documentation
-- [x] Repository cleanup
-- [x] OCR testing (23,522 chars from 15-page PDF)
-
-### Pending
-- [ ] Full end-to-end test with valid API key
-- [ ] PDF report generation verification
-- [ ] JSON output format verification
-- [ ] Testing on clean Windows machine
-
-### Known Issues
-- Current API key returns 401 error (needs replacement)
-- Pydantic v1 warning with Python 3.14 (non-critical)
-
----
-
-## Version History
-
-### Version 1.0 (January 28, 2026)
-- Initial production release
-- PDF and DOCX support
-- OCR support for scanned documents
-- AI-powered analysis with gpt-4o-mini
-- JSON and PDF output formats
-- Standalone Windows executable
-- Complete documentation
-
----
-
-## Contributing
-
-### Development Setup
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests
-5. Submit a pull request
-
-### Code Style
-- Follow PEP 8 guidelines
-- Add docstrings to functions
-- Include type hints
-- Write unit tests for new features
-
----
+- **Version:** 1.0
+- **Build Date:** January 28, 2026
+- **Platform:** Windows 10/11 (64-bit)
+- **Size:** 42.5 MB
+- **AI Model:** OpenAI gpt-4o-mini
 
 ## License
 
 See LICENSE file for details.
-
----
-
-## Credits
-
-Built with:
-- Python 3.14
-- OpenAI API (gpt-4o-mini)
-- Tesseract OCR
-- Poppler
-- PyInstaller
-- And many other open-source libraries
-
----
-
-## Summary
-
-**Production-ready contract analysis tool with:**
-- Standalone Windows executable (45.7 MB)
-- OCR support for scanned documents
-- AI-powered analysis
-- Professional PDF reports
-- Complete documentation
-- Easy distribution
-
-**Ready to use! Just add your OpenAI API key.**
-
----
-
-**End of README**
