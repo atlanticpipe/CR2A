@@ -1,4 +1,1 @@
-# OpenAI API Key Configuration
-# Replace the line below with your actual API key
-
-sk-your-api-key-here
+sk-svcacct-bZe--5fgLVQl1LEojDFCAPrOCgDev5zjjc7IGiZ_sM-Fv26l1WghF95MbJh31k7h31k7hbV7iDoT4J3T3BlbkFJnBQFeXppplB6-shDIoacWo_jHfDq3iePbgEt6bwsYnlpEs23MVTZwIRsITihlilMfyRDRWR-gA
