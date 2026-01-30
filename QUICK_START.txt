@@ -1,0 +1,98 @@
+================================================================================
+CONTRACT ANALYSIS CLI - QUICK START
+================================================================================
+
+READY TO USE!
+Location: dist\ContractAnalysisCLI.exe
+Size: 42.5 MB
+Output: JSON file
+
+================================================================================
+STEP 1: SET YOUR API KEY (One-time setup)
+================================================================================
+
+Open PowerShell and run:
+
+  [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-your-key-here", "User")
+
+Replace "sk-your-key-here" with your actual OpenAI API key.
+
+Then RESTART any open applications.
+
+
+================================================================================
+STEP 2: USE THE TOOL
+================================================================================
+
+METHOD A: DRAG & DROP (Easiest)
+  
+  1. Open File Explorer
+  2. Navigate to dist\ContractAnalysisCLI.exe
+  3. Drag your contract file (PDF or DOCX) onto the executable
+  4. Wait for analysis to complete
+  5. Press Enter when done
+  6. Find <filename>_analysis.json in the same folder as your contract
+
+
+METHOD B: COMMAND LINE
+
+  dist\ContractAnalysisCLI.exe "Contract #1.pdf"
+
+
+================================================================================
+STEP 3: CHECK YOUR RESULTS
+================================================================================
+
+Look in the same folder as your input file for:
+
+  <filename>_analysis.json  - Complete analysis in JSON format
+
+
+THAT'S IT!
+================================================================================
+
+The JSON file contains:
+  - Contract overview
+  - Parties involved
+  - Financial terms
+  - Timeline and milestones
+  - Risk assessment
+  - Key clauses
+  - Recommendations
+
+
+PROCESSING TIMES
+================================================================================
+
+Text PDF (10 pages):     ~1 minute
+Scanned PDF (15 pages):  3-4 minutes (requires OCR setup)
+DOCX (10 pages):         ~1 minute
+
+
+COMMON ISSUES
+================================================================================
+
+"API key not configured"
+  → Set OPENAI_API_KEY environment variable (see Step 1)
+  → Restart application
+
+"Authentication failed"
+  → Check your API key is correct
+  → Verify your OpenAI account has credits
+
+"File not found"
+  → Check file path is correct
+  → Use quotes around paths with spaces
+
+Window closes immediately
+  → Run from command line to see error messages
+  → Use test_drag_drop.bat to test
+
+
+NEED HELP?
+================================================================================
+
+See FINAL_CLI_SUMMARY.md for complete documentation
+
+
+================================================================================

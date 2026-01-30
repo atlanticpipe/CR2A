@@ -1,89 +1,161 @@
-# Node.js artifacts
-node_modules/
-npm-debug.log
-npm-debug.log.*
-yarn-debug.log
-yarn-debug.log.*
-yarn-error.log
-yarn-error.log.*
-lerna-debug.log
-.pnpm-debug.log*
-
-# Python artifacts
+# ============================================================================
+# Contract Analysis Tool - .gitignore
+# ============================================================================
+config.txt
+# ============================================================================
+# Python
+# ============================================================================
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.py
-*.egg-info/
-*.egg
+*.py[cod]
+*$py.class
+*.so
 .Python
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Virtual environments
+# Virtual Environment
 venv/
 env/
-.venv/
 ENV/
 env.bak/
 venv.bak/
 
-# Build outputs
-dist/
+# ============================================================================
+# Build Artifacts - DO NOT COMMIT
+# ============================================================================
+# PyInstaller outputs
 build/
-.next/
-out/
-*.dist-info/
+dist/
+*.spec
 
-# Environment files
-.env
-.env.local
-.env.*.local
-.env.development.local
-.env.test.local
-.env.production.local
+# Executables - DO NOT COMMIT (distribute via GitHub Releases)
+*.exe
+*.dll
+*.so
+*.dylib
+*.msi
+*.app
 
-# IDE and editor files
+# Installers
+installers/
+release/
+
+# ============================================================================
+# IDE and Editor
+# ============================================================================
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.project
-.classpath
-.settings/
-*.sublime-project
-*.sublime-workspace
-
-# OS-specific files
 .DS_Store
 Thumbs.db
-desktop.ini
-ehthumbs.db
 
-# Logs and temporary files
+# ============================================================================
+# Logs and Temporary Files
+# ============================================================================
 *.log
-logs/
+error.log
 *.tmp
-.cache/
-.temp/
-tmp/
+*.temp
+~$*
 
-# Test coverage
-coverage/
-.nyc_output/
-htmlcov/
+# ============================================================================
+# API Keys and Secrets - NEVER COMMIT
+# ============================================================================
+.env
+.env.local
+.env.*.local
+*.key
+secrets.json
+config.local.json
+
+# ============================================================================
+# Test and Sample Files
+# ============================================================================
+# Sample contracts (keep one for testing, ignore others)
+Contract*.pdf
+!Contract\ #1.pdf
+Contract*_analysis.json
+Contract*_analysis.pdf
+
+# Test outputs
+test_*.pdf
+test_*.json
+sample_*.pdf
+sample_*.json
+
+# ============================================================================
+# Output Directories
+# ============================================================================
+output/
+results/
+reports/
+contracts/
+
+# ============================================================================
+# Testing
+# ============================================================================
+.pytest_cache/
 .coverage
-.coverage.*
+htmlcov/
+.tox/
 *.cover
 .hypothesis/
-.pytest_cache/
 
-# Test files
-__tests__/
-*.test.js
-*.test.ts
-*.spec.js
-*.spec.ts
+# ============================================================================
+# Documentation Build
+# ============================================================================
+docs/_build/
+site/
 
-# Git directory (for artifact exclusion)
-.git/
+# ============================================================================
+# OS Generated
+# ============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ============================================================================
+# Backup Files
+# ============================================================================
+*.bak
+*.backup
+*~
+*.swp
+*.swo
+
+# ============================================================================
+# Compressed Files (if used for distribution)
+# ============================================================================
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# ============================================================================
+# Project Specific
+# ============================================================================
+# Keep the CLI spec file if you want to version it
+# Uncomment the line below to ignore it:
+# ContractAnalysisCLI.spec
+
+# Ignore all analysis outputs except the sample
+*_analysis.json
+*_analysis.pdf
+
+# ============================================================================
+# Development Tools
+# ============================================================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/

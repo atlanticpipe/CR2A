@@ -1,0 +1,43 @@
+================================================================================
+CONTRACT ANALYSIS TOOL - QUICK REFERENCE
+================================================================================
+
+WHAT YOU NEED
+  ✓ ContractAnalysisCLI.exe
+  ✓ config.txt
+  ✓ Keep both files in the same folder!
+
+HOW TO USE
+  1. Drag your contract PDF onto ContractAnalysisCLI.exe
+  2. Wait 1-4 minutes
+  3. Press Enter when done
+  4. Find YourContract_analysis.json in the same folder as your contract
+
+SUPPORTED FILES
+  ✓ PDF files (.pdf)
+  ✓ Word documents (.docx)
+
+PROCESSING TIMES
+  Text PDF (10 pages):     ~1 minute
+  Scanned PDF (15 pages):  3-4 minutes
+  Word document:           ~1 minute
+
+TROUBLESHOOTING
+  Window closes immediately
+    → Run from Command Prompt to see error
+
+  "API key not found"
+    → Make sure config.txt is in same folder as .exe
+
+  "Authentication failed"
+    → Contact the person who gave you the application
+
+  Takes too long
+    → Wait at least 5 minutes
+    → Check your internet connection
+
+NEED HELP?
+  See USER_GUIDE.txt for complete instructions
+  Contact the person who provided the application
+
+================================================================================
