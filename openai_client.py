@@ -1,10 +1,146 @@
 import os
 import sys
 import json
-from typing import Dict
+from typing import Dict, List
 from pathlib import Path
 from openai import OpenAI
 from openai._exceptions import OpenAIError
+import contract_extractor
+
+
+def estimate_tokens(text: str) -> int:
+    """
+    Estimate the number of tokens in a text.
+    Rough estimate: 1 token ≈ 4 characters for English text.
+    """
+    return len(text) // 4
+
+
+def chunk_contract(contract_text: str, max_chunk_tokens: int = 30000) -> List[str]:
+    """
+    Split contract into chunks that fit within token limits.
+    
+    Args:
+        contract_text: The full contract text
+        max_chunk_tokens: Maximum tokens per chunk (default 30k to leave room for schema/rules)
+    
+    Returns:
+        List of contract text chunks
+    """
+    # Estimate tokens in full contract
+    total_tokens = estimate_tokens(contract_text)
+    
+    # If contract fits in one chunk, return as-is
+    if total_tokens <= max_chunk_tokens:
+        return [contract_text]
+    
+    # Calculate number of chunks needed
+    num_chunks = (total_tokens // max_chunk_tokens) + 1
+    
+    # Split by paragraphs to avoid breaking mid-sentence
+    paragraphs = contract_text.split('\n\n')
+    
+    chunks = []
+    current_chunk = []
+    current_tokens = 0
+    target_tokens_per_chunk = total_tokens // num_chunks
+    
+    for para in paragraphs:
+        para_tokens = estimate_tokens(para)
+        
+        # If adding this paragraph exceeds target, start new chunk
+        if current_tokens + para_tokens > target_tokens_per_chunk and current_chunk:
+            chunks.append('\n\n'.join(current_chunk))
+            current_chunk = [para]
+            current_tokens = para_tokens
+        else:
+            current_chunk.append(para)
+            current_tokens += para_tokens
+    
+    # Add remaining paragraphs
+    if current_chunk:
+        chunks.append('\n\n'.join(current_chunk))
+    
+    return chunks
+
+
+def merge_analyses(chunk_analyses: List[Dict]) -> Dict:
+    """
+    Merge multiple chunk analyses into a single comprehensive analysis.
+    
+    Args:
+        chunk_analyses: List of analysis results from each chunk
+    
+    Returns:
+        Merged analysis dictionary
+    """
+    if not chunk_analyses:
+        return {}
+    
+    if len(chunk_analyses) == 1:
+        return chunk_analyses[0]
+    
+    # Start with first chunk as base
+    merged = chunk_analyses[0].copy()
+    
+    # Merge contract_overview - take most complete one
+    if 'contract_overview' in merged:
+        for analysis in chunk_analyses[1:]:
+            if 'contract_overview' in analysis:
+                overview = analysis['contract_overview']
+                # Fill in any missing fields
+                for key, value in overview.items():
+                    if value and (not merged['contract_overview'].get(key) or merged['contract_overview'].get(key) == ""):
+                        merged['contract_overview'][key] = value
+    
+    # Merge sections - combine unique items
+    section_keys = [
+        'administrative_commercial_terms',
+        'technical_performance_terms', 
+        'legal_risk_enforcement',
+        'regulatory_compliance_terms',
+        'data_technology_deliverables',
+        'supplemental_operational_risks'
+    ]
+    
+    for section_key in section_keys:
+        if section_key not in merged:
+            merged[section_key] = []
+        
+        # Collect all items from all chunks
+        seen_subsections = set()
+        merged_items = []
+        
+        for analysis in chunk_analyses:
+            if section_key in analysis:
+                for item in analysis[section_key]:
+                    subsection = item.get('Subsection', '')
+                    # Avoid duplicates based on subsection name
+                    if subsection and subsection not in seen_subsections:
+                        seen_subsections.add(subsection)
+                        merged_items.append(item)
+                    elif not subsection:
+                        # Items without subsection names, add them all
+                        merged_items.append(item)
+        
+        merged[section_key] = merged_items
+    
+    # Merge parties - combine unique parties
+    if 'parties' in merged:
+        all_parties = []
+        seen_parties = set()
+        
+        for analysis in chunk_analyses:
+            if 'parties' in analysis:
+                for party in analysis['parties']:
+                    party_key = (party.get('Name', ''), party.get('Role', ''))
+                    if party_key not in seen_parties:
+                        seen_parties.add(party_key)
+                        all_parties.append(party)
+        
+        merged['parties'] = all_parties
+    
+    return merged
 
 
 def get_api_key() -> str:
@@ -64,6 +200,18 @@ def get_api_key() -> str:
 
 
 def analyze_contract(contract_text: str, schema_content: str, rules_content: str) -> Dict:
+    """
+    Analyze a contract using OpenAI API with intelligent pre-processing.
+    Uses regex extraction to reduce token usage for large contracts.
+    
+    Args:
+        contract_text: The extracted contract text
+        schema_content: JSON schema for output format
+        rules_content: Company-specific validation rules
+    
+    Returns:
+        Dictionary containing the analysis results
+    """
     # Get API key from environment variable or config file
     api_key = get_api_key()
     
@@ -71,7 +219,7 @@ def analyze_contract(contract_text: str, schema_content: str, rules_content: str
     if not api_key.startswith('sk-'):
         raise OpenAIError(
             "Invalid OpenAI API key format. API keys should start with 'sk-'\n\n"
-            "Please check your OPENAI_API_KEY environment variable."
+            "Please check your OPENAI_API_KEY environment variable or config.txt file."
         )
 
     # Initialize OpenAI client with API key
@@ -80,8 +228,84 @@ def analyze_contract(contract_text: str, schema_content: str, rules_content: str
     except Exception as e:
         raise OpenAIError(f"Failed to initialize OpenAI client: {str(e)}")
 
+    # Check if we should use extraction to reduce token usage
+    contract_tokens = estimate_tokens(contract_text)
+    schema_tokens = estimate_tokens(schema_content)
+    rules_tokens = estimate_tokens(rules_content)
+    overhead_tokens = 1000
+    
+    total_tokens = contract_tokens + schema_tokens + rules_tokens + overhead_tokens
+    max_context = 120000  # Leave buffer below 128k limit
+    
+    print(f"   Estimated tokens: {total_tokens:,} (contract: {contract_tokens:,})")
+    
+    # Use extraction if contract is large
+    if contract_tokens > 60000:  # ~240,000 characters
+        print(f"   Contract is large - using intelligent extraction...")
+        
+        # Extract relevant sections using regex
+        focused_text, metadata = contract_extractor.create_focused_contract(
+            contract_text, 
+            max_chars=200000  # ~50k tokens
+        )
+        
+        print(f"   Reduced contract by {metadata['reduction_percent']}%")
+        print(f"   Extracted sections: {', '.join(metadata['sections_extracted'])}")
+        
+        # Use the focused text for analysis
+        contract_text_to_analyze = focused_text
+        
+        # Recalculate tokens
+        contract_tokens = estimate_tokens(contract_text_to_analyze)
+        total_tokens = contract_tokens + schema_tokens + rules_tokens + overhead_tokens
+        print(f"   New token estimate: {total_tokens:,}")
+    else:
+        contract_text_to_analyze = contract_text
+    
+    # Check if we still need chunking after extraction
+    if total_tokens > max_context:
+        print(f"   Still too large - splitting into chunks...")
+        # Calculate how much space we have for contract text
+        available_for_contract = max_context - schema_tokens - rules_tokens - overhead_tokens
+        chunks = chunk_contract(contract_text_to_analyze, max_chunk_tokens=available_for_contract)
+        print(f"   Split into {len(chunks)} chunks")
+        
+        # Analyze each chunk
+        chunk_analyses = []
+        for i, chunk in enumerate(chunks, 1):
+            print(f"   Analyzing chunk {i}/{len(chunks)}...")
+            chunk_result = analyze_contract_chunk(client, chunk, schema_content, rules_content, i, len(chunks))
+            chunk_analyses.append(chunk_result)
+        
+        print(f"   Merging results from {len(chunks)} chunks...")
+        return merge_analyses(chunk_analyses)
+    else:
+        # Contract fits in one request
+        return analyze_contract_chunk(client, contract_text_to_analyze, schema_content, rules_content, 1, 1)
+
+
+def analyze_contract_chunk(client: OpenAI, contract_text: str, schema_content: str, 
+                           rules_content: str, chunk_num: int, total_chunks: int) -> Dict:
+    """
+    Analyze a single contract chunk (or full contract if not chunked).
+    
+    Args:
+        client: OpenAI client instance
+        contract_text: Contract text to analyze
+        schema_content: JSON schema
+        rules_content: Validation rules
+        chunk_num: Current chunk number
+        total_chunks: Total number of chunks
+    
+    Returns:
+        Analysis results dictionary
+    """
+    
     # Define system message for contract analysis
-    system_message = """You are a Contract Analysis Engine. Output only a single JSON object that conforms exactly to the provided JSON Schema (2020-12). Do not include explanations or extra keys. If a required data point is not present in the contract, use "" for strings or [] for arrays. For each ClauseBlock, include at least one Redline Recommendations item with an action of insert, replace, or delete."""
+    if total_chunks > 1:
+        system_message = f"""You are a Contract Analysis Engine analyzing chunk {chunk_num} of {total_chunks} of a contract. Output only a single JSON object that conforms exactly to the provided JSON Schema (2020-12). Do not include explanations or extra keys. If a required data point is not present in this chunk, use "" for strings or [] for arrays. For each ClauseBlock, include at least one Redline Recommendations item with an action of insert, replace, or delete. Focus on extracting information from this chunk while maintaining consistency with the overall contract structure."""
+    else:
+        system_message = """You are a Contract Analysis Engine. Output only a single JSON object that conforms exactly to the provided JSON Schema (2020-12). Do not include explanations or extra keys. If a required data point is not present in the contract, use "" for strings or [] for arrays. For each ClauseBlock, include at least one Redline Recommendations item with an action of insert, replace, or delete."""
 
     # Format user message with schema, rules, and contract text
     user_message = f"""SCHEMA (do not echo): <<<JSON_SCHEMA_START
@@ -196,7 +420,7 @@ Produce ONLY the JSON object that conforms to the schema above. No comments, no 
     try:
         # Make API call with JSON schema response formatting
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Use cost-effective model
+            model="gpt-4o",  # Use model with larger context window (128k tokens)
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": user_message}
