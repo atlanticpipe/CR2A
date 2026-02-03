@@ -2,6 +2,8 @@
 # Contract Analysis Tool - .gitignore
 # ============================================================================
 config.txt
+tests/
+
 # ============================================================================
 # Python
 # ============================================================================
@@ -159,3 +161,11 @@ desktop.ini
 dmypy.json
 .pyre/
 .pytype/
+
+# Additional build and test artifacts (added by cleanup script)
+MagicMock/
+installer/output/
+.benchmarks/
+
+# Virtual environment (project specific)
+venv311/

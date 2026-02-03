@@ -5,7 +5,7 @@ from typing import Dict, List
 from pathlib import Path
 from openai import OpenAI
 from openai._exceptions import OpenAIError
-import contract_extractor
+import analyzer.contract_extractor
 
 
 def estimate_tokens(text: str) -> int:
