@@ -12,6 +12,8 @@ from typing import Dict, Optional, Callable
 from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError, AuthenticationError
 
+from src.schema_loader import SchemaLoader
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +51,10 @@ class OpenAIClient:
         self.client = OpenAI(api_key=api_key)
         self._max_retries = 3
         self._base_delay = 1.0  # Base delay for exponential backoff in seconds
+        
+        # Load comprehensive schema for contract analysis
+        self._schema_loader = SchemaLoader()
+        self._schema_loader.load_schema()  # Load schema on initialization
     
     def analyze_contract(
         self, 
@@ -197,17 +203,139 @@ class OpenAIClient:
         
         Returns:
             System message string with instructions for the AI
+        
+        Requirements:
+            - 1.2: Instruct AI to analyze contracts according to ClauseBlock structure
+            - 1.4: Instruct to omit clauses not found rather than including empty values
         """
-        return """You are a Contract Analysis Engine. Analyze the provided contract and extract key information in a structured JSON format.
+        return """You are a Contract Analysis Engine specializing in comprehensive contract risk assessment. Analyze the provided contract and extract key information in a structured JSON format following the 8-section schema.
 
-Your analysis should include:
-1. Contract metadata (parties, dates, type)
-2. Key clauses with risk assessment
-3. Identified risks with severity levels
-4. Compliance issues
-5. Redlining suggestions for problematic clauses
+## ANALYSIS SECTIONS
 
-Output ONLY a valid JSON object. Do not include explanations or markdown formatting."""
+You must analyze the contract across these 8 sections:
+
+### Section I: Contract Overview (contract_overview)
+Extract high-level contract information including:
+- Project Title: The name or title of the project/contract
+- Solicitation No.: Contract or solicitation number if present
+- Owner: The party commissioning the work (client/owner)
+- Contractor: The party performing the work
+- Scope: Brief description of the contract scope
+- General Risk Level: Overall risk assessment (Low, Medium, High, or Critical)
+- Bid Model: Type of pricing model (Lump Sum, Unit Price, Cost Plus, Time & Materials, GMP, Design-Build, or Other)
+- Notes: Any additional relevant observations
+
+### Section II: Administrative & Commercial Terms (administrative_and_commercial_terms)
+Analyze these 16 clause categories:
+- Contract Term, Renewal & Extensions
+- Bonding, Surety & Insurance
+- Retainage & Progress Payments
+- Pay-When-Paid / Pay-If-Paid
+- Price Escalation
+- Fuel Price Adjustment
+- Change Orders
+- Termination for Convenience
+- Termination for Cause
+- Bid Protest Procedures
+- Bid Tabulation
+- Contractor Qualification
+- Release Orders
+- Assignment & Novation
+- Audit Rights
+- Notice Requirements
+
+### Section III: Technical & Performance Terms (technical_and_performance_terms)
+Analyze these 17 clause categories:
+- Scope of Work
+- Performance Schedule
+- Delays & Extensions of Time
+- Liquidated Damages
+- Warranty & Guarantees
+- Inspection & Acceptance
+- Quality Control / Quality Assurance
+- Safety Requirements
+- Site Conditions
+- Differing Site Conditions
+- Force Majeure
+- Suspension of Work
+- Acceleration
+- Subcontracting
+- Equipment & Materials
+- Testing & Commissioning
+- Punch List & Final Completion
+
+### Section IV: Legal Risk & Enforcement (legal_risk_and_enforcement)
+Analyze these 13 clause categories:
+- Indemnification
+- Duty to Defend
+- Limitation of Liability
+- Consequential Damages Waiver
+- Dispute Resolution
+- Governing Law & Jurisdiction
+- Arbitration
+- Mediation
+- Litigation
+- Attorneys' Fees
+- Waiver of Jury Trial
+- Sovereign Immunity
+- Statute of Limitations
+
+### Section V: Regulatory & Compliance Terms (regulatory_and_compliance_terms)
+Analyze these 8 clause categories:
+- Certified Payroll
+- Prevailing Wage / Davis-Bacon
+- Equal Employment Opportunity (EEO)
+- Small Business / DBE Requirements
+- Environmental Compliance
+- Permits & Licenses
+- OSHA Compliance
+- Buy America / Buy American
+
+### Section VI: Data, Technology & Deliverables (data_technology_and_deliverables)
+Analyze these 7 clause categories:
+- Data Ownership & Rights
+- Intellectual Property
+- AI / Technology Use
+- Cybersecurity Requirements
+- BIM / Digital Deliverables
+- Document Retention
+- Confidentiality / Non-Disclosure
+
+### Section VII: Supplemental Operational Risks (supplemental_operational_risks)
+Identify up to 9 additional risk areas not covered in the standard sections above. These are contract-specific risks that warrant attention.
+
+### Section VIII: Final Analysis (final_analysis)
+Provide a comprehensive summary including:
+- Executive Summary: Overall assessment of the contract
+- Top Risks: The most significant risks identified
+- Recommended Actions: Priority actions for the contractor
+- Negotiation Points: Key areas to negotiate before signing
+
+## CLAUSEBLOCK STRUCTURE
+
+For each clause category found in the contract, provide analysis using this ClauseBlock structure:
+
+1. **Clause Language**: The verbatim or quoted text from the contract that contains this clause
+2. **Clause Summary**: A plain-English summary explaining what the clause means and its implications
+3. **Risk Triggers Identified**: A list of specific conditions, terms, or language that indicate potential risk
+4. **Flow-Down Obligations**: A list of requirements that must be passed down to subcontractors
+5. **Redline Recommendations**: A list of suggested changes, each containing:
+   - action: "insert", "replace", or "delete"
+   - text: The specific text to insert, the replacement text, or the text to delete
+   - reference: (optional) Reference to standard clause or industry practice
+6. **Harmful Language / Policy Conflicts**: A list of terms that conflict with standard business practices or policies
+
+## CRITICAL INSTRUCTIONS
+
+1. **OMIT MISSING CLAUSES**: If a clause category is NOT found in the contract, DO NOT include it in the response. Only include clause categories that are actually present in the contract text. Do not include empty objects or null values for missing clauses.
+
+2. **JSON OUTPUT ONLY**: Output ONLY a valid JSON object. Do not include explanations, markdown formatting, or any text outside the JSON structure.
+
+3. **ACCURACY**: Only extract information that is explicitly stated or clearly implied in the contract. Do not fabricate or assume clause content.
+
+4. **COMPLETENESS**: For each clause found, provide all applicable ClauseBlock fields. If a specific field (like Flow-Down Obligations) is not applicable, use an empty array [].
+
+5. **RISK ASSESSMENT**: Be thorough in identifying risk triggers and harmful language. Consider the contractor's perspective when assessing risks."""
     
     def _build_query_system_message(self) -> str:
         """
@@ -229,70 +357,38 @@ Guidelines:
         """
         Build the user message containing the contract text and output schema.
         
+        This method uses the comprehensive 8-section schema from SchemaLoader
+        to provide detailed instructions for contract analysis output.
+        
         Args:
             contract_text: The contract text to analyze
         
         Returns:
-            Formatted user message with contract and schema
-        """
-        schema = {
-            "contract_metadata": {
-                "filename": "string",
-                "analyzed_at": "ISO 8601 datetime",
-                "page_count": "integer",
-                "parties": [
-                    {
-                        "name": "string",
-                        "role": "string (e.g., 'contractor', 'client')"
-                    }
-                ],
-                "contract_type": "string",
-                "effective_date": "string"
-            },
-            "clauses": [
-                {
-                    "id": "string (e.g., 'clause_1')",
-                    "type": "string (e.g., 'payment_terms', 'liability', 'termination')",
-                    "text": "string (excerpt from contract)",
-                    "page": "integer",
-                    "risk_level": "string ('low', 'medium', 'high')"
-                }
-            ],
-            "risks": [
-                {
-                    "id": "string (e.g., 'risk_1')",
-                    "clause_id": "string (reference to clause)",
-                    "severity": "string ('low', 'medium', 'high', 'critical')",
-                    "description": "string",
-                    "recommendation": "string"
-                }
-            ],
-            "compliance_issues": [
-                {
-                    "id": "string (e.g., 'compliance_1')",
-                    "regulation": "string (e.g., 'GDPR', 'CCPA')",
-                    "issue": "string",
-                    "severity": "string ('low', 'medium', 'high')"
-                }
-            ],
-            "redlining_suggestions": [
-                {
-                    "clause_id": "string (reference to clause)",
-                    "original_text": "string",
-                    "suggested_text": "string",
-                    "rationale": "string"
-                }
-            ]
-        }
+            Formatted user message with comprehensive schema and contract text
         
-        return f"""Analyze the following contract and provide a structured JSON response following this schema:
+        Requirements:
+            - 1.1: Include complete schema structure from output_schemas_v1.json with all 8 sections
+            - 1.5: Request JSON output that validates against the output_schemas_v1.json schema
+        """
+        # Get comprehensive schema description from SchemaLoader
+        schema_description = self._schema_loader.get_schema_for_prompt()
+        
+        return f"""Analyze the following contract and provide a structured JSON response.
 
-{json.dumps(schema, indent=2)}
+{schema_description}
+
+---
 
 CONTRACT TEXT:
 {contract_text}
 
-Provide your analysis as a JSON object matching the schema above."""
+---
+
+Provide your analysis as a valid JSON object matching the schema structure described above. Remember to:
+1. Include schema_version field (e.g., "v1.0.0")
+2. Only include clause categories that are found in the contract
+3. Omit clause categories that are not present (do not include empty values)
+4. Use the exact ClauseBlock structure for each clause found"""
     
     def _build_query_user_message(self, query: str, context: Dict) -> str:
         """

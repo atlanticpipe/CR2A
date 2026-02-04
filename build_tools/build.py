@@ -194,6 +194,23 @@ GUI_CONFIG = BuildConfig(
         "src.settings_dialog",
         "src.openai_fallback_client",
         "src.contract_chat_ui",
+        # History feature modules
+        "src.history_models",
+        "src.history_store",
+        "src.history_tab",
+        # Structured analysis view
+        "src.structured_analysis_view",
+        "src.schema_loader",
+        "src.schema_validator",
+        # Exhaustiveness modules
+        "src.exhaustiveness_models",
+        "src.exhaustiveness_gate",
+        "src.verification_layer",
+        "src.confidence_scorer",
+        "src.conflict_resolver",
+        "src.coverage_checker",
+        "src.result_comparator",
+        "src.contract_chunker",
     ],
     collect_packages=["tokenizers", "cryptography"],
     excludes=["pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook"],

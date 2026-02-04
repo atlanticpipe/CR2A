@@ -29,14 +29,20 @@ logging.basicConfig(
     ]
 )
 
-# Add src to path
+logger = logging.getLogger(__name__)
+
+# Add src to path for development
 sys.path.insert(0, str(Path(__file__).parent))
 
-from analysis_engine import AnalysisEngine
-from query_engine import QueryEngine
-from openai_fallback_client import OpenAIClient
-from config_manager import ConfigManager
-from exhaustiveness_models import VerifiedAnalysisResult, PresenceStatus
+# Use absolute imports for PyInstaller compatibility
+from src.analysis_engine import AnalysisEngine
+from src.query_engine import QueryEngine
+from src.openai_fallback_client import OpenAIClient
+from src.config_manager import ConfigManager
+from src.exhaustiveness_models import VerifiedAnalysisResult, PresenceStatus
+from src.history_store import HistoryStore, HistoryStoreError
+from src.history_tab import HistoryTab
+from src.structured_analysis_view import StructuredAnalysisView
 
 
 class AnalysisThread(QThread):
@@ -98,9 +104,12 @@ class CR2A_GUI(QMainWindow):
         self.current_file = None
         self.config_manager = None
         self.contract_text = None  # Store extracted text for verification
+        self.history_store = None  # History store for persistent analysis records
+        self.current_history_record_id = None  # Track the record_id of currently loaded historical analysis
         
         self.init_ui()
         self.init_config()
+        self.init_history_store()
         self.init_engines()
     
     def init_config(self):
@@ -114,6 +123,184 @@ class CR2A_GUI(QMainWindow):
                 "Configuration Warning",
                 f"Failed to load configuration:\n{str(e)}\n\nUsing defaults."
             )
+    
+    def init_history_store(self):
+        """Initialize history store for persistent analysis records."""
+        try:
+            self.history_store = HistoryStore()
+            logger.info("History store initialized successfully")
+        except HistoryStoreError as e:
+            logger.error("Failed to initialize history store: %s", e)
+            QMessageBox.warning(
+                self,
+                "History Store Warning",
+                f"Failed to initialize history storage:\n{str(e)}\n\n"
+                "Analysis history features will be disabled.\n"
+                "You can still analyze contracts normally."
+            )
+            self.history_store = None
+        except Exception as e:
+            logger.error("Unexpected error initializing history store: %s", e)
+            QMessageBox.warning(
+                self,
+                "History Store Warning",
+                f"Unexpected error initializing history storage:\n{str(e)}\n\n"
+                "Analysis history features will be disabled.\n"
+                "You can still analyze contracts normally."
+            )
+            self.history_store = None
+        
+        # Initialize History tab if history_store is available
+        self.init_history_tab()
+    
+    def init_history_tab(self):
+        """Initialize the History tab if history store is available."""
+        if self.history_store is not None:
+            try:
+                # Create History tab
+                self.history_tab = HistoryTab(self.history_store)
+                
+                # Add tab after Chat tab
+                self.tabs.addTab(self.history_tab, "📜 History")
+                
+                # Connect signals to handler methods
+                self.history_tab.analysis_selected.connect(self.on_history_selected)
+                self.history_tab.analysis_deleted.connect(self.on_history_deleted)
+                
+                logger.info("History tab initialized successfully")
+            except Exception as e:
+                logger.error("Failed to initialize history tab: %s", e)
+                QMessageBox.warning(
+                    self,
+                    "History Tab Warning",
+                    f"Failed to initialize history tab:\n{str(e)}\n\n"
+                    "History tab will not be available."
+                )
+                self.history_tab = None
+        else:
+            logger.info("History tab not initialized (history store unavailable)")
+    
+    def on_history_selected(self, record_id: str):
+        """
+        Handle history record selection.
+        
+        Loads the full analysis from HistoryStore, sets it as current_analysis,
+        displays it in the Analysis tab, enables the Chat tab for querying,
+        and switches to the Analysis tab.
+        
+        Args:
+            record_id: ID of the selected analysis record
+        """
+        logger.info("History record selected: %s", record_id)
+        
+        # Check if history store is available
+        if self.history_store is None:
+            QMessageBox.warning(
+                self,
+                "History Unavailable",
+                "History store is not available.\n"
+                "Cannot load historical analysis."
+            )
+            return
+        
+        try:
+            # Load full analysis from HistoryStore
+            analysis_result = self.history_store.get(record_id)
+            
+            # Handle load errors
+            if analysis_result is None:
+                logger.error("Failed to load analysis: %s", record_id)
+                QMessageBox.critical(
+                    self,
+                    "Load Error",
+                    f"Failed to load the selected analysis.\n\n"
+                    f"The analysis file may be corrupted or missing.\n"
+                    f"Record ID: {record_id}"
+                )
+                return
+            
+            # Set as current_analysis
+            self.current_analysis = analysis_result
+            
+            # Store the record_id for tracking
+            self.current_history_record_id = record_id
+            
+            # Set current_file to the filename from metadata
+            if analysis_result.metadata and analysis_result.metadata.filename:
+                self.current_file = analysis_result.metadata.filename
+            
+            # Display in Analysis tab
+            self.display_analysis(analysis_result)
+            
+            # Enable Chat tab for querying (it's already enabled by default, but ensure it's accessible)
+            # The chat tab is always enabled, but we can update the chat history to indicate a new analysis is loaded
+            self.chat_history.append(
+                f"<br><b>📜 Historical Analysis Loaded:</b> {analysis_result.metadata.filename}<br>"
+                f"<i>You can now ask questions about this analysis.</i><br>"
+            )
+            
+            # Switch to Analysis tab
+            self.tabs.setCurrentIndex(1)  # Analysis tab is at index 1
+            
+            logger.info("Successfully loaded historical analysis: %s", record_id)
+            self.statusBar().showMessage(f"Loaded analysis: {analysis_result.metadata.filename}")
+            
+        except Exception as e:
+            logger.error("Unexpected error loading analysis %s: %s", record_id, e)
+            QMessageBox.critical(
+                self,
+                "Load Error",
+                f"An unexpected error occurred while loading the analysis:\n\n{str(e)}"
+            )
+    
+    def on_history_deleted(self, record_id: str):
+        """
+        Handle history record deletion.
+        
+        Performs cleanup if the deleted analysis was currently loaded,
+        and logs the deletion for debugging purposes.
+        
+        Args:
+            record_id: ID of the deleted analysis record
+        """
+        logger.info("History record deleted: %s", record_id)
+        
+        # Check if the deleted analysis is currently loaded
+        if self.current_history_record_id == record_id:
+            logger.info("Deleted analysis was currently loaded, clearing current analysis")
+            
+            # Clear the current analysis
+            self.current_analysis = None
+            self.current_file = None
+            self.current_history_record_id = None
+            
+            # Clear the analysis display
+            self._clear_analysis_display()
+            
+            # Update the chat history to indicate the analysis was deleted
+            self.chat_history.append(
+                "<br><b>⚠️ Notice:</b> The currently loaded analysis has been deleted from history.<br>"
+                "<i>Please analyze a new contract or select another analysis from history.</i><br>"
+            )
+            
+            # Update status bar
+            self.statusBar().showMessage("Current analysis was deleted from history")
+            
+            logger.info("Cleared current analysis after deletion")
+    
+    def _clear_analysis_display(self):
+        """Clear the analysis display and show the 'no analysis' message."""
+        # Clear existing content
+        while self.analysis_layout.count():
+            child = self.analysis_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        # Show the "no analysis" message
+        self.no_analysis_label = QLabel("No contract analyzed yet.\nGo to Upload tab to analyze a contract.")
+        self.no_analysis_label.setAlignment(Qt.AlignCenter)
+        self.no_analysis_label.setStyleSheet("padding: 50px; font-size: 14px; color: #666;")
+        self.analysis_layout.addWidget(self.no_analysis_label)
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -152,6 +339,9 @@ class CR2A_GUI(QMainWindow):
         # Chat tab
         self.chat_tab = self.create_chat_tab()
         self.tabs.addTab(self.chat_tab, "💬 Chat")
+        
+        # History tab (will be initialized after history_store is ready)
+        self.history_tab = None
         
         # Status bar
         self.statusBar().showMessage("Ready")
@@ -267,14 +457,19 @@ class CR2A_GUI(QMainWindow):
             )
     
     def create_analysis_tab(self):
-        """Create the analysis results tab."""
+        """Create the analysis results tab with structured view."""
         widget = QWidget()
         layout = QVBoxLayout()
         widget.setLayout(layout)
         
-        # Scroll area for results
+        # Create structured analysis view
+        self.structured_view = StructuredAnalysisView()
+        layout.addWidget(self.structured_view)
+        
+        # Keep the old layout for backward compatibility (hidden by default)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setVisible(False)  # Hidden by default
         scroll_content = QWidget()
         self.analysis_layout = QVBoxLayout()
         scroll_content.setLayout(self.analysis_layout)
@@ -722,11 +917,17 @@ class CR2A_GUI(QMainWindow):
         """Handle analysis completion."""
         self.current_analysis = result
         
+        # Clear the history record ID since this is a new analysis (not from history)
+        self.current_history_record_id = None
+        
         # Hide progress
         self.progress_bar.setVisible(False)
         self.analyze_btn.setEnabled(True)
         self.upload_status.setText("✓ Analysis complete! View results in the Analysis tab.")
         self.statusBar().showMessage("Analysis complete")
+        
+        # Auto-save to history store
+        self._auto_save_analysis(result)
         
         # Display results
         self.display_analysis(result)
@@ -735,6 +936,56 @@ class CR2A_GUI(QMainWindow):
         self.tabs.setCurrentIndex(1)
         
         QMessageBox.information(self, "Success", "Contract analysis complete!\n\nView results in the Analysis tab or ask questions in the Chat tab.")
+    
+    def _auto_save_analysis(self, result):
+        """
+        Auto-save analysis result to history store.
+        
+        This method saves the analysis to the history store and updates the
+        History tab with the new record. Errors are logged and displayed to
+        the user without blocking the workflow.
+        
+        Args:
+            result: The AnalysisResult to save
+        """
+        # Check if history store is available
+        if self.history_store is None:
+            logger.info("History store not available, skipping auto-save")
+            return
+        
+        # Check if history tab is available
+        if self.history_tab is None:
+            logger.info("History tab not available, skipping auto-save")
+            return
+        
+        try:
+            # Save to history store
+            record_id = self.history_store.save(result)
+            logger.info("Auto-saved analysis with ID: %s", record_id)
+            
+            # Get the summary record to add to the History tab
+            summary = self.history_store.get_summary(record_id)
+            
+            if summary:
+                # Add new record to History tab
+                self.history_tab.add_record(summary)
+                logger.info("Added record to History tab: %s", record_id)
+            else:
+                logger.warning("Failed to get summary for record: %s", record_id)
+            
+        except Exception as e:
+            # Log the error
+            logger.error("Failed to auto-save analysis: %s", e)
+            
+            # Show a non-blocking warning to the user
+            # Use QMessageBox.warning instead of critical to indicate it's not fatal
+            QMessageBox.warning(
+                self,
+                "Auto-Save Warning",
+                f"Analysis completed successfully, but failed to save to history:\n\n{str(e)}\n\n"
+                "You can still view and use the analysis results.\n"
+                "The analysis will not be available in the History tab."
+            )
     
     def on_analysis_error(self, error):
         """Handle analysis error."""
@@ -746,23 +997,16 @@ class CR2A_GUI(QMainWindow):
         QMessageBox.critical(self, "Analysis Error", f"Analysis failed:\n\n{error}")
     
     def display_analysis(self, result):
-        """Display analysis results."""
-        # Clear existing content
-        while self.analysis_layout.count():
-            child = self.analysis_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+        """Display analysis results using structured view."""
+        # Hide the "no analysis" message
+        if hasattr(self, 'no_analysis_label'):
+            self.no_analysis_label.setVisible(False)
         
-        # Check if this is a verified result by checking for verification_metadata attribute
-        # This is more robust than isinstance which can fail with import issues
-        is_verified = hasattr(result, 'verification_metadata') and result.verification_metadata is not None
+        # Display in structured view
+        self.structured_view.display_analysis(result)
         
-        if is_verified:
-            self._display_verified_analysis(result)
-        else:
-            self._display_standard_analysis(result)
-        
-        self.analysis_layout.addStretch()
+        # Store current analysis for chat
+        self.current_analysis = result
     
     def _display_standard_analysis(self, result):
         """Display standard (non-verified) analysis results."""

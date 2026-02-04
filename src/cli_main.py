@@ -11,13 +11,14 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-# Add src to path for imports
+# Add src to path for development
 sys.path.insert(0, str(Path(__file__).parent))
 
-from contract_uploader import ContractUploader
-from openai_fallback_client import OpenAIClient
-from analysis_engine import AnalysisEngine
-from query_engine import QueryEngine
+# Use absolute imports for PyInstaller compatibility
+from src.contract_uploader import ContractUploader
+from src.openai_fallback_client import OpenAIClient
+from src.analysis_engine import AnalysisEngine
+from src.query_engine import QueryEngine
 
 
 # Configure logging

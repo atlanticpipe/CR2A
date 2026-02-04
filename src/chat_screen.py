@@ -279,6 +279,8 @@ class ChatScreen:
         """
         Load analysis result for querying.
         
+        Supports both legacy and comprehensive schema formats.
+        
         Args:
             analysis_result: Analysis result dictionary from OpenAI
         """
@@ -286,9 +288,23 @@ class ChatScreen:
         
         self.analysis_result = analysis_result
         
-        # Extract contract filename from metadata
-        metadata = analysis_result.get('contract_metadata', {})
+        # Detect schema format and extract metadata accordingly
+        from src.result_parser import ComprehensiveResultParser
+        schema_format = ComprehensiveResultParser.detect_schema_format(analysis_result)
+        
+        logger.debug("Detected schema format: %s", schema_format)
+        
+        # Extract contract filename from metadata based on format
+        if schema_format == "comprehensive":
+            # Comprehensive format has metadata at top level
+            metadata = analysis_result.get('metadata', {})
+        else:
+            # Legacy format has contract_metadata
+            metadata = analysis_result.get('contract_metadata', {})
+        
         self.contract_filename = metadata.get('filename', 'Unknown Contract')
+        
+        logger.info("Loaded analysis for: %s (format: %s)", self.contract_filename, schema_format)
         
         # Update title with filename
         if self.title_label:

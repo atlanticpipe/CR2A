@@ -1,20 +1,40 @@
 import json
 import os
 import re
+import sys
 from typing import Dict, Tuple
 
 import jsonschema
 
 
+def get_resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and for PyInstaller.
+    
+    Args:
+        relative_path: Relative path to the resource file.
+        
+    Returns:
+        Absolute path to the resource.
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable - use PyInstaller's temp folder
+        base_path = sys._MEIPASS
+    else:
+        # Running as script - use directory of this file
+        base_path = os.path.dirname(__file__)
+    
+    return os.path.join(base_path, relative_path)
+
+
 def load_schema() -> dict:
-    schema_path = os.path.join(os.path.dirname(__file__), 'output_schemas_v1.json')
+    schema_path = get_resource_path('config/output_schemas_v1.json')
 
     with open(schema_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 
 def load_policy_rules() -> dict:
-    policy_path = os.path.join(os.path.dirname(__file__), 'validation_rules_v1.json')
+    policy_path = get_resource_path('config/validation_rules_v1.json')
 
     with open(policy_path, 'r', encoding='utf-8') as f:
         return json.load(f)

@@ -3,19 +3,33 @@ Result Parser Module
 
 Handles parsing and validation of OpenAI API responses into AnalysisResult objects.
 Provides robust handling of partial or malformed responses.
+
+Supports both legacy simplified schema (AnalysisResult) and comprehensive 8-section
+schema (ComprehensiveAnalysisResult).
 """
 
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Type, TypeVar
 from src.analysis_models import (
     AnalysisResult,
     ContractMetadata,
     Clause,
     Risk,
     ComplianceIssue,
-    RedliningSuggestion
+    RedliningSuggestion,
+    # Comprehensive schema models
+    ComprehensiveAnalysisResult,
+    ContractOverview,
+    ClauseBlock,
+    RedlineRecommendation,
+    AdministrativeAndCommercialTerms,
+    TechnicalAndPerformanceTerms,
+    LegalRiskAndEnforcement,
+    RegulatoryAndComplianceTerms,
+    DataTechnologyAndDeliverables,
 )
+from src.schema_validator import SchemaValidator
 
 
 logger = logging.getLogger(__name__)
@@ -417,3 +431,680 @@ class ResultParser:
             suggested_text=suggested_text,
             rationale=rationale
         )
+
+
+# Type variable for section classes
+T = TypeVar('T')
+
+
+class ComprehensiveResultParser:
+    """
+    Parses API responses into ComprehensiveAnalysisResult objects.
+    
+    This class handles parsing of the comprehensive 8-section schema responses
+    from the OpenAI API. It validates responses against the schema and converts
+    them into strongly-typed Python dataclass objects.
+    
+    Validates: Requirements 4.1, 4.2
+    
+    Attributes:
+        _validator: SchemaValidator instance for validating API responses.
+    """
+    
+    # Mapping of section names to their dataclass types
+    SECTION_CLASSES: Dict[str, Type] = {
+        'administrative_and_commercial_terms': AdministrativeAndCommercialTerms,
+        'technical_and_performance_terms': TechnicalAndPerformanceTerms,
+        'legal_risk_and_enforcement': LegalRiskAndEnforcement,
+        'regulatory_and_compliance_terms': RegulatoryAndComplianceTerms,
+        'data_technology_and_deliverables': DataTechnologyAndDeliverables,
+    }
+    
+    def __init__(self, schema_validator: SchemaValidator):
+        """
+        Initialize the ComprehensiveResultParser.
+        
+        Args:
+            schema_validator: SchemaValidator instance for validating API responses.
+        """
+        self._validator = schema_validator
+        logger.debug("ComprehensiveResultParser initialized with SchemaValidator")
+    
+    @staticmethod
+    def detect_schema_format(data: Dict[str, Any]) -> str:
+        """
+        Detect whether data uses legacy or comprehensive schema format.
+        
+        Validates: Requirement 7.1
+        
+        This method identifies the schema format by checking for:
+        1. Presence of schema_version field (comprehensive format)
+        2. Presence of comprehensive section structure (contract_overview, 
+           administrative_and_commercial_terms, etc.)
+        3. Presence of legacy structure (clauses, risks, compliance_issues, 
+           redlining_suggestions)
+        
+        Args:
+            data: Dictionary containing analysis result data
+        
+        Returns:
+            "comprehensive" if data uses the new 8-section schema,
+            "legacy" if data uses the old simplified schema,
+            "unknown" if format cannot be determined
+        """
+        # Check for schema_version field (strong indicator of comprehensive format)
+        if 'schema_version' in data:
+            logger.debug("Detected comprehensive format: schema_version field present")
+            return "comprehensive"
+        
+        # Check for comprehensive section structure
+        comprehensive_sections = [
+            'contract_overview',
+            'administrative_and_commercial_terms',
+            'technical_and_performance_terms',
+            'legal_risk_and_enforcement',
+            'regulatory_and_compliance_terms',
+            'data_technology_and_deliverables',
+            'supplemental_operational_risks'
+        ]
+        
+        # Count how many comprehensive sections are present
+        comprehensive_count = sum(1 for section in comprehensive_sections if section in data)
+        
+        # If we have at least 3 comprehensive sections, it's likely comprehensive format
+        if comprehensive_count >= 3:
+            logger.debug("Detected comprehensive format: %d comprehensive sections found", 
+                        comprehensive_count)
+            return "comprehensive"
+        
+        # Check for legacy structure
+        legacy_fields = ['clauses', 'risks', 'compliance_issues', 'redlining_suggestions']
+        legacy_count = sum(1 for field in legacy_fields if field in data)
+        
+        # If we have at least 2 legacy fields, it's likely legacy format
+        if legacy_count >= 2:
+            logger.debug("Detected legacy format: %d legacy fields found", legacy_count)
+            return "legacy"
+        
+        # Check for contract_metadata (legacy) vs metadata (comprehensive)
+        if 'contract_metadata' in data:
+            logger.debug("Detected legacy format: contract_metadata field present")
+            return "legacy"
+        
+        # Cannot determine format
+        logger.warning("Unable to determine schema format from data keys: %s", list(data.keys()))
+        return "unknown"
+    
+    def parse_api_response(
+        self,
+        api_response: Dict[str, Any],
+        filename: str,
+        file_size_bytes: int,
+        page_count: Optional[int] = None
+    ) -> ComprehensiveAnalysisResult:
+        """
+        Parse and validate API response into ComprehensiveAnalysisResult object.
+        
+        This method parses the comprehensive 8-section schema response from the
+        OpenAI API into a strongly-typed ComprehensiveAnalysisResult object.
+        
+        Validates: Requirements 4.1, 4.2, 6.2, 6.4
+        
+        Args:
+            api_response: JSON response from OpenAI API matching output_schemas_v1.json
+            filename: Name of the analyzed contract file
+            file_size_bytes: Size of the file in bytes
+            page_count: Number of pages (optional)
+        
+        Returns:
+            ComprehensiveAnalysisResult object with all sections populated
+        
+        Raises:
+            ValueError: If response is invalid or missing critical fields
+        """
+        logger.info("Parsing comprehensive API response for file: %s", filename)
+        
+        try:
+            # Validate the response against the schema (Requirement 6.2)
+            logger.debug("Validating API response against schema")
+            validation_result = self._validator.validate(api_response)
+            
+            if not validation_result.is_valid:
+                # Log validation errors (Requirement 6.2)
+                logger.warning("Schema validation failed with %d error(s)", len(validation_result.errors))
+                for error in validation_result.errors:
+                    logger.warning("Validation error at '%s': %s (value: %s)", 
+                                 error.path, error.message, error.value)
+                
+                # Continue processing on non-critical failures (Requirement 6.4)
+                logger.info("Continuing with best-effort parsing despite validation errors")
+            else:
+                logger.debug("Schema validation passed successfully")
+            
+            # Log any warnings (Requirement 6.2)
+            if validation_result.warnings:
+                logger.debug("Schema validation produced %d warning(s)", len(validation_result.warnings))
+                for warning in validation_result.warnings:
+                    logger.debug("Validation warning: %s", warning)
+            
+            # Parse schema version
+            schema_version = api_response.get('schema_version', 'v1.0.0')
+            logger.debug("Schema version: %s", schema_version)
+            
+            # Parse Section I: Contract Overview (Requirement 4.1)
+            contract_overview = self._parse_contract_overview(
+                api_response.get('contract_overview', {})
+            )
+            logger.debug("Parsed contract overview")
+            
+            # Parse Section II-VI: Clause sections (Requirement 4.2)
+            administrative_and_commercial_terms = self._parse_section(
+                api_response.get('administrative_and_commercial_terms', {}),
+                AdministrativeAndCommercialTerms
+            )
+            logger.debug("Parsed administrative_and_commercial_terms")
+            
+            technical_and_performance_terms = self._parse_section(
+                api_response.get('technical_and_performance_terms', {}),
+                TechnicalAndPerformanceTerms
+            )
+            logger.debug("Parsed technical_and_performance_terms")
+            
+            legal_risk_and_enforcement = self._parse_section(
+                api_response.get('legal_risk_and_enforcement', {}),
+                LegalRiskAndEnforcement
+            )
+            logger.debug("Parsed legal_risk_and_enforcement")
+            
+            regulatory_and_compliance_terms = self._parse_section(
+                api_response.get('regulatory_and_compliance_terms', {}),
+                RegulatoryAndComplianceTerms
+            )
+            logger.debug("Parsed regulatory_and_compliance_terms")
+            
+            data_technology_and_deliverables = self._parse_section(
+                api_response.get('data_technology_and_deliverables', {}),
+                DataTechnologyAndDeliverables
+            )
+            logger.debug("Parsed data_technology_and_deliverables")
+            
+            # Parse Section VII: Supplemental Operational Risks (list of ClauseBlocks)
+            supplemental_operational_risks = self._parse_supplemental_risks(
+                api_response.get('supplemental_operational_risks', [])
+            )
+            logger.debug("Parsed %d supplemental operational risks", len(supplemental_operational_risks))
+            
+            # Create metadata
+            metadata = self._create_metadata(
+                api_response,
+                filename,
+                file_size_bytes,
+                page_count
+            )
+            
+            # Create the comprehensive result
+            result = ComprehensiveAnalysisResult(
+                schema_version=schema_version,
+                contract_overview=contract_overview,
+                administrative_and_commercial_terms=administrative_and_commercial_terms,
+                technical_and_performance_terms=technical_and_performance_terms,
+                legal_risk_and_enforcement=legal_risk_and_enforcement,
+                regulatory_and_compliance_terms=regulatory_and_compliance_terms,
+                data_technology_and_deliverables=data_technology_and_deliverables,
+                supplemental_operational_risks=supplemental_operational_risks,
+                metadata=metadata
+            )
+            
+            # Validate the result
+            if not result.validate():
+                logger.warning("ComprehensiveAnalysisResult validation failed, but continuing with partial result")
+            
+            logger.info("Successfully parsed comprehensive analysis result")
+            return result
+            
+        except Exception as e:
+            logger.error("Failed to parse comprehensive API response: %s", e, exc_info=True)
+            raise ValueError(f"Failed to parse comprehensive analysis result: {str(e)}") from e
+    
+    def _parse_contract_overview(self, data: Dict[str, Any]) -> ContractOverview:
+        """
+        Parse Section I: Contract Overview with all 8 fields.
+        
+        Validates: Requirement 4.1
+        
+        Args:
+            data: Dictionary containing contract overview data from API response.
+                  Expects schema format keys (e.g., "Project Title", "Owner").
+        
+        Returns:
+            ContractOverview object with all 8 fields populated.
+            
+        Raises:
+            ValueError: If required fields are missing or have invalid values.
+        """
+        logger.debug("Parsing contract overview section")
+        
+        # Use ContractOverview.from_dict which handles both schema and Python formats
+        try:
+            return ContractOverview.from_dict(data)
+        except (KeyError, ValueError) as e:
+            logger.error("Failed to parse contract overview: %s", e)
+            raise ValueError(f"Invalid contract overview data: {str(e)}") from e
+    
+    def _parse_clause_block(self, data: Dict[str, Any]) -> Optional[ClauseBlock]:
+        """
+        Parse a single ClauseBlock, returning None if empty/missing.
+        
+        Validates: Requirement 4.2
+        
+        Args:
+            data: Dictionary containing clause block data from API response.
+                  Expects schema format keys (e.g., "Clause Language", "Risk Triggers Identified").
+        
+        Returns:
+            ClauseBlock object if data is valid, None if data is empty or invalid.
+        """
+        if not data or not isinstance(data, dict):
+            return None
+        
+        # Check if the clause block has meaningful content
+        clause_language = data.get('Clause Language', data.get('clause_language', ''))
+        if not clause_language:
+            logger.debug("Skipping clause block with empty clause language")
+            return None
+        
+        try:
+            return ClauseBlock.from_dict(data)
+        except (KeyError, ValueError) as e:
+            logger.warning("Failed to parse clause block: %s", e)
+            return None
+    
+    def _parse_section(
+        self,
+        data: Dict[str, Any],
+        section_class: Type[T]
+    ) -> T:
+        """
+        Parse a section with multiple clause blocks.
+        
+        Validates: Requirement 4.2
+        
+        Args:
+            data: Dictionary containing section data from API response.
+                  Keys are clause category names, values are ClauseBlock dictionaries.
+            section_class: The dataclass type for this section
+                          (e.g., AdministrativeAndCommercialTerms).
+        
+        Returns:
+            Instance of section_class with populated clause blocks.
+        """
+        if not data or not isinstance(data, dict):
+            # Return empty section instance
+            return section_class()
+        
+        try:
+            return section_class.from_dict(data)
+        except (KeyError, ValueError) as e:
+            logger.warning("Failed to parse section %s: %s", section_class.__name__, e)
+            # Return empty section instance on error
+            return section_class()
+    
+    def _parse_supplemental_risks(
+        self,
+        data: List[Dict[str, Any]]
+    ) -> List[ClauseBlock]:
+        """
+        Parse Section VII: Supplemental Operational Risks.
+        
+        Args:
+            data: List of ClauseBlock dictionaries from API response.
+        
+        Returns:
+            List of ClauseBlock objects.
+        """
+        if not data or not isinstance(data, list):
+            return []
+        
+        result: List[ClauseBlock] = []
+        for idx, item in enumerate(data):
+            clause_block = self._parse_clause_block(item)
+            if clause_block is not None:
+                result.append(clause_block)
+            else:
+                logger.debug("Skipped invalid supplemental risk at index %d", idx)
+        
+        return result
+    
+    def _create_metadata(
+        self,
+        api_response: Dict[str, Any],
+        filename: str,
+        file_size_bytes: int,
+        page_count: Optional[int]
+    ) -> ContractMetadata:
+        """
+        Create ContractMetadata from API response and file information.
+        
+        Args:
+            api_response: API response dictionary (may contain metadata hints)
+            filename: Contract filename
+            file_size_bytes: File size in bytes
+            page_count: Number of pages (optional)
+        
+        Returns:
+            ContractMetadata object
+        """
+        # Try to get page count from API response if not provided
+        if page_count is None:
+            metadata_dict = api_response.get('metadata', {})
+            page_count = metadata_dict.get('page_count', 0)
+        
+        # Ensure page_count is at least 1 if we have a file
+        if page_count == 0 and file_size_bytes > 0:
+            page_count = 1
+        
+        return ContractMetadata(
+            filename=filename,
+            analyzed_at=datetime.now(),
+            page_count=page_count,
+            file_size_bytes=file_size_bytes
+        )
+    
+    def convert_legacy_result(self, legacy: AnalysisResult) -> ComprehensiveAnalysisResult:
+        """
+        Convert legacy AnalysisResult to ComprehensiveAnalysisResult format.
+        
+        Validates: Requirements 7.2, 7.3
+        
+        This method performs best-effort mapping of legacy data to the comprehensive
+        schema structure:
+        
+        1. Maps legacy clauses to appropriate schema sections based on clause type
+        2. Maps legacy risks to risk_triggers_identified in relevant clause blocks
+        3. Maps legacy redlining_suggestions to redline_recommendations
+        4. Preserves all original data
+        
+        Args:
+            legacy: AnalysisResult object in legacy format
+        
+        Returns:
+            ComprehensiveAnalysisResult with data mapped to new schema structure
+        """
+        logger.info("Converting legacy AnalysisResult to ComprehensiveAnalysisResult")
+        
+        # Create default contract overview from available metadata
+        contract_overview = ContractOverview(
+            project_title=legacy.metadata.filename.replace('.pdf', '').replace('.docx', ''),
+            solicitation_no="N/A",
+            owner="Unknown",
+            contractor="Unknown",
+            scope="Converted from legacy analysis",
+            general_risk_level=self._determine_overall_risk_level(legacy),
+            bid_model="Other",
+            notes=f"Converted from legacy format on {datetime.now().isoformat()}"
+        )
+        
+        # Initialize empty section models
+        administrative_and_commercial_terms = AdministrativeAndCommercialTerms()
+        technical_and_performance_terms = TechnicalAndPerformanceTerms()
+        legal_risk_and_enforcement = LegalRiskAndEnforcement()
+        regulatory_and_compliance_terms = RegulatoryAndComplianceTerms()
+        data_technology_and_deliverables = DataTechnologyAndDeliverables()
+        supplemental_operational_risks: List[ClauseBlock] = []
+        
+        # Map legacy clauses to appropriate sections
+        clause_mapping = self._map_legacy_clauses_to_sections(legacy)
+        
+        # Populate sections with mapped clauses
+        administrative_and_commercial_terms = self._populate_section_from_mapping(
+            clause_mapping.get('administrative_and_commercial_terms', {}),
+            AdministrativeAndCommercialTerms
+        )
+        technical_and_performance_terms = self._populate_section_from_mapping(
+            clause_mapping.get('technical_and_performance_terms', {}),
+            TechnicalAndPerformanceTerms
+        )
+        legal_risk_and_enforcement = self._populate_section_from_mapping(
+            clause_mapping.get('legal_risk_and_enforcement', {}),
+            LegalRiskAndEnforcement
+        )
+        regulatory_and_compliance_terms = self._populate_section_from_mapping(
+            clause_mapping.get('regulatory_and_compliance_terms', {}),
+            RegulatoryAndComplianceTerms
+        )
+        data_technology_and_deliverables = self._populate_section_from_mapping(
+            clause_mapping.get('data_technology_and_deliverables', {}),
+            DataTechnologyAndDeliverables
+        )
+        
+        # Add unmapped clauses to supplemental operational risks
+        supplemental_operational_risks = clause_mapping.get('supplemental_operational_risks', [])
+        
+        # Create comprehensive result
+        result = ComprehensiveAnalysisResult(
+            schema_version="1.0.0-legacy-converted",
+            contract_overview=contract_overview,
+            administrative_and_commercial_terms=administrative_and_commercial_terms,
+            technical_and_performance_terms=technical_and_performance_terms,
+            legal_risk_and_enforcement=legal_risk_and_enforcement,
+            regulatory_and_compliance_terms=regulatory_and_compliance_terms,
+            data_technology_and_deliverables=data_technology_and_deliverables,
+            supplemental_operational_risks=supplemental_operational_risks,
+            metadata=legacy.metadata
+        )
+        
+        logger.info("Successfully converted legacy result to comprehensive format")
+        return result
+    
+    def _determine_overall_risk_level(self, legacy: AnalysisResult) -> str:
+        """
+        Determine overall risk level from legacy risks.
+        
+        Args:
+            legacy: Legacy AnalysisResult
+        
+        Returns:
+            Risk level string: "Low", "Medium", "High", or "Critical"
+        """
+        if not legacy.risks:
+            return "Low"
+        
+        # Count risks by severity
+        severity_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+        for risk in legacy.risks:
+            severity = risk.severity.lower()
+            if severity in severity_counts:
+                severity_counts[severity] += 1
+        
+        # Determine overall level based on highest severity risks
+        if severity_counts['critical'] > 0:
+            return "Critical"
+        elif severity_counts['high'] >= 3:
+            return "High"
+        elif severity_counts['high'] > 0 or severity_counts['medium'] >= 3:
+            return "High"
+        elif severity_counts['medium'] > 0:
+            return "Medium"
+        else:
+            return "Low"
+    
+    def _map_legacy_clauses_to_sections(
+        self, 
+        legacy: AnalysisResult
+    ) -> Dict[str, Any]:
+        """
+        Map legacy clauses to comprehensive schema sections.
+        
+        Args:
+            legacy: Legacy AnalysisResult
+        
+        Returns:
+            Dictionary mapping section names to clause blocks or lists of clause blocks
+        """
+        # Initialize section mappings
+        section_mappings: Dict[str, Dict[str, ClauseBlock]] = {
+            'administrative_and_commercial_terms': {},
+            'technical_and_performance_terms': {},
+            'legal_risk_and_enforcement': {},
+            'regulatory_and_compliance_terms': {},
+            'data_technology_and_deliverables': {},
+        }
+        supplemental_risks: List[ClauseBlock] = []
+        
+        # Define mapping from legacy clause types to comprehensive schema fields
+        clause_type_mapping = {
+            # Administrative & Commercial
+            'payment_terms': ('administrative_and_commercial_terms', 'retainage_progress_payments'),
+            'termination': ('administrative_and_commercial_terms', 'termination_for_convenience'),
+            'change_order': ('administrative_and_commercial_terms', 'change_orders'),
+            'bonding': ('administrative_and_commercial_terms', 'bonding_surety_insurance'),
+            'insurance': ('administrative_and_commercial_terms', 'bonding_surety_insurance'),
+            
+            # Technical & Performance
+            'scope': ('technical_and_performance_terms', 'scope_of_work'),
+            'schedule': ('technical_and_performance_terms', 'performance_schedule'),
+            'warranty': ('technical_and_performance_terms', 'warranty'),
+            'delay': ('technical_and_performance_terms', 'delays'),
+            'deliverable': ('technical_and_performance_terms', 'deliverables'),
+            
+            # Legal Risk & Enforcement
+            'liability': ('legal_risk_and_enforcement', 'limitations_of_liability'),
+            'indemnification': ('legal_risk_and_enforcement', 'indemnification'),
+            'dispute': ('legal_risk_and_enforcement', 'dispute_resolution'),
+            'insurance_coverage': ('legal_risk_and_enforcement', 'insurance_coverage'),
+            
+            # Regulatory & Compliance
+            'compliance': ('regulatory_and_compliance_terms', 'eeo_non_discrimination'),
+            'wage': ('regulatory_and_compliance_terms', 'prevailing_wage'),
+            'payroll': ('regulatory_and_compliance_terms', 'certified_payroll'),
+            
+            # Data & Technology
+            'data': ('data_technology_and_deliverables', 'data_ownership'),
+            'confidentiality': ('data_technology_and_deliverables', 'confidentiality'),
+            'intellectual_property': ('data_technology_and_deliverables', 'intellectual_property'),
+        }
+        
+        # Map each legacy clause to a section
+        for clause in legacy.clauses:
+            # Find related risks for this clause
+            related_risks = [r for r in legacy.risks if r.clause_id == clause.id]
+            
+            # Find related redlining suggestions
+            related_redlines = [rs for rs in legacy.redlining_suggestions if rs.clause_id == clause.id]
+            
+            # Create ClauseBlock from legacy clause
+            clause_block = self._create_clause_block_from_legacy(
+                clause, related_risks, related_redlines
+            )
+            
+            # Determine which section this clause belongs to
+            clause_type_lower = clause.type.lower()
+            mapped = False
+            
+            for type_key, (section_name, field_name) in clause_type_mapping.items():
+                if type_key in clause_type_lower:
+                    section_mappings[section_name][field_name] = clause_block
+                    mapped = True
+                    break
+            
+            # If not mapped, add to supplemental operational risks
+            if not mapped:
+                supplemental_risks.append(clause_block)
+        
+        # Add any unmapped risks to supplemental operational risks
+        unmapped_risks = [r for r in legacy.risks if not any(c.id == r.clause_id for c in legacy.clauses)]
+        for risk in unmapped_risks:
+            clause_block = ClauseBlock(
+                clause_language=f"Risk identified: {risk.description}",
+                clause_summary=risk.description,
+                risk_triggers_identified=[risk.description],
+                flow_down_obligations=[],
+                redline_recommendations=[],
+                harmful_language_policy_conflicts=[]
+            )
+            supplemental_risks.append(clause_block)
+        
+        # Add any unmapped compliance issues to supplemental operational risks
+        for issue in legacy.compliance_issues:
+            clause_block = ClauseBlock(
+                clause_language=f"Compliance issue: {issue.issue}",
+                clause_summary=f"{issue.regulation}: {issue.issue}",
+                risk_triggers_identified=[issue.issue],
+                flow_down_obligations=[],
+                redline_recommendations=[],
+                harmful_language_policy_conflicts=[issue.issue]
+            )
+            supplemental_risks.append(clause_block)
+        
+        return {
+            **section_mappings,
+            'supplemental_operational_risks': supplemental_risks
+        }
+    
+    def _create_clause_block_from_legacy(
+        self,
+        clause: Clause,
+        risks: List[Risk],
+        redlines: List[RedliningSuggestion]
+    ) -> ClauseBlock:
+        """
+        Create a ClauseBlock from legacy clause, risks, and redlining suggestions.
+        
+        Args:
+            clause: Legacy Clause object
+            risks: List of related Risk objects
+            redlines: List of related RedliningSuggestion objects
+        
+        Returns:
+            ClauseBlock with data mapped from legacy objects
+        """
+        # Extract risk triggers from risks
+        risk_triggers = [r.description for r in risks]
+        
+        # Convert legacy redlining suggestions to redline recommendations
+        redline_recommendations = []
+        for redline in redlines:
+            # Determine action based on text comparison
+            if not redline.original_text:
+                action = "insert"
+            elif not redline.suggested_text:
+                action = "delete"
+            else:
+                action = "replace"
+            
+            recommendation = RedlineRecommendation(
+                action=action,
+                text=redline.suggested_text if action != "delete" else redline.original_text,
+                reference=redline.rationale if redline.rationale else None
+            )
+            redline_recommendations.append(recommendation)
+        
+        return ClauseBlock(
+            clause_language=clause.text,
+            clause_summary=f"{clause.type} clause (page {clause.page})",
+            risk_triggers_identified=risk_triggers,
+            flow_down_obligations=[],  # Not available in legacy format
+            redline_recommendations=redline_recommendations,
+            harmful_language_policy_conflicts=[]  # Not available in legacy format
+        )
+    
+    def _populate_section_from_mapping(
+        self,
+        mapping: Dict[str, ClauseBlock],
+        section_class: Type[T]
+    ) -> T:
+        """
+        Populate a section dataclass from a mapping of field names to ClauseBlocks.
+        
+        Args:
+            mapping: Dictionary mapping field names to ClauseBlock objects
+            section_class: The section dataclass type to instantiate
+        
+        Returns:
+            Instance of section_class with fields populated from mapping
+        """
+        # Create kwargs dict with mapped clause blocks
+        kwargs = {field_name: clause_block for field_name, clause_block in mapping.items()}
+        
+        # Instantiate section with mapped fields
+        return section_class(**kwargs)

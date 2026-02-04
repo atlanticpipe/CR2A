@@ -9,6 +9,9 @@ openai>=1.0.0
 cryptography>=41.0.0
 tiktoken>=0.5.0            # Token counting for contract chunking
 
+# Schema validation
+jsonschema>=4.17.0         # JSON Schema validation for API responses
+
 # OCR dependencies (optional but recommended for scanned PDFs)
 pytesseract>=0.3.10
 Pillow>=10.0.0

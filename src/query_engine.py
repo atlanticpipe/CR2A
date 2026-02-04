@@ -225,12 +225,13 @@ class QueryEngine:
         """
         Format analysis result as context for LLM.
         
+        Supports both legacy and comprehensive schema formats.
         Selects relevant portions of analysis based on query to fit within
         the model's context window (~2000 tokens). Uses keyword matching to
         extract the most relevant clauses, risks, and compliance issues.
         
         Args:
-            analysis_result: Full analysis result dictionary
+            analysis_result: Full analysis result dictionary (legacy or comprehensive format)
             query: User's question (used for relevance extraction)
             
         Returns:
@@ -239,90 +240,234 @@ class QueryEngine:
         try:
             logger.debug("Formatting context for query")
             
-            # Extract keywords from query for relevance matching
-            query_lower = query.lower()
+            # Detect schema format
+            from src.result_parser import ComprehensiveResultParser
+            schema_format = ComprehensiveResultParser.detect_schema_format(analysis_result)
             
-            # Get all clauses
-            all_clauses = analysis_result.get('clauses', [])
+            logger.debug("Detected schema format: %s", schema_format)
             
-            # Extract relevant clauses based on query
-            relevant_clauses = self.extract_relevant_clauses(query, all_clauses)
-            
-            # Get risks associated with relevant clauses
-            relevant_clause_ids = {clause['id'] for clause in relevant_clauses}
-            all_risks = analysis_result.get('risks', [])
-            relevant_risks = [
-                risk for risk in all_risks 
-                if risk.get('clause_id') in relevant_clause_ids
-            ]
-            
-            # Check if query mentions compliance/regulation keywords
-            compliance_keywords = ['compliance', 'regulation', 'gdpr', 'ccpa', 'sox', 'legal', 'law']
-            mentions_compliance = any(keyword in query_lower for keyword in compliance_keywords)
-            
-            # Include compliance issues if query mentions compliance or if no specific clauses found
-            all_compliance = analysis_result.get('compliance_issues', [])
-            if mentions_compliance or not relevant_clauses:
-                relevant_compliance = all_compliance[:5]  # Limit to 5 for context size
+            # Extract data based on format
+            if schema_format == "comprehensive":
+                return self._format_context_comprehensive(analysis_result, query)
             else:
-                relevant_compliance = []
-            
-            # Check if query mentions redlining/changes/suggestions
-            redlining_keywords = ['change', 'modify', 'suggest', 'improve', 'redline', 'edit', 'revise']
-            mentions_redlining = any(keyword in query_lower for keyword in redlining_keywords)
-            
-            # Include redlining suggestions if query mentions them or for relevant clauses
-            all_redlining = analysis_result.get('redlining_suggestions', [])
-            if mentions_redlining:
-                relevant_redlining = all_redlining[:5]  # Limit to 5
-            else:
-                relevant_redlining = [
-                    suggestion for suggestion in all_redlining
-                    if suggestion.get('clause_id') in relevant_clause_ids
-                ]
-            
-            # Build formatted context with relevant data (limited for memory optimization)
-            formatted_context = {
-                'contract_metadata': analysis_result.get('contract_metadata', {}),
-                'clauses': relevant_clauses[:self.MAX_CLAUSES],  # Limit to MAX_CLAUSES
-                'risks': relevant_risks[:self.MAX_RISKS],  # Limit to MAX_RISKS
-                'compliance_issues': relevant_compliance[:self.MAX_COMPLIANCE],  # Limit to MAX_COMPLIANCE
-                'redlining_suggestions': relevant_redlining[:self.MAX_REDLINING]  # Limit to MAX_REDLINING
-            }
-            
-            # CRITICAL: Always ensure we have clauses if they exist in the analysis
-            # This ensures the chat can answer questions about the contract
-            if not formatted_context['clauses'] and all_clauses:
-                logger.debug("No relevant clauses found by keyword matching, including all clauses")
-                formatted_context['clauses'] = all_clauses[:self.MAX_CLAUSES]
-            
-            # If no relevant data found, include a summary of all data (still limited)
-            if not relevant_clauses and not relevant_risks and not relevant_compliance:
-                logger.debug("No specific relevant data found, including summary")
-                formatted_context = {
-                    'contract_metadata': analysis_result.get('contract_metadata', {}),
-                    'clauses': all_clauses[:self.MAX_CLAUSES],  # Include more clauses
-                    'risks': all_risks[:self.MAX_RISKS],  # Include more risks
-                    'compliance_issues': all_compliance[:self.MAX_COMPLIANCE],
-                    'redlining_suggestions': all_redlining[:self.MAX_REDLINING]
-                }
-            
-            logger.debug(f"Context formatted: {len(formatted_context['clauses'])} clauses, "
-                        f"{len(formatted_context['risks'])} risks, "
-                        f"{len(formatted_context['compliance_issues'])} compliance issues")
-            
-            return formatted_context
+                return self._format_context_legacy(analysis_result, query)
             
         except Exception as e:
             logger.error(f"Error formatting context: {e}")
             # Return minimal context on error
+            metadata_key = 'metadata' if 'metadata' in analysis_result else 'contract_metadata'
             return {
-                'contract_metadata': analysis_result.get('contract_metadata', {}),
+                metadata_key: analysis_result.get(metadata_key, {}),
                 'clauses': [],
                 'risks': [],
                 'compliance_issues': [],
                 'redlining_suggestions': []
             }
+    
+    def _format_context_legacy(self, analysis_result: Dict[str, Any], query: str) -> Dict[str, Any]:
+        """
+        Format legacy analysis result as context for LLM.
+        
+        Args:
+            analysis_result: Legacy format analysis result dictionary
+            query: User's question
+            
+        Returns:
+            Filtered analysis result dictionary with relevant data
+        """
+        # Extract keywords from query for relevance matching
+        query_lower = query.lower()
+        
+        # Get all clauses
+        all_clauses = analysis_result.get('clauses', [])
+        
+        # Extract relevant clauses based on query
+        relevant_clauses = self.extract_relevant_clauses(query, all_clauses)
+        
+        # Get risks associated with relevant clauses
+        relevant_clause_ids = {clause['id'] for clause in relevant_clauses}
+        all_risks = analysis_result.get('risks', [])
+        relevant_risks = [
+            risk for risk in all_risks 
+            if risk.get('clause_id') in relevant_clause_ids
+        ]
+        
+        # Check if query mentions compliance/regulation keywords
+        compliance_keywords = ['compliance', 'regulation', 'gdpr', 'ccpa', 'sox', 'legal', 'law']
+        mentions_compliance = any(keyword in query_lower for keyword in compliance_keywords)
+        
+        # Include compliance issues if query mentions compliance or if no specific clauses found
+        all_compliance = analysis_result.get('compliance_issues', [])
+        if mentions_compliance or not relevant_clauses:
+            relevant_compliance = all_compliance[:5]  # Limit to 5 for context size
+        else:
+            relevant_compliance = []
+        
+        # Check if query mentions redlining/changes/suggestions
+        redlining_keywords = ['change', 'modify', 'suggest', 'improve', 'redline', 'edit', 'revise']
+        mentions_redlining = any(keyword in query_lower for keyword in redlining_keywords)
+        
+        # Include redlining suggestions if query mentions them or for relevant clauses
+        all_redlining = analysis_result.get('redlining_suggestions', [])
+        if mentions_redlining:
+            relevant_redlining = all_redlining[:5]  # Limit to 5
+        else:
+            relevant_redlining = [
+                suggestion for suggestion in all_redlining
+                if suggestion.get('clause_id') in relevant_clause_ids
+            ]
+        
+        # Build formatted context with relevant data (limited for memory optimization)
+        formatted_context = {
+            'contract_metadata': analysis_result.get('contract_metadata', {}),
+            'clauses': relevant_clauses[:self.MAX_CLAUSES],  # Limit to MAX_CLAUSES
+            'risks': relevant_risks[:self.MAX_RISKS],  # Limit to MAX_RISKS
+            'compliance_issues': relevant_compliance[:self.MAX_COMPLIANCE],  # Limit to MAX_COMPLIANCE
+            'redlining_suggestions': relevant_redlining[:self.MAX_REDLINING]  # Limit to MAX_REDLINING
+        }
+        
+        # CRITICAL: Always ensure we have clauses if they exist in the analysis
+        # This ensures the chat can answer questions about the contract
+        if not formatted_context['clauses'] and all_clauses:
+            logger.debug("No relevant clauses found by keyword matching, including all clauses")
+            formatted_context['clauses'] = all_clauses[:self.MAX_CLAUSES]
+        
+        # If no relevant data found, include a summary of all data (still limited)
+        if not relevant_clauses and not relevant_risks and not relevant_compliance:
+            logger.debug("No specific relevant data found, including summary")
+            formatted_context = {
+                'contract_metadata': analysis_result.get('contract_metadata', {}),
+                'clauses': all_clauses[:self.MAX_CLAUSES],  # Include more clauses
+                'risks': all_risks[:self.MAX_RISKS],  # Include more risks
+                'compliance_issues': all_compliance[:self.MAX_COMPLIANCE],
+                'redlining_suggestions': all_redlining[:self.MAX_REDLINING]
+            }
+        
+        logger.debug(f"Context formatted: {len(formatted_context['clauses'])} clauses, "
+                    f"{len(formatted_context['risks'])} risks, "
+                    f"{len(formatted_context['compliance_issues'])} compliance issues")
+        
+        return formatted_context
+    
+    def _format_context_comprehensive(self, analysis_result: Dict[str, Any], query: str) -> Dict[str, Any]:
+        """
+        Format comprehensive analysis result as context for LLM.
+        
+        Args:
+            analysis_result: Comprehensive format analysis result dictionary
+            query: User's question
+            
+        Returns:
+            Filtered analysis result dictionary with relevant data
+        """
+        query_lower = query.lower()
+        
+        # Extract all clause blocks from all sections
+        all_clause_blocks = []
+        section_names = [
+            'administrative_and_commercial_terms',
+            'technical_and_performance_terms',
+            'legal_risk_and_enforcement',
+            'regulatory_and_compliance_terms',
+            'data_technology_and_deliverables'
+        ]
+        
+        for section_name in section_names:
+            section_data = analysis_result.get(section_name, {})
+            if isinstance(section_data, dict):
+                for clause_name, clause_block in section_data.items():
+                    if clause_block and isinstance(clause_block, dict):
+                        # Add section and clause name for context
+                        clause_block_copy = clause_block.copy()
+                        clause_block_copy['_section'] = section_name
+                        clause_block_copy['_clause_name'] = clause_name
+                        all_clause_blocks.append(clause_block_copy)
+        
+        # Add supplemental operational risks
+        supplemental = analysis_result.get('supplemental_operational_risks', [])
+        for idx, block in enumerate(supplemental):
+            if block and isinstance(block, dict):
+                block_copy = block.copy()
+                block_copy['_section'] = 'supplemental_operational_risks'
+                block_copy['_clause_name'] = f'risk_{idx + 1}'
+                all_clause_blocks.append(block_copy)
+        
+        # Filter clause blocks based on query relevance
+        relevant_blocks = self._extract_relevant_clause_blocks(query, all_clause_blocks)
+        
+        # If no relevant blocks found, include all blocks (limited)
+        if not relevant_blocks:
+            logger.debug("No relevant clause blocks found, including all blocks")
+            relevant_blocks = all_clause_blocks[:self.MAX_CLAUSES]
+        else:
+            relevant_blocks = relevant_blocks[:self.MAX_CLAUSES]
+        
+        # Build formatted context
+        formatted_context = {
+            'metadata': analysis_result.get('metadata', {}),
+            'contract_overview': analysis_result.get('contract_overview', {}),
+            'clause_blocks': relevant_blocks,
+            'schema_version': analysis_result.get('schema_version', 'unknown')
+        }
+        
+        logger.debug(f"Context formatted: {len(relevant_blocks)} clause blocks from comprehensive schema")
+        
+        return formatted_context
+    
+    def _extract_relevant_clause_blocks(
+        self, 
+        query: str, 
+        clause_blocks: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract clause blocks relevant to query using keyword matching.
+        
+        Args:
+            query: User's question
+            clause_blocks: List of clause block dictionaries
+            
+        Returns:
+            List of relevant clause blocks, sorted by relevance
+        """
+        query_lower = query.lower()
+        query_words = set(query_lower.split())
+        
+        scored_blocks = []
+        
+        for block in clause_blocks:
+            score = 0
+            
+            # Check clause language
+            clause_language = block.get('Clause Language', block.get('clause_language', '')).lower()
+            clause_summary = block.get('Clause Summary', block.get('clause_summary', '')).lower()
+            
+            # Count matching words
+            for word in query_words:
+                if len(word) > 3:  # Only count words longer than 3 chars
+                    if word in clause_language:
+                        score += 2
+                    if word in clause_summary:
+                        score += 1
+            
+            # Check risk triggers
+            risk_triggers = block.get('Risk Triggers Identified', block.get('risk_triggers_identified', []))
+            for trigger in risk_triggers:
+                if isinstance(trigger, str) and any(word in trigger.lower() for word in query_words if len(word) > 3):
+                    score += 3
+            
+            # Check clause name
+            clause_name = block.get('_clause_name', '').lower()
+            for word in query_words:
+                if len(word) > 3 and word in clause_name:
+                    score += 1
+            
+            if score > 0:
+                scored_blocks.append((score, block))
+        
+        # Sort by score (highest first)
+        scored_blocks.sort(key=lambda x: x[0], reverse=True)
+        
+        return [block for score, block in scored_blocks]
     
     def extract_relevant_clauses(self, query: str, clauses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
