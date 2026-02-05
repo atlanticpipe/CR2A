@@ -2,6 +2,8 @@
 # Contract Analysis Tool - .gitignore
 # ============================================================================
 config.txt
+tests/
+
 # ============================================================================
 # Python
 # ============================================================================
@@ -71,6 +73,14 @@ error.log
 *.key
 secrets.json
 config.local.json
+
+# Code Signing Certificates - NEVER COMMIT
+certs/
+*.pfx
+*.p12
+*.cer
+*.crt
+*.pem
 
 # ============================================================================
 # Test and Sample Files
@@ -159,3 +169,11 @@ desktop.ini
 dmypy.json
 .pyre/
 .pytype/
+
+# Additional build and test artifacts (added by cleanup script)
+MagicMock/
+installer/output/
+.benchmarks/
+
+# Virtual environment (project specific)
+venv311/
