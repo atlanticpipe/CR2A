@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Tuple, Set
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from src.analysis_models import AnalysisResult, Clause, Risk, ComplianceIssue, RedliningSuggestion
+from src.analysis_models import AnalysisResult, ComprehensiveAnalysisResult, Clause, Risk, ComplianceIssue, RedliningSuggestion
 from src.exhaustiveness_models import Conflict
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class ResultComparator:
     
     def compare_passes(
         self,
-        pass_results: List[AnalysisResult]
+        pass_results: List  # List of AnalysisResult or ComprehensiveAnalysisResult
     ) -> ComparisonResult:
         """
         Compare results from multiple analysis passes.
@@ -96,18 +96,122 @@ class ResultComparator:
     
     def _extract_all_findings(
         self,
-        result: AnalysisResult,
+        result,  # Can be AnalysisResult or ComprehensiveAnalysisResult
         pass_number: int
     ) -> List[Dict[str, Any]]:
         """
-        Extract all findings from an AnalysisResult into a flat list.
+        Extract all findings from an AnalysisResult or ComprehensiveAnalysisResult into a flat list.
+        
+        Args:
+            result: AnalysisResult or ComprehensiveAnalysisResult to extract from
+            pass_number: Pass number for tracking
+            
+        Returns:
+            List of finding dictionaries with type and pass info
+        """
+        findings = []
+        
+        # Check if this is a ComprehensiveAnalysisResult (new format)
+        if hasattr(result, 'administrative_and_commercial_terms'):
+            # Extract from comprehensive schema sections
+            findings.extend(self._extract_from_comprehensive_result(result, pass_number))
+        else:
+            # Extract from legacy format
+            findings.extend(self._extract_from_legacy_result(result, pass_number))
+        
+        return findings
+    
+    def _extract_from_comprehensive_result(
+        self,
+        result,  # ComprehensiveAnalysisResult
+        pass_number: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract findings from ComprehensiveAnalysisResult.
+        
+        Args:
+            result: ComprehensiveAnalysisResult to extract from
+            pass_number: Pass number for tracking
+            
+        Returns:
+            List of finding dictionaries
+        """
+        findings = []
+        
+        # Extract from all sections
+        sections = [
+            ('administrative_and_commercial_terms', result.administrative_and_commercial_terms),
+            ('technical_and_performance_terms', result.technical_and_performance_terms),
+            ('legal_risk_and_enforcement', result.legal_risk_and_enforcement),
+            ('regulatory_and_compliance_terms', result.regulatory_and_compliance_terms),
+            ('data_technology_and_deliverables', result.data_technology_and_deliverables),
+        ]
+        
+        for section_name, section in sections:
+            if section is None:
+                continue
+            
+            # Get the section's __dict__ to access only data attributes, not methods
+            section_dict = section.__dict__ if hasattr(section, '__dict__') else {}
+            
+            # Iterate through all clause blocks in the section
+            for field_name, clause_block in section_dict.items():
+                if field_name.startswith('_') or clause_block is None:
+                    continue
+                
+                # Check if this is actually a ClauseBlock object
+                if not hasattr(clause_block, 'clause_language'):
+                    continue
+                
+                # Extract clause block as a finding
+                findings.append({
+                    'type': 'clause',
+                    'data': {
+                        'section': section_name,
+                        'category': field_name,
+                        'text': clause_block.clause_language,
+                        'summary': clause_block.clause_summary,
+                        'risk_triggers': clause_block.risk_triggers_identified,
+                        'flow_down_obligations': clause_block.flow_down_obligations,
+                        'redline_recommendations': [r.to_dict() for r in clause_block.redline_recommendations],
+                        'harmful_language': clause_block.harmful_language_policy_conflicts,
+                    },
+                    'pass_number': pass_number,
+                    'text_key': 'text',
+                    'id_key': 'category'
+                })
+        
+        # Extract supplemental operational risks
+        if result.supplemental_operational_risks:
+            for i, risk_block in enumerate(result.supplemental_operational_risks):
+                findings.append({
+                    'type': 'risk',
+                    'data': {
+                        'text': risk_block.clause_language,
+                        'description': risk_block.clause_summary,
+                        'risk_triggers': risk_block.risk_triggers_identified,
+                    },
+                    'pass_number': pass_number,
+                    'text_key': 'description',
+                    'id_key': 'text'
+                })
+        
+        return findings
+    
+    def _extract_from_legacy_result(
+        self,
+        result,  # AnalysisResult
+        pass_number: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract findings from legacy AnalysisResult.
         
         Args:
             result: AnalysisResult to extract from
             pass_number: Pass number for tracking
             
         Returns:
-            List of finding dictionaries with type and pass info
+            List of finding dictionaries
         """
         findings = []
         
@@ -330,7 +434,7 @@ class ResultComparator:
     
     def find_consensus_findings(
         self,
-        pass_results: List[AnalysisResult]
+        pass_results: List  # List of AnalysisResult or ComprehensiveAnalysisResult
     ) -> List[Dict[str, Any]]:
         """
         Identify findings that appear in all passes.
@@ -346,7 +450,7 @@ class ResultComparator:
     
     def find_conflicts(
         self,
-        pass_results: List[AnalysisResult]
+        pass_results: List  # List of AnalysisResult or ComprehensiveAnalysisResult
     ) -> List[Conflict]:
         """
         Identify conflicting findings between passes.

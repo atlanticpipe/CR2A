@@ -212,61 +212,214 @@ class HistoryStore:
         """
         # Generate unique ID
         record_id = str(uuid.uuid4())
+        analysis_file = None
         
         try:
             # Import here to avoid circular dependency
             from src.analysis_models import ComprehensiveAnalysisResult
             
-            # Handle different result types
+            # Log result type at start
+            result_type = type(analysis_result).__name__
+            logger.info("Saving analysis result of type: %s", result_type)
+            
+            # Handle different result types with detailed logging
             if hasattr(analysis_result, 'verification_metadata'):
                 # This is a VerifiedAnalysisResult
-                # Extract metadata from base_result
-                base_result = analysis_result.base_result
-                if isinstance(base_result, dict):
-                    # base_result is already a dict
-                    metadata = base_result.get('contract_metadata', {})
-                    filename = metadata.get('filename', 'unknown')
-                    analyzed_at = metadata.get('analyzed_at', '')
-                    clauses = base_result.get('clauses', [])
-                    risks = base_result.get('risks', [])
-                else:
-                    # base_result is an AnalysisResult object
-                    filename = base_result.metadata.filename
-                    analyzed_at = base_result.metadata.analyzed_at.isoformat()
-                    clauses = base_result.clauses
-                    risks = base_result.risks
+                logger.debug("Processing VerifiedAnalysisResult")
+                
+                try:
+                    # Extract metadata from base_result
+                    base_result = analysis_result.base_result
+                    logger.debug("base_result type: %s", type(base_result).__name__)
+                    
+                    if isinstance(base_result, dict):
+                        # base_result is already a dict
+                        logger.debug("Extracting metadata from dict base_result")
+                        
+                        # Try to get metadata from the dict
+                        metadata = base_result.get('metadata', base_result.get('contract_metadata', {}))
+                        
+                        if not metadata:
+                            logger.warning("No metadata found in base_result dict, checking top-level keys")
+                            # Fallback: check if metadata fields are at top level
+                            filename = base_result.get('filename', 'unknown')
+                            analyzed_at = base_result.get('analyzed_at', '')
+                        else:
+                            filename = metadata.get('filename', 'unknown')
+                            analyzed_at = metadata.get('analyzed_at', '')
+                        
+                        logger.debug("Extracted filename: %s, analyzed_at: %s", filename, analyzed_at)
+                        
+                        # Count clauses from dict structure
+                        # For ComprehensiveAnalysisResult dict, count clause blocks from sections
+                        clauses = []
+                        risks = []
+                        
+                        # Check if this is a comprehensive result dict
+                        if 'administrative_and_commercial_terms' in base_result:
+                            logger.debug("Counting clauses from comprehensive result dict")
+                            section_keys = [
+                                'administrative_and_commercial_terms',
+                                'technical_and_performance_terms',
+                                'legal_risk_and_enforcement',
+                                'regulatory_and_compliance_terms',
+                                'data_technology_and_deliverables'
+                            ]
+                            
+                            for section_key in section_keys:
+                                section_data = base_result.get(section_key, {})
+                                if section_data and isinstance(section_data, dict):
+                                    for category_name, clause_block in section_data.items():
+                                        if clause_block and isinstance(clause_block, dict):
+                                            clauses.append(clause_block)
+                                            risk_triggers = clause_block.get('Risk Triggers Identified', 
+                                                                            clause_block.get('risk_triggers_identified', []))
+                                            if risk_triggers:
+                                                risks.extend(risk_triggers)
+                            
+                            # Add supplemental operational risks
+                            supplemental = base_result.get('supplemental_operational_risks', [])
+                            if supplemental:
+                                clauses.extend(supplemental)
+                                for block in supplemental:
+                                    if isinstance(block, dict):
+                                        risk_triggers = block.get('Risk Triggers Identified',
+                                                                 block.get('risk_triggers_identified', []))
+                                        if risk_triggers:
+                                            risks.extend(risk_triggers)
+                        else:
+                            # Legacy format
+                            logger.debug("Counting clauses from legacy result dict")
+                            clauses = base_result.get('clauses', [])
+                            risks = base_result.get('risks', [])
+                        
+                        logger.debug("Counted %d clauses and %d risks from dict base_result", 
+                                   len(clauses), len(risks))
+                    else:
+                        # base_result is an object (AnalysisResult or ComprehensiveAnalysisResult)
+                        logger.debug("Extracting metadata from object base_result")
+                        
+                        try:
+                            filename = base_result.metadata.filename
+                            analyzed_at = base_result.metadata.analyzed_at.isoformat()
+                            logger.debug("Extracted filename: %s, analyzed_at: %s", filename, analyzed_at)
+                        except AttributeError as e:
+                            logger.error("Failed to extract metadata from object: %s", e, exc_info=True)
+                            raise HistoryStoreError(f"Invalid base_result object structure: {e}")
+                        
+                        # Check if it's a ComprehensiveAnalysisResult
+                        if isinstance(base_result, ComprehensiveAnalysisResult):
+                            logger.debug("Counting clauses from ComprehensiveAnalysisResult object")
+                            clauses = []
+                            risks = []
+                            
+                            # Iterate through all 5 section fields
+                            sections = [
+                                base_result.administrative_and_commercial_terms,
+                                base_result.technical_and_performance_terms,
+                                base_result.legal_risk_and_enforcement,
+                                base_result.regulatory_and_compliance_terms,
+                                base_result.data_technology_and_deliverables
+                            ]
+                            
+                            for section in sections:
+                                if section is not None:
+                                    for field_name in section.__dataclass_fields__:
+                                        clause_block = getattr(section, field_name)
+                                        if clause_block is not None:
+                                            clauses.append(clause_block)
+                                            risks.extend(clause_block.risk_triggers_identified)
+                            
+                            # Add supplemental operational risks
+                            if base_result.supplemental_operational_risks:
+                                clauses.extend(base_result.supplemental_operational_risks)
+                                for block in base_result.supplemental_operational_risks:
+                                    risks.extend(block.risk_triggers_identified)
+                            
+                            logger.debug("Counted %d clauses and %d risks from ComprehensiveAnalysisResult", 
+                                       len(clauses), len(risks))
+                        else:
+                            # Standard AnalysisResult
+                            logger.debug("Counting clauses from AnalysisResult object")
+                            clauses = base_result.clauses
+                            risks = base_result.risks
+                            logger.debug("Counted %d clauses and %d risks from AnalysisResult", 
+                                       len(clauses), len(risks))
+                
+                except Exception as e:
+                    logger.error("Error extracting metadata from VerifiedAnalysisResult: %s", e, exc_info=True)
+                    raise HistoryStoreError(f"Failed to extract metadata from VerifiedAnalysisResult: {e}")
+                    
             elif isinstance(analysis_result, ComprehensiveAnalysisResult):
                 # This is a ComprehensiveAnalysisResult
-                filename = analysis_result.metadata.filename
-                analyzed_at = analysis_result.metadata.analyzed_at.isoformat()
-                # Count clauses and risks from all sections
-                clauses = []
-                risks = []
-                # Count non-None clause blocks across all sections
-                for section in [
-                    analysis_result.administrative_and_commercial_terms,
-                    analysis_result.technical_and_performance_terms,
-                    analysis_result.legal_risk_and_enforcement,
-                    analysis_result.regulatory_and_compliance_terms,
-                    analysis_result.data_technology_and_deliverables
-                ]:
-                    for field_name in section.__dataclass_fields__:
-                        clause_block = getattr(section, field_name)
-                        if clause_block is not None:
-                            clauses.append(clause_block)
-                            risks.extend(clause_block.risk_triggers_identified)
-                # Add supplemental operational risks
-                clauses.extend(analysis_result.supplemental_operational_risks)
-                for block in analysis_result.supplemental_operational_risks:
-                    risks.extend(block.risk_triggers_identified)
+                logger.debug("Processing ComprehensiveAnalysisResult")
+                
+                try:
+                    filename = analysis_result.metadata.filename
+                    analyzed_at = analysis_result.metadata.analyzed_at.isoformat()
+                    logger.debug("Extracted filename: %s, analyzed_at: %s", filename, analyzed_at)
+                    
+                    # Count clauses and risks from all sections
+                    logger.debug("Counting clauses from all 5 sections")
+                    clauses = []
+                    risks = []
+                    
+                    # Iterate through all 5 section fields correctly
+                    sections = [
+                        ('administrative_and_commercial_terms', analysis_result.administrative_and_commercial_terms),
+                        ('technical_and_performance_terms', analysis_result.technical_and_performance_terms),
+                        ('legal_risk_and_enforcement', analysis_result.legal_risk_and_enforcement),
+                        ('regulatory_and_compliance_terms', analysis_result.regulatory_and_compliance_terms),
+                        ('data_technology_and_deliverables', analysis_result.data_technology_and_deliverables)
+                    ]
+                    
+                    for section_name, section in sections:
+                        if section is None:
+                            logger.debug("Section %s is None, skipping", section_name)
+                            continue
+                        
+                        section_clause_count = 0
+                        for field_name in section.__dataclass_fields__:
+                            clause_block = getattr(section, field_name)
+                            if clause_block is not None:
+                                clauses.append(clause_block)
+                                section_clause_count += 1
+                                risks.extend(clause_block.risk_triggers_identified)
+                        
+                        logger.debug("Section %s: %d clauses", section_name, section_clause_count)
+                    
+                    # Add supplemental operational risks
+                    if analysis_result.supplemental_operational_risks:
+                        supplemental_count = len(analysis_result.supplemental_operational_risks)
+                        clauses.extend(analysis_result.supplemental_operational_risks)
+                        logger.debug("Added %d supplemental operational risks", supplemental_count)
+                        
+                        for block in analysis_result.supplemental_operational_risks:
+                            risks.extend(block.risk_triggers_identified)
+                    
+                    logger.debug("Total: %d clauses and %d risks", len(clauses), len(risks))
+                    
+                except Exception as e:
+                    logger.error("Error extracting metadata from ComprehensiveAnalysisResult: %s", e, exc_info=True)
+                    raise HistoryStoreError(f"Failed to extract metadata from ComprehensiveAnalysisResult: {e}")
+                    
             else:
                 # This is a standard AnalysisResult
-                filename = analysis_result.metadata.filename
-                analyzed_at = analysis_result.metadata.analyzed_at.isoformat()
-                clauses = analysis_result.clauses
-                risks = analysis_result.risks
+                logger.debug("Processing standard AnalysisResult")
+                
+                try:
+                    filename = analysis_result.metadata.filename
+                    analyzed_at = analysis_result.metadata.analyzed_at.isoformat()
+                    clauses = analysis_result.clauses
+                    risks = analysis_result.risks
+                    logger.debug("Extracted filename: %s, analyzed_at: %s, %d clauses, %d risks", 
+                               filename, analyzed_at, len(clauses), len(risks))
+                except Exception as e:
+                    logger.error("Error extracting metadata from AnalysisResult: %s", e, exc_info=True)
+                    raise HistoryStoreError(f"Failed to extract metadata from AnalysisResult: {e}")
             
             # Create analysis file
+            logger.debug("Creating analysis file: %s", record_id)
             analysis_file = self.storage_dir / f"{record_id}.json"
             analysis_data = {
                 "version": self.ANALYSIS_VERSION,
@@ -280,6 +433,7 @@ class HistoryStore:
             logger.debug("Saved analysis to: %s", analysis_file)
             
             # Update index
+            logger.debug("Updating index with new record")
             index_data = self._read_index()
             
             record = {
@@ -294,17 +448,27 @@ class HistoryStore:
             index_data["records"].append(record)
             self._write_index(index_data)
             
-            logger.info("Saved analysis record: %s (%s)", record_id, filename)
+            logger.info("Successfully saved analysis record: %s (%s) with %d clauses and %d risks", 
+                       record_id, filename, len(clauses), len(risks))
             return record_id
             
+        except HistoryStoreError:
+            # Re-raise HistoryStoreError as-is
+            raise
         except Exception as e:
-            logger.error("Failed to save analysis: %s", e)
+            # Log full exception with stack trace
+            logger.error("Failed to save analysis: %s", e, exc_info=True)
+            
             # Clean up partial save
-            try:
-                if analysis_file.exists():
-                    analysis_file.unlink()
-            except:
-                pass
+            if analysis_file is not None:
+                try:
+                    if analysis_file.exists():
+                        analysis_file.unlink()
+                        logger.debug("Cleaned up partial save: %s", analysis_file)
+                except Exception as cleanup_error:
+                    logger.warning("Failed to clean up partial save: %s", cleanup_error)
+            
+            # Raise clear error message
             raise HistoryStoreError(f"Failed to save analysis: {e}")
     
     def load_all(self) -> List[AnalysisRecord]:

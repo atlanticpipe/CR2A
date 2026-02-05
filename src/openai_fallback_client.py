@@ -8,6 +8,7 @@ It implements structured prompts for JSON output, error handling, and retry logi
 import json
 import time
 import logging
+import re
 from typing import Dict, Optional, Callable
 from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError, AuthenticationError
@@ -327,15 +328,19 @@ For each clause category found in the contract, provide analysis using this Clau
 
 ## CRITICAL INSTRUCTIONS
 
-1. **OMIT MISSING CLAUSES**: If a clause category is NOT found in the contract, DO NOT include it in the response. Only include clause categories that are actually present in the contract text. Do not include empty objects or null values for missing clauses.
+1. **RETURN ONLY FOUND CLAUSES**: Only include clause categories that are actually present in the contract text. Do not include categories that are not found. The application will automatically add missing categories for display purposes.
 
-2. **JSON OUTPUT ONLY**: Output ONLY a valid JSON object. Do not include explanations, markdown formatting, or any text outside the JSON structure.
+2. **JSON OUTPUT ONLY**: Output ONLY a valid JSON object. Do not include explanations, markdown formatting, code blocks, or any text outside the JSON structure. Start directly with { and end with }.
 
 3. **ACCURACY**: Only extract information that is explicitly stated or clearly implied in the contract. Do not fabricate or assume clause content.
 
-4. **COMPLETENESS**: For each clause found, provide all applicable ClauseBlock fields. If a specific field (like Flow-Down Obligations) is not applicable, use an empty array [].
+4. **COMPLETENESS**: For each clause found, provide all applicable ClauseBlock fields. If a specific field is not applicable, use an empty array [].
 
-5. **RISK ASSESSMENT**: Be thorough in identifying risk triggers and harmful language. Consider the contractor's perspective when assessing risks."""
+5. **RISK ASSESSMENT**: Be thorough in identifying risk triggers and harmful language. Consider the contractor's perspective when assessing risks.
+
+6. **BE CONCISE**: Keep summaries and descriptions concise to avoid token limits. Focus on key information. Use brief, clear language. Avoid repetition.
+
+7. **PRIORITIZE COMPLETENESS**: It's better to include all found categories with brief summaries than to provide detailed analysis of only a few categories."""
     
     def _build_query_system_message(self) -> str:
         """
@@ -361,7 +366,7 @@ Guidelines:
         to provide detailed instructions for contract analysis output.
         
         Args:
-            contract_text: The contract text to analyze
+            contract_text: The contract text to analyze (may be full text or pre-extracted sections)
         
         Returns:
             Formatted user message with comprehensive schema and contract text
@@ -373,22 +378,37 @@ Guidelines:
         # Get comprehensive schema description from SchemaLoader
         schema_description = self._schema_loader.get_schema_for_prompt()
         
+        # Detect if this is focused extraction (heuristic: much shorter than typical contract)
+        is_focused = len(contract_text) < 50000  # Less than ~50KB suggests focused extraction
+        
+        if is_focused:
+            contract_label = "EXTRACTED CONTRACT SECTIONS"
+            extraction_note = """
+NOTE: The text below contains pre-extracted sections that match the clause categories 
+in the schema. These sections were identified using pattern matching to focus the 
+analysis on relevant contract language."""
+        else:
+            contract_label = "CONTRACT TEXT"
+            extraction_note = ""
+        
         return f"""Analyze the following contract and provide a structured JSON response.
 
 {schema_description}
 
 ---
 
-CONTRACT TEXT:
+{contract_label}:
 {contract_text}
 
 ---
+{extraction_note}
 
 Provide your analysis as a valid JSON object matching the schema structure described above. Remember to:
 1. Include schema_version field (e.g., "v1.0.0")
-2. Only include clause categories that are found in the contract
-3. Omit clause categories that are not present (do not include empty values)
-4. Use the exact ClauseBlock structure for each clause found"""
+2. Only include clause categories that are actually found in the contract
+3. Omit categories not present - the application will add them for display
+4. Use the exact ClauseBlock structure for each clause found
+5. Output ONLY valid JSON - no markdown, no code blocks, no explanations"""
     
     def _build_query_user_message(self, query: str, context: Dict) -> str:
         """
@@ -417,6 +437,8 @@ Please provide a clear and accurate answer based on the information above."""
         """
         Format contract context as readable text for query processing.
         
+        Supports both legacy and comprehensive schema formats.
+        
         Args:
             context: Contract analysis result dictionary
         
@@ -425,57 +447,92 @@ Please provide a clear and accurate answer based on the information above."""
         """
         parts = []
         
-        # Add metadata if present
-        if "contract_metadata" in context:
-            metadata = context["contract_metadata"]
-            parts.append("CONTRACT METADATA:")
-            if "filename" in metadata:
-                parts.append(f"  Filename: {metadata['filename']}")
-            if "contract_type" in metadata:
-                parts.append(f"  Type: {metadata['contract_type']}")
-            if "parties" in metadata and metadata["parties"]:
-                parties_str = ", ".join([p.get("name", "Unknown") for p in metadata["parties"]])
-                parts.append(f"  Parties: {parties_str}")
-            if "effective_date" in metadata:
-                parts.append(f"  Effective Date: {metadata['effective_date']}")
-            parts.append("")
+        # Check if this is comprehensive format (has contract_overview or clause_blocks)
+        is_comprehensive = 'contract_overview' in context or 'clause_blocks' in context
         
-        # Add clauses if present - include FULL text for better answers
-        if "clauses" in context and context["clauses"]:
-            parts.append("CONTRACT CLAUSES:")
-            for clause in context["clauses"][:15]:  # Limit to first 15 clauses
-                clause_type = clause.get("type", "Unknown")
-                clause_text = clause.get("text", "")  # Include full text
-                risk_level = clause.get("risk_level", "unknown")
-                page = clause.get("page", "?")
-                parts.append(f"  [{clause_type}] (Page {page}, Risk: {risk_level})")
-                parts.append(f"    {clause_text}")
+        if is_comprehensive:
+            # Handle comprehensive format
+            
+            # Add contract overview if present
+            if "contract_overview" in context and context["contract_overview"]:
+                overview = context["contract_overview"]
+                parts.append("CONTRACT OVERVIEW:")
+                for key, value in overview.items():
+                    if value:
+                        # Convert snake_case to Title Case for display
+                        display_key = key.replace('_', ' ').title()
+                        parts.append(f"  {display_key}: {value}")
+                parts.append("")
+            
+            # Add clause blocks if present
+            if "clause_blocks" in context and context["clause_blocks"]:
+                parts.append("CONTRACT CLAUSES:")
+                for block in context["clause_blocks"][:15]:  # Limit to first 15
+                    section = block.get('_section', 'Unknown Section')
+                    clause_name = block.get('_clause_name', 'Unknown Clause')
+                    clause_language = block.get('Clause Language', block.get('clause_language', ''))
+                    clause_summary = block.get('Clause Summary', block.get('clause_summary', ''))
+                    
+                    parts.append(f"  [{clause_name}]")
+                    if clause_summary and clause_summary.lower() != 'not found':
+                        parts.append(f"    Summary: {clause_summary}")
+                    if clause_language and clause_language.lower() != 'not found':
+                        parts.append(f"    Language: {clause_language}")
+                    parts.append("")
+        else:
+            # Handle legacy format
+            
+            # Add metadata if present
+            if "contract_metadata" in context:
+                metadata = context["contract_metadata"]
+                parts.append("CONTRACT METADATA:")
+                if "filename" in metadata:
+                    parts.append(f"  Filename: {metadata['filename']}")
+                if "contract_type" in metadata:
+                    parts.append(f"  Type: {metadata['contract_type']}")
+                if "parties" in metadata and metadata["parties"]:
+                    parties_str = ", ".join([p.get("name", "Unknown") for p in metadata["parties"]])
+                    parts.append(f"  Parties: {parties_str}")
+                if "effective_date" in metadata:
+                    parts.append(f"  Effective Date: {metadata['effective_date']}")
+                parts.append("")
+            
+            # Add clauses if present - include FULL text for better answers
+            if "clauses" in context and context["clauses"]:
+                parts.append("CONTRACT CLAUSES:")
+                for clause in context["clauses"][:15]:  # Limit to first 15 clauses
+                    clause_type = clause.get("type", "Unknown")
+                    clause_text = clause.get("text", "")  # Include full text
+                    risk_level = clause.get("risk_level", "unknown")
+                    page = clause.get("page", "?")
+                    parts.append(f"  [{clause_type}] (Page {page}, Risk: {risk_level})")
+                    parts.append(f"    {clause_text}")
+                    parts.append("")
+            
+            # Add risks if present
+            if "risks" in context and context["risks"]:
+                parts.append("IDENTIFIED RISKS:")
+                for risk in context["risks"][:10]:  # Limit to first 10 risks
+                    severity = risk.get("severity", "unknown")
+                    description = risk.get("description", "")
+                    recommendation = risk.get("recommendation", "")
+                    parts.append(f"  - [{severity.upper()}] {description}")
+                    if recommendation:
+                        parts.append(f"    Recommendation: {recommendation}")
+                parts.append("")
+            
+            # Add compliance issues if present
+            if "compliance_issues" in context and context["compliance_issues"]:
+                parts.append("COMPLIANCE ISSUES:")
+                for issue in context["compliance_issues"][:10]:  # Limit to first 10 issues
+                    regulation = issue.get("regulation", "Unknown")
+                    issue_desc = issue.get("issue", "")
+                    severity = issue.get("severity", "unknown")
+                    parts.append(f"  - [{regulation}] {issue_desc} (Severity: {severity})")
                 parts.append("")
         
-        # Add risks if present
-        if "risks" in context and context["risks"]:
-            parts.append("IDENTIFIED RISKS:")
-            for risk in context["risks"][:10]:  # Limit to first 10 risks
-                severity = risk.get("severity", "unknown")
-                description = risk.get("description", "")
-                recommendation = risk.get("recommendation", "")
-                parts.append(f"  - [{severity.upper()}] {description}")
-                if recommendation:
-                    parts.append(f"    Recommendation: {recommendation}")
-            parts.append("")
-        
-        # Add compliance issues if present
-        if "compliance_issues" in context and context["compliance_issues"]:
-            parts.append("COMPLIANCE ISSUES:")
-            for issue in context["compliance_issues"][:10]:  # Limit to first 10 issues
-                regulation = issue.get("regulation", "Unknown")
-                issue_desc = issue.get("issue", "")
-                severity = issue.get("severity", "unknown")
-                parts.append(f"  - [{regulation}] {issue_desc} (Severity: {severity})")
-            parts.append("")
-        
         result = "\n".join(parts) if parts else "No contract context available"
-        logger.debug(f"Formatted context length: {len(result)} chars")
+        logger.debug(f"Formatted context length: {len(result)} chars, format: {'comprehensive' if is_comprehensive else 'legacy'}")
         return result
     
     def _make_api_call_with_retry(
@@ -515,7 +572,7 @@ Please provide a clear and accurate answer based on the information above."""
                         {"role": "user", "content": user_message}
                     ],
                     temperature=0.0,  # Deterministic output
-                    max_tokens=4000,
+                    max_tokens=16000,  # Increased from 4000 to allow more complete responses
                     response_format={"type": "json_object"}
                 )
                 
@@ -524,7 +581,26 @@ Please provide a clear and accurate answer based on the information above."""
                 if not response_text:
                     raise ValueError("Empty response from OpenAI API")
                 
-                result = json.loads(response_text)
+                # Try to parse JSON
+                try:
+                    result = json.loads(response_text)
+                except json.JSONDecodeError as e:
+                    # Log the error and try to repair the JSON
+                    logger.warning(f"JSON parsing failed: {e}")
+                    logger.debug(f"Response text (first 500 chars): {response_text[:500]}")
+                    
+                    # Try to repair common JSON issues
+                    repaired_text = self._repair_json(response_text)
+                    if repaired_text != response_text:
+                        logger.info("Attempting to parse repaired JSON")
+                        try:
+                            result = json.loads(repaired_text)
+                            logger.info("Successfully parsed repaired JSON")
+                        except json.JSONDecodeError as e2:
+                            logger.error(f"Repaired JSON still invalid: {e2}")
+                            raise ValueError(f"Invalid JSON response from API: {e}") from e
+                    else:
+                        raise ValueError(f"Invalid JSON response from API: {e}") from e
                 
                 if progress_callback:
                     progress_callback("Parsing analysis results...", 90)
@@ -606,6 +682,55 @@ Please provide a clear and accurate answer based on the information above."""
         delay = self._base_delay * (2 ** attempt)
         # Cap at 10 seconds for non-rate-limit errors
         return min(delay, 10.0)
+    
+    def _repair_json(self, json_text: str) -> str:
+        """
+        Attempt to repair common JSON formatting issues.
+        
+        Args:
+            json_text: Potentially malformed JSON text
+            
+        Returns:
+            Repaired JSON text (may still be invalid)
+        """
+        # Remove markdown code blocks if present
+        if json_text.startswith("```"):
+            json_text = re.sub(r'^```(?:json)?\s*', '', json_text)
+            json_text = re.sub(r'\s*```$', '', json_text)
+        
+        # Try to find the JSON object boundaries
+        # Look for the first { and last }
+        start_idx = json_text.find('{')
+        end_idx = json_text.rfind('}')
+        
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            json_text = json_text[start_idx:end_idx + 1]
+        
+        # Fix unterminated strings by truncating at the error point
+        # This is a last resort - we'll try to close any open strings
+        try:
+            # Count quotes to see if we have an odd number (unterminated string)
+            quote_count = json_text.count('"') - json_text.count('\\"')
+            if quote_count % 2 != 0:
+                # Find the last quote and try to close it
+                last_quote = json_text.rfind('"')
+                if last_quote != -1:
+                    # Truncate before the unterminated string
+                    # Look backwards for the previous complete field
+                    truncate_point = json_text.rfind(',', 0, last_quote)
+                    if truncate_point == -1:
+                        truncate_point = json_text.rfind('{', 0, last_quote)
+                    
+                    if truncate_point != -1:
+                        json_text = json_text[:truncate_point]
+                        # Close any open braces
+                        open_braces = json_text.count('{') - json_text.count('}')
+                        json_text += '}' * open_braces
+                        logger.info(f"Truncated JSON at unterminated string, added {open_braces} closing braces")
+        except Exception as e:
+            logger.warning(f"Error during JSON repair: {e}")
+        
+        return json_text
     
     def _make_query_api_call_with_retry(self, messages: list) -> str:
         """

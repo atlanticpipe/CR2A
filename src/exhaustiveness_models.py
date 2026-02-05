@@ -367,10 +367,14 @@ class VerifiedAnalysisResult:
     """
     Complete verified analysis result.
     
-    Extends the base AnalysisResult with verification metadata,
+    Extends the base ComprehensiveAnalysisResult with verification metadata,
     confidence scores, and presence status for all findings.
+    
+    The base_result field stores the ComprehensiveAnalysisResult as a dictionary
+    to maintain compatibility with serialization. Use get_base_result() to
+    reconstruct the ComprehensiveAnalysisResult object.
     """
-    base_result: Dict[str, Any]  # Original analysis result as dict
+    base_result: Dict[str, Any]  # ComprehensiveAnalysisResult stored as dict
     verified_clauses: List[VerifiedFinding]
     verified_risks: List[VerifiedFinding]
     verified_compliance_issues: List[VerifiedFinding]
@@ -378,6 +382,20 @@ class VerifiedAnalysisResult:
     verification_metadata: VerificationMetadata
     coverage_report: CoverageReport
     conflicts: List[ConflictResolution]
+    
+    def get_base_result(self) -> 'ComprehensiveAnalysisResult':
+        """
+        Reconstruct the ComprehensiveAnalysisResult from the stored dictionary.
+        
+        Returns:
+            ComprehensiveAnalysisResult instance
+            
+        Raises:
+            ImportError: If ComprehensiveAnalysisResult cannot be imported
+            ValueError: If base_result cannot be parsed
+        """
+        from src.analysis_models import ComprehensiveAnalysisResult
+        return ComprehensiveAnalysisResult.from_dict(self.base_result)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -447,7 +465,10 @@ class VerifiedAnalysisResult:
             lines.append("-" * 40)
             for finding in self.verified_clauses:
                 status_icon = self._get_status_icon(finding.presence_status)
-                lines.append(f"{status_icon} [{finding.confidence_score:.0%}] {finding.finding_data.get('type', 'Unknown')}")
+                # Handle both legacy and comprehensive schema formats
+                finding_desc = finding.finding_data.get('type', 
+                              finding.finding_data.get('clause_summary', 'Unknown'))[:50]
+                lines.append(f"{status_icon} [{finding.confidence_score:.0%}] {finding_desc}")
                 if finding.is_hallucinated:
                     lines.append("   ⚠️ FLAGGED AS POTENTIAL HALLUCINATION")
             lines.append("")
@@ -458,8 +479,11 @@ class VerifiedAnalysisResult:
             lines.append("-" * 40)
             for finding in self.verified_risks:
                 status_icon = self._get_status_icon(finding.presence_status)
+                # Handle both legacy and comprehensive schema formats
                 severity = finding.finding_data.get('severity', 'unknown').upper()
-                lines.append(f"{status_icon} [{finding.confidence_score:.0%}] [{severity}] {finding.finding_data.get('description', 'No description')[:50]}...")
+                desc = finding.finding_data.get('description',
+                       finding.finding_data.get('clause_summary', 'No description'))[:50]
+                lines.append(f"{status_icon} [{finding.confidence_score:.0%}] [{severity}] {desc}...")
             lines.append("")
         
         # Conflicts

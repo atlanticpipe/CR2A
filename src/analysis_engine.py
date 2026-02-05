@@ -15,6 +15,14 @@ from src.result_parser import ResultParser
 from src.analysis_models import AnalysisResult
 from src.exhaustiveness_models import VerifiedAnalysisResult
 
+# Import clause extractor for focused analysis
+try:
+    from analyzer.contract_extractor import ComprehensiveContractExtractor
+    EXTRACTOR_AVAILABLE = True
+except ImportError:
+    EXTRACTOR_AVAILABLE = False
+    logger.warning("ComprehensiveContractExtractor not available, will use full contract text")
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +56,17 @@ class AnalysisEngine:
         self.uploader = ContractUploader()
         self.openai_client = OpenAIClient(api_key=openai_api_key, model=model)
         self.parser = ResultParser()
+        
+        # Initialize clause extractor if available
+        self.extractor = None
+        if EXTRACTOR_AVAILABLE:
+            try:
+                self.extractor = ComprehensiveContractExtractor()
+                logger.info("ComprehensiveContractExtractor initialized - will use focused clause extraction")
+            except Exception as e:
+                logger.warning(f"Failed to initialize ComprehensiveContractExtractor: {e}")
+        else:
+            logger.warning("ComprehensiveContractExtractor not available - will analyze full contract text")
         
         logger.info("AnalysisEngine initialized successfully")
     
@@ -204,6 +223,40 @@ class AnalysisEngine:
                 logger.error(error_msg)
                 raise ValueError(error_msg)
             
+            # Step 3.5: Extract focused clause sections (if extractor available)
+            analysis_text = contract_text
+            if self.extractor:
+                if progress_callback:
+                    progress_callback("Extracting relevant clause sections...", 25)
+                
+                try:
+                    focused_contract, extraction_metadata = self.extractor.create_focused_contract(contract_text)
+                    
+                    # Log extraction statistics
+                    original_len = extraction_metadata.get('original_length', len(contract_text))
+                    focused_len = extraction_metadata.get('focused_length', len(focused_contract))
+                    reduction_pct = extraction_metadata.get('reduction_percent', 0)
+                    categories_found = extraction_metadata.get('total_categories', 0)
+                    
+                    logger.info(f"Clause extraction: {original_len} chars -> {focused_len} chars ({reduction_pct:.1f}% reduction)")
+                    logger.info(f"Found {categories_found} clause categories")
+                    
+                    # Use focused contract if extraction found substantial content
+                    # If less than 10% was extracted, fall back to full text
+                    if focused_len >= original_len * 0.1:
+                        analysis_text = focused_contract
+                        logger.info("Using focused clause extraction for analysis")
+                    else:
+                        logger.warning(f"Clause extraction found minimal content ({focused_len} chars), using full contract")
+                        analysis_text = contract_text
+                        
+                except Exception as e:
+                    logger.warning(f"Clause extraction failed: {e}, using full contract text")
+                    analysis_text = contract_text
+            else:
+                logger.info("Clause extractor not available, using full contract text")
+            
+            # Step 4: Analyze contract with OpenAI
             # Step 4: Analyze contract with OpenAI
             if progress_callback:
                 progress_callback("Analyzing contract with AI...", 30)
@@ -216,7 +269,7 @@ class AnalysisEngine:
                     progress_callback(status, adjusted_percent)
             
             api_response = self.openai_client.analyze_contract(
-                contract_text,
+                analysis_text,  # Use focused text if extraction succeeded, otherwise full text
                 progress_callback=openai_progress_callback
             )
             
@@ -226,6 +279,7 @@ class AnalysisEngine:
             if progress_callback:
                 progress_callback("Parsing analysis results...", 95)
             
+            # Use comprehensive parser to get ComprehensiveAnalysisResult
             analysis_result = self.parser.parse_api_response(
                 api_response=api_response,
                 filename=file_info['filename'],
@@ -234,15 +288,13 @@ class AnalysisEngine:
             )
             
             logger.info("Analysis completed successfully")
-            logger.debug("Result summary: %d clauses, %d risks, %d compliance issues, %d redlining suggestions",
-                        len(analysis_result.clauses),
-                        len(analysis_result.risks),
-                        len(analysis_result.compliance_issues),
-                        len(analysis_result.redlining_suggestions))
+            logger.info(f"Result type: {type(analysis_result)}")
             
-            # Step 6: Final validation
-            if not analysis_result.validate_result():
-                logger.warning("Analysis result validation failed, but returning partial result")
+            # Log what sections we got
+            if hasattr(analysis_result, 'contract_overview'):
+                logger.info("Got ComprehensiveAnalysisResult with contract_overview")
+            elif hasattr(analysis_result, 'clauses'):
+                logger.info("Got old AnalysisResult with clauses - this is wrong!")
             
             if progress_callback:
                 progress_callback("Analysis complete!", 100)

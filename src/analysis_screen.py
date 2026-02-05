@@ -7,9 +7,10 @@ Provides UI for displaying progress during contract analysis in the Unified CR2A
 import logging
 import tkinter as tk
 from tkinter import ttk
-from typing import Optional, Callable
+from typing import Optional, Callable, List
 import threading
 import time
+from datetime import datetime
 from src.ui_styles import UIStyles
 
 
@@ -252,6 +253,12 @@ class AnalysisScreen:
         """
         Handle successful analysis completion.
         
+        This method now includes versioning logic:
+        1. If this is a version update, compare with previous version
+        2. Assign version numbers to changed clauses
+        3. Store differential changes via DifferentialStorage
+        4. Otherwise, store as new contract with version 1
+        
         Args:
             result: Analysis result dictionary
         """
@@ -261,7 +268,7 @@ class AnalysisScreen:
         
         # Update UI to show completion
         self.progress_bar['value'] = 100
-        self.status_label.config(text="Analysis complete! Loading chat interface...")
+        self.status_label.config(text="Analysis complete! Processing versioning...")
         self.time_label.config(text="")
         
         # Log completion time
@@ -269,12 +276,261 @@ class AnalysisScreen:
             elapsed = time.time() - self.start_time
             logger.info("Analysis completed in %.2f seconds", elapsed)
         
+        # Process versioning if components are available
+        try:
+            if (self.controller.differential_storage and 
+                self.controller.change_comparator and 
+                self.controller.version_manager and
+                self.controller.contract_identity_detector):
+                
+                logger.info("Processing versioning for analysis result...")
+                self._process_versioning(result)
+            else:
+                logger.warning("Versioning components not available, skipping versioning")
+        except Exception as e:
+            logger.error("Error processing versioning: %s", e, exc_info=True)
+            # Continue even if versioning fails
+            logger.warning("Continuing without versioning due to error")
+        
+        # Update UI
+        self.status_label.config(text="Analysis complete! Loading chat interface...")
+        
         # Trigger transition to chat screen
         try:
             self.controller.transition_to_chat(result)
         except Exception as e:
             logger.error("Error transitioning to chat: %s", e)
             self.on_analysis_error(e)
+    
+    def _process_versioning(self, result: dict) -> None:
+        """
+        Process versioning for the analysis result.
+        
+        This method handles both new contracts and version updates:
+        - For new contracts: Store with version 1
+        - For updates: Compare with previous version, assign versions, store deltas
+        
+        Args:
+            result: Analysis result dictionary
+        """
+        import uuid
+        from datetime import datetime
+        from pathlib import Path
+        from src.differential_storage import Contract, Clause, VersionMetadata
+        from src.analysis_models import ComprehensiveAnalysisResult
+        
+        try:
+            # Convert result dict back to ComprehensiveAnalysisResult
+            analysis_result = ComprehensiveAnalysisResult.from_dict(result)
+            
+            # Check if this is a version update
+            if self.controller.context.is_version_update:
+                logger.info("Processing as version update")
+                
+                # Get matched contract info
+                contract_id = self.controller.context.matched_contract_id
+                current_version = self.controller.context.matched_contract_version
+                
+                # Get previous analysis from storage
+                logger.info("Retrieving previous version for comparison...")
+                
+                # Reconstruct previous analysis result from stored clauses
+                logger.info("Reconstructing previous version %d...", current_version)
+                old_analysis_dict = self.controller.version_manager.reconstruct_version(
+                    contract_id,
+                    current_version
+                )
+                
+                # Convert reconstructed dict back to ComprehensiveAnalysisResult for comparison
+                try:
+                    old_analysis = ComprehensiveAnalysisResult.from_dict(old_analysis_dict)
+                    logger.info("Successfully reconstructed previous version for comparison")
+                except Exception as e:
+                    logger.error("Failed to reconstruct previous version: %s", e, exc_info=True)
+                    logger.warning("Falling back to treating as new contract")
+                    # Fall back to treating as new contract
+                    self.controller.context.is_version_update = False
+                    self._process_versioning(result)
+                    return
+                
+                # Compare old version with new analysis
+                logger.info("Comparing old version %d with new analysis...", current_version)
+                contract_diff = self.controller.change_comparator.compare_contracts(
+                    old_analysis=old_analysis,
+                    new_analysis=analysis_result
+                )
+                
+                # Get next version number
+                new_version = self.controller.version_manager.get_next_version(contract_id)
+                
+                logger.info("Assigning version numbers for version %d...", new_version)
+                
+                # Assign clause versions
+                versioned_contract = self.controller.version_manager.assign_clause_versions(
+                    contract_diff=contract_diff,
+                    contract_id=contract_id,
+                    new_version=new_version
+                )
+                
+                # Store the new version
+                logger.info("Storing version %d...", new_version)
+                self.controller.differential_storage.store_contract_version(
+                    contract_id=contract_id,
+                    version=new_version,
+                    changed_clauses=versioned_contract.clauses,
+                    version_metadata=versioned_contract.version_metadata
+                )
+                
+                logger.info("Version %d stored successfully", new_version)
+                
+            else:
+                logger.info("Processing as new contract (version 1)")
+                
+                # Generate new contract ID
+                contract_id = str(uuid.uuid4())
+                
+                # Compute file hash
+                file_hash = self.controller.contract_identity_detector.compute_file_hash(
+                    self.file_path
+                )
+                
+                # Create contract record
+                filename = Path(self.file_path).name
+                timestamp = datetime.now()
+                
+                contract = Contract(
+                    contract_id=contract_id,
+                    filename=filename,
+                    file_hash=file_hash,
+                    current_version=1,
+                    created_at=timestamp,
+                    updated_at=timestamp
+                )
+                
+                # Extract clauses from analysis result
+                logger.info("Extracting clauses from analysis result...")
+                clauses = self._extract_clauses_from_analysis(
+                    analysis_result,
+                    contract_id,
+                    version=1,
+                    timestamp=timestamp
+                )
+                
+                # Store new contract
+                logger.info("Storing new contract with %d clauses...", len(clauses))
+                self.controller.differential_storage.store_new_contract(
+                    contract=contract,
+                    clauses=clauses
+                )
+                
+                logger.info("New contract stored successfully with ID: %s", contract_id)
+                
+        except Exception as e:
+            logger.error("Error in versioning process: %s", e, exc_info=True)
+            raise
+    
+    def _extract_clauses_from_analysis(
+        self,
+        analysis: 'ComprehensiveAnalysisResult',
+        contract_id: str,
+        version: int,
+        timestamp: datetime
+    ) -> List['Clause']:
+        """
+        Extract all clauses from a comprehensive analysis result.
+        
+        Args:
+            analysis: Comprehensive analysis result
+            contract_id: ID of the contract
+            version: Version number to assign
+            timestamp: Timestamp for clause creation
+            
+        Returns:
+            List of Clause objects
+        """
+        import uuid
+        from src.differential_storage import Clause
+        
+        clauses = []
+        
+        # Helper function to create clause
+        def create_clause(identifier: str, clause_block) -> Clause:
+            if clause_block is None:
+                return None
+            
+            return Clause(
+                clause_id=str(uuid.uuid4()),
+                contract_id=contract_id,
+                clause_version=version,
+                clause_identifier=identifier,
+                content=clause_block.clause_language,
+                metadata={
+                    "risk_level": clause_block.risk_level,
+                    "risk_explanation": clause_block.risk_explanation,
+                    "recommended_action": clause_block.recommended_action
+                },
+                created_at=timestamp,
+                is_deleted=False,
+                deleted_at=None
+            )
+        
+        # Extract from administrative_and_commercial_terms
+        admin = analysis.administrative_and_commercial_terms
+        for attr_name in dir(admin):
+            if not attr_name.startswith('_'):
+                clause_block = getattr(admin, attr_name)
+                if clause_block is not None and hasattr(clause_block, 'clause_language'):
+                    clause = create_clause(attr_name, clause_block)
+                    if clause:
+                        clauses.append(clause)
+        
+        # Extract from technical_and_performance_terms
+        tech = analysis.technical_and_performance_terms
+        for attr_name in dir(tech):
+            if not attr_name.startswith('_'):
+                clause_block = getattr(tech, attr_name)
+                if clause_block is not None and hasattr(clause_block, 'clause_language'):
+                    clause = create_clause(attr_name, clause_block)
+                    if clause:
+                        clauses.append(clause)
+        
+        # Extract from legal_risk_and_enforcement
+        legal = analysis.legal_risk_and_enforcement
+        for attr_name in dir(legal):
+            if not attr_name.startswith('_'):
+                clause_block = getattr(legal, attr_name)
+                if clause_block is not None and hasattr(clause_block, 'clause_language'):
+                    clause = create_clause(attr_name, clause_block)
+                    if clause:
+                        clauses.append(clause)
+        
+        # Extract from regulatory_and_compliance_terms
+        regulatory = analysis.regulatory_and_compliance_terms
+        for attr_name in dir(regulatory):
+            if not attr_name.startswith('_'):
+                clause_block = getattr(regulatory, attr_name)
+                if clause_block is not None and hasattr(clause_block, 'clause_language'):
+                    clause = create_clause(attr_name, clause_block)
+                    if clause:
+                        clauses.append(clause)
+        
+        # Extract from data_technology_and_deliverables
+        data_tech = analysis.data_technology_and_deliverables
+        for attr_name in dir(data_tech):
+            if not attr_name.startswith('_'):
+                clause_block = getattr(data_tech, attr_name)
+                if clause_block is not None and hasattr(clause_block, 'clause_language'):
+                    clause = create_clause(attr_name, clause_block)
+                    if clause:
+                        clauses.append(clause)
+        
+        # Extract from supplemental_operational_risks
+        for idx, clause_block in enumerate(analysis.supplemental_operational_risks):
+            clause = create_clause(f'supplemental_risk_{idx}', clause_block)
+            if clause:
+                clauses.append(clause)
+        
+        return clauses
     
     def on_analysis_error(self, error: Exception) -> None:
         """

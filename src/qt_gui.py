@@ -107,8 +107,16 @@ class CR2A_GUI(QMainWindow):
         self.history_store = None  # History store for persistent analysis records
         self.current_history_record_id = None  # Track the record_id of currently loaded historical analysis
         
+        # Versioning components
+        self.version_db = None
+        self.differential_storage = None
+        self.contract_identity_detector = None
+        self.change_comparator = None
+        self.version_manager = None
+        
         self.init_ui()
         self.init_config()
+        self.init_versioning()
         self.init_history_store()
         self.init_engines()
     
@@ -123,6 +131,45 @@ class CR2A_GUI(QMainWindow):
                 "Configuration Warning",
                 f"Failed to load configuration:\n{str(e)}\n\nUsing defaults."
             )
+    
+    def init_versioning(self):
+        """Initialize versioning components for contract change tracking."""
+        try:
+            from src.version_database import VersionDatabase
+            from src.differential_storage import DifferentialStorage
+            from src.contract_identity_detector import ContractIdentityDetector
+            from src.change_comparator import ChangeComparator
+            from src.version_manager import VersionManager
+            
+            # Initialize version database
+            self.version_db = VersionDatabase()
+            logger.info("Version database initialized")
+            
+            # Initialize differential storage
+            self.differential_storage = DifferentialStorage(self.version_db)
+            logger.info("Differential storage initialized")
+            
+            # Initialize other versioning components
+            self.contract_identity_detector = ContractIdentityDetector(self.differential_storage)
+            self.change_comparator = ChangeComparator()
+            self.version_manager = VersionManager(self.differential_storage)
+            
+            logger.info("Versioning system initialized successfully")
+            
+        except Exception as e:
+            logger.error("Failed to initialize versioning system: %s", e, exc_info=True)
+            QMessageBox.warning(
+                self,
+                "Versioning Warning",
+                f"Failed to initialize versioning system:\n{str(e)}\n\n"
+                "Contract versioning features will be disabled.\n"
+                "You can still analyze contracts normally."
+            )
+            self.version_db = None
+            self.differential_storage = None
+            self.contract_identity_detector = None
+            self.change_comparator = None
+            self.version_manager = None
     
     def init_history_store(self):
         """Initialize history store for persistent analysis records."""
@@ -157,8 +204,11 @@ class CR2A_GUI(QMainWindow):
         """Initialize the History tab if history store is available."""
         if self.history_store is not None:
             try:
-                # Create History tab
-                self.history_tab = HistoryTab(self.history_store)
+                # Create History tab with optional differential_storage
+                self.history_tab = HistoryTab(
+                    self.history_store,
+                    differential_storage=self.differential_storage
+                )
                 
                 # Add tab after Chat tab
                 self.tabs.addTab(self.history_tab, "📜 History")
@@ -167,7 +217,8 @@ class CR2A_GUI(QMainWindow):
                 self.history_tab.analysis_selected.connect(self.on_history_selected)
                 self.history_tab.analysis_deleted.connect(self.on_history_deleted)
                 
-                logger.info("History tab initialized successfully")
+                logger.info("History tab initialized successfully (versioning: %s)", 
+                           "enabled" if self.differential_storage else "disabled")
             except Exception as e:
                 logger.error("Failed to initialize history tab: %s", e)
                 QMessageBox.warning(
@@ -939,23 +990,30 @@ class CR2A_GUI(QMainWindow):
     
     def _auto_save_analysis(self, result):
         """
-        Auto-save analysis result to history store.
+        Auto-save analysis result to history store and differential storage.
         
-        This method saves the analysis to the history store and updates the
-        History tab with the new record. Errors are logged and displayed to
-        the user without blocking the workflow.
+        This method saves the analysis to both the history store (for backward compatibility)
+        and the differential storage (for versioning). It also handles duplicate detection
+        and version updates.
         
         Args:
             result: The AnalysisResult to save
         """
-        # Check if history store is available
+        # Save to differential storage if available (versioning)
+        if self.differential_storage and self.contract_identity_detector:
+            try:
+                self._save_to_differential_storage(result)
+            except Exception as e:
+                logger.error("Failed to save to differential storage: %s", e, exc_info=True)
+                # Continue to save to history_store even if versioning fails
+        
+        # Save to history store (backward compatibility)
         if self.history_store is None:
-            logger.info("History store not available, skipping auto-save")
+            logger.info("History store not available, skipping history save")
             return
         
-        # Check if history tab is available
         if self.history_tab is None:
-            logger.info("History tab not available, skipping auto-save")
+            logger.info("History tab not available, skipping history save")
             return
         
         try:
@@ -963,22 +1021,21 @@ class CR2A_GUI(QMainWindow):
             record_id = self.history_store.save(result)
             logger.info("Auto-saved analysis with ID: %s", record_id)
             
-            # Get the summary record to add to the History tab
-            summary = self.history_store.get_summary(record_id)
-            
-            if summary:
-                # Add new record to History tab
-                self.history_tab.add_record(summary)
-                logger.info("Added record to History tab: %s", record_id)
+            # Refresh history tab to show updated list from differential storage
+            if self.differential_storage:
+                self.history_tab.refresh()
+                logger.info("Refreshed history tab with versioned data")
             else:
-                logger.warning("Failed to get summary for record: %s", record_id)
+                # Fallback to old method if versioning not available
+                summary = self.history_store.get_summary(record_id)
+                if summary:
+                    self.history_tab.add_record(summary)
+                    logger.info("Added record to History tab: %s", record_id)
+                else:
+                    logger.warning("Failed to get summary for record: %s", record_id)
             
         except Exception as e:
-            # Log the error
             logger.error("Failed to auto-save analysis: %s", e)
-            
-            # Show a non-blocking warning to the user
-            # Use QMessageBox.warning instead of critical to indicate it's not fatal
             QMessageBox.warning(
                 self,
                 "Auto-Save Warning",
@@ -986,6 +1043,197 @@ class CR2A_GUI(QMainWindow):
                 "You can still view and use the analysis results.\n"
                 "The analysis will not be available in the History tab."
             )
+    
+    def _save_to_differential_storage(self, result):
+        """
+        Save analysis result to differential storage with versioning.
+        
+        Handles duplicate detection and version updates.
+        
+        Args:
+            result: The AnalysisResult to save
+        """
+        import uuid
+        from datetime import datetime
+        from pathlib import Path
+        from src.differential_storage import Contract, Clause, VersionMetadata
+        from src.analysis_models import ComprehensiveAnalysisResult
+        
+        logger.info("Saving to differential storage...")
+        
+        # Convert result to ComprehensiveAnalysisResult if needed
+        if isinstance(result, dict):
+            analysis_result = ComprehensiveAnalysisResult.from_dict(result)
+        else:
+            analysis_result = result
+        
+        # Check for duplicate contracts
+        file_hash = self.contract_identity_detector.compute_file_hash(self.current_file)
+        filename = Path(self.current_file).name
+        matches = self.contract_identity_detector.find_potential_matches(file_hash, filename)
+        
+        if matches:
+            # Found potential duplicate
+            match = matches[0]
+            logger.info("Found potential duplicate: %s (version %d)", match.contract_id, match.current_version)
+            
+            # Ask user if this is an update
+            if match.match_type == 'hash':
+                message = (
+                    f"This file appears to be identical to a previously analyzed contract:\n\n"
+                    f"Contract: {match.filename}\n"
+                    f"Current Version: {match.current_version}\n\n"
+                    f"Is this an updated version of the same contract?"
+                )
+            else:
+                message = (
+                    f"This file has a similar name to a previously analyzed contract:\n\n"
+                    f"Contract: {match.filename}\n"
+                    f"Similarity: {match.similarity_score:.0%}\n"
+                    f"Current Version: {match.current_version}\n\n"
+                    f"Is this an updated version of the same contract?"
+                )
+            
+            reply = QMessageBox.question(
+                self,
+                "Duplicate Contract Detected",
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # User confirmed it's an update - store as new version
+                self._store_contract_version(match.contract_id, match.current_version, analysis_result)
+                return
+        
+        # No duplicate or user said it's different - store as new contract
+        self._store_new_contract(analysis_result, file_hash, filename)
+    
+    def _store_new_contract(self, analysis_result, file_hash, filename):
+        """Store a new contract with version 1."""
+        import uuid
+        from datetime import datetime
+        from src.differential_storage import Contract, Clause
+        
+        contract_id = str(uuid.uuid4())
+        timestamp = datetime.now()
+        
+        contract = Contract(
+            contract_id=contract_id,
+            filename=filename,
+            file_hash=file_hash,
+            current_version=1,
+            created_at=timestamp,
+            updated_at=timestamp
+        )
+        
+        # Extract clauses from analysis
+        clauses = self._extract_clauses_from_analysis(analysis_result, contract_id, 1, timestamp)
+        
+        # Store
+        self.differential_storage.store_new_contract(contract, clauses)
+        logger.info("Stored new contract: %s (version 1)", contract_id)
+    
+    def _store_contract_version(self, contract_id, current_version, new_analysis):
+        """Store a new version of an existing contract."""
+        from src.differential_storage import Clause, VersionMetadata
+        from datetime import datetime
+        
+        # Reconstruct old version
+        old_analysis_dict = self.version_manager.reconstruct_version(contract_id, current_version)
+        
+        try:
+            from src.analysis_models import ComprehensiveAnalysisResult
+            old_analysis = ComprehensiveAnalysisResult.from_dict(old_analysis_dict)
+        except Exception as e:
+            logger.error("Failed to reconstruct previous version: %s", e)
+            QMessageBox.warning(
+                self,
+                "Version Update Warning",
+                "Could not compare with previous version. Storing as new contract instead."
+            )
+            # Fall back to storing as new
+            file_hash = self.contract_identity_detector.compute_file_hash(self.current_file)
+            from pathlib import Path
+            filename = Path(self.current_file).name
+            self._store_new_contract(new_analysis, file_hash, filename)
+            return
+        
+        # Compare versions
+        contract_diff = self.change_comparator.compare_contracts(old_analysis, new_analysis)
+        
+        # Get next version
+        new_version = self.version_manager.get_next_version(contract_id)
+        
+        # Assign clause versions
+        versioned_contract = self.version_manager.assign_clause_versions(
+            contract_diff, contract_id, new_version
+        )
+        
+        # Store new version
+        self.differential_storage.store_contract_version(
+            contract_id, new_version,
+            versioned_contract.clauses,
+            versioned_contract.version_metadata
+        )
+        logger.info("Stored contract version %d: %s", new_version, contract_id)
+    
+    def _extract_clauses_from_analysis(self, analysis, contract_id, version, timestamp):
+        """Extract clauses from analysis result for storage."""
+        import uuid
+        from src.differential_storage import Clause
+        
+        clauses = []
+        
+        # Extract contract overview as a special clause
+        if hasattr(analysis, 'contract_overview') and analysis.contract_overview:
+            overview_dict = analysis.contract_overview.to_dict() if hasattr(analysis.contract_overview, 'to_dict') else analysis.contract_overview
+            clause = Clause(
+                clause_id=str(uuid.uuid4()),
+                contract_id=contract_id,
+                clause_version=version,
+                clause_identifier="contract_overview",
+                content=str(overview_dict),
+                metadata=overview_dict,
+                created_at=timestamp,
+                is_deleted=False,
+                deleted_at=None
+            )
+            clauses.append(clause)
+        
+        # Extract clauses from each section
+        sections = [
+            'administrative_and_commercial_terms',
+            'technical_and_performance_terms',
+            'legal_risk_and_enforcement',
+            'regulatory_and_compliance_terms',
+            'data_technology_and_deliverables'
+        ]
+        
+        for section_name in sections:
+            if hasattr(analysis, section_name):
+                section = getattr(analysis, section_name)
+                if section:
+                    section_dict = section.to_dict() if hasattr(section, 'to_dict') else section
+                    if isinstance(section_dict, dict):
+                        for category_name, clause_data in section_dict.items():
+                            if clause_data:
+                                clause_dict = clause_data.to_dict() if hasattr(clause_data, 'to_dict') else clause_data
+                                clause = Clause(
+                                    clause_id=str(uuid.uuid4()),
+                                    contract_id=contract_id,
+                                    clause_version=version,
+                                    clause_identifier=f"{section_name}.{category_name}",
+                                    content=str(clause_dict.get('Clause Language', clause_dict.get('clause_language', ''))),
+                                    metadata=clause_dict,
+                                    created_at=timestamp,
+                                    is_deleted=False,
+                                    deleted_at=None
+                                )
+                                clauses.append(clause)
+        
+        return clauses
     
     def on_analysis_error(self, error):
         """Handle analysis error."""
@@ -1001,6 +1249,20 @@ class CR2A_GUI(QMainWindow):
         # Hide the "no analysis" message
         if hasattr(self, 'no_analysis_label'):
             self.no_analysis_label.setVisible(False)
+        
+        # Log what we're receiving
+        logger.info(f"display_analysis called with type: {type(result)}")
+        logger.info(f"Result has to_dict: {hasattr(result, 'to_dict')}")
+        
+        # Try to get a dict representation for debugging
+        try:
+            if hasattr(result, 'to_dict'):
+                result_dict = result.to_dict()
+                logger.info(f"Result dict keys: {list(result_dict.keys())}")
+            elif hasattr(result, '__dict__'):
+                logger.info(f"Result __dict__ keys: {list(result.__dict__.keys())}")
+        except Exception as e:
+            logger.error(f"Error getting result keys: {e}")
         
         # Display in structured view
         self.structured_view.display_analysis(result)

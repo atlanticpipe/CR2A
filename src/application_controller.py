@@ -34,11 +34,17 @@ class ApplicationContext:
         current_file: Path to currently selected/analyzed file
         analysis_result: Stored analysis result from OpenAI
         error_message: Current error message if in ERROR state
+        is_version_update: Whether the current upload is a version update
+        matched_contract_id: ID of matched contract (if version update)
+        matched_contract_version: Current version of matched contract
     """
     current_state: AppState
     current_file: Optional[str] = None
     analysis_result: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+    is_version_update: bool = False
+    matched_contract_id: Optional[str] = None
+    matched_contract_version: Optional[int] = None
 
 
 class ApplicationController:
@@ -64,6 +70,13 @@ class ApplicationController:
         self.contract_uploader = None
         self.analysis_engine = None
         self.query_engine = None
+        
+        # Versioning component references (initialized later)
+        self.version_db = None
+        self.differential_storage = None
+        self.contract_identity_detector = None
+        self.change_comparator = None
+        self.version_manager = None
         
         # Screen references (initialized later)
         self.upload_screen = None
@@ -275,6 +288,12 @@ class ApplicationController:
         """
         Transition from upload to analysis screen.
         
+        This method now includes duplicate detection and version handling:
+        1. Compute file hash
+        2. Check for potential matches (hash or filename similarity)
+        3. If matches found, prompt user to confirm if it's an update
+        4. Store the decision for use during analysis
+        
         Args:
             file_path: Path to contract file to analyze
         """
@@ -290,6 +309,76 @@ class ApplicationController:
         
         # Clear previous analysis result
         self.context.analysis_result = None
+        
+        # Initialize versioning context
+        self.context.is_version_update = False
+        self.context.matched_contract_id = None
+        self.context.matched_contract_version = None
+        
+        # Check for duplicate contracts if versioning is enabled
+        if self.contract_identity_detector:
+            try:
+                logger.info("Checking for duplicate contracts...")
+                
+                # Compute file hash
+                file_hash = self.contract_identity_detector.compute_file_hash(file_path)
+                logger.debug("File hash computed: %s", file_hash[:16] + "...")
+                
+                # Find potential matches
+                from pathlib import Path
+                filename = Path(file_path).name
+                matches = self.contract_identity_detector.find_potential_matches(
+                    file_hash=file_hash,
+                    filename=filename
+                )
+                
+                if matches:
+                    logger.info("Found %d potential matches", len(matches))
+                    
+                    # Show user prompt to confirm if this is an update
+                    match = matches[0]  # Use the best match
+                    
+                    if match.match_type == 'hash':
+                        message = (
+                            f"This file appears to be identical to a previously analyzed contract:\n\n"
+                            f"Contract: {match.filename}\n"
+                            f"Current Version: {match.current_version}\n\n"
+                            f"Is this an updated version of the same contract?"
+                        )
+                    else:
+                        message = (
+                            f"This file has a similar name to a previously analyzed contract:\n\n"
+                            f"Contract: {match.filename}\n"
+                            f"Similarity: {match.similarity_score:.0%}\n"
+                            f"Current Version: {match.current_version}\n\n"
+                            f"Is this an updated version of the same contract?"
+                        )
+                    
+                    # Show confirmation dialog
+                    from tkinter import messagebox
+                    result = messagebox.askyesno(
+                        "Duplicate Contract Detected",
+                        message,
+                        parent=self.root
+                    )
+                    
+                    if result:
+                        # User confirmed it's an update
+                        logger.info("User confirmed contract update for: %s", match.contract_id)
+                        self.context.is_version_update = True
+                        self.context.matched_contract_id = match.contract_id
+                        self.context.matched_contract_version = match.current_version
+                    else:
+                        # User indicated it's a different contract
+                        logger.info("User indicated this is a different contract")
+                        self.context.is_version_update = False
+                else:
+                    logger.info("No duplicate contracts found")
+                    
+            except Exception as e:
+                logger.error("Error during duplicate detection: %s", e, exc_info=True)
+                # Continue with analysis even if duplicate detection fails
+                logger.warning("Continuing with analysis despite duplicate detection error")
         
         # Transition to analyzing state
         self._transition_state(AppState.ANALYZING)
@@ -826,6 +915,123 @@ class ApplicationController:
                 else:
                     logger.warning("QueryEngine not initialized - AnalysisEngine unavailable")
                     self.query_engine = None
+            except ImportError as e:
+                # Module import failure
+                error_msg = (
+                    f"Failed to initialize QueryEngine - missing dependency: {str(e)}\n\n"
+                    f"Troubleshooting:\n"
+                    f"• Install required packages for query processing\n"
+                    f"• Verify your Python environment is properly configured\n"
+                    f"• Check that all dependencies are installed"
+                )
+                logger.error(f"QueryEngine initialization failed - ImportError: {e}", exc_info=True)
+                self._initialization_errors.append(error_msg)
+                self.query_engine = None
+                # Don't return False - allow analysis without query capability
+            except ValueError as e:
+                # Invalid configuration
+                error_msg = (
+                    f"Failed to initialize QueryEngine - invalid configuration: {str(e)}\n\n"
+                    f"Troubleshooting:\n"
+                    f"• Verify OpenAI client is properly configured\n"
+                    f"• Check query engine settings in configuration\n"
+                    f"• Try resetting to default settings\n"
+                    f"• Review the configuration file for errors"
+                )
+                logger.error(f"QueryEngine initialization failed - ValueError: {e}", exc_info=True)
+                self._initialization_errors.append(error_msg)
+                self.query_engine = None
+                # Don't return False - allow analysis without query capability
+            except AttributeError as e:
+                # AnalysisEngine doesn't have openai_client attribute
+                error_msg = (
+                    f"Failed to initialize QueryEngine - AnalysisEngine missing OpenAI client: {str(e)}\n\n"
+                    f"Troubleshooting:\n"
+                    f"• Verify AnalysisEngine is properly initialized\n"
+                    f"• Check that AnalysisEngine has openai_client attribute\n"
+                    f"• Try restarting the application\n"
+                    f"• Contact support if the issue persists"
+                )
+                logger.error(f"QueryEngine initialization failed - AttributeError: {e}", exc_info=True)
+                self._initialization_errors.append(error_msg)
+                self.query_engine = None
+                # Don't return False - allow analysis without query capability
+            except Exception as e:
+                # Generic error with troubleshooting guidance
+                error_msg = (
+                    f"Failed to initialize QueryEngine: {str(e)}\n\n"
+                    f"Troubleshooting:\n"
+                    f"• Verify OpenAI client is properly initialized\n"
+                    f"• Check the application logs for more details\n"
+                    f"• Try restarting the application\n"
+                    f"• Contact support if the issue persists"
+                )
+                logger.error(f"QueryEngine initialization failed - Exception: {e}", exc_info=True)
+                self._initialization_errors.append(error_msg)
+                self.query_engine = None
+                # Don't return False - allow analysis without query capability
+            
+            # 6. Initialize versioning components
+            logger.info("Initializing versioning components...")
+            try:
+                from src.version_database import VersionDatabase
+                from src.contract_identity_detector import ContractIdentityDetector
+                from src.change_comparator import ChangeComparator
+                from src.differential_storage import DifferentialStorage
+                from src.version_manager import VersionManager
+                
+                # Initialize version database
+                self.version_db = VersionDatabase()
+                logger.info("VersionDatabase initialized successfully")
+                
+                # Initialize differential storage
+                self.differential_storage = DifferentialStorage(database=self.version_db)
+                logger.info("DifferentialStorage initialized successfully")
+                
+                # Initialize contract identity detector
+                self.contract_identity_detector = ContractIdentityDetector(db=self.version_db)
+                logger.info("ContractIdentityDetector initialized successfully")
+                
+                # Initialize change comparator
+                self.change_comparator = ChangeComparator()
+                logger.info("ChangeComparator initialized successfully")
+                
+                # Initialize version manager
+                self.version_manager = VersionManager(storage=self.differential_storage)
+                logger.info("VersionManager initialized successfully")
+                
+            except ImportError as e:
+                error_msg = (
+                    f"Failed to initialize versioning components - missing dependency: {str(e)}\n\n"
+                    f"Troubleshooting:\n"
+                    f"• Verify versioning modules are available\n"
+                    f"• Check that all dependencies are installed\n"
+                    f"• Restart the application"
+                )
+                logger.error(f"Versioning components initialization failed - ImportError: {e}", exc_info=True)
+                self._initialization_errors.append(error_msg)
+                # Set components to None
+                self.version_db = None
+                self.differential_storage = None
+                self.contract_identity_detector = None
+                self.change_comparator = None
+                self.version_manager = None
+            except Exception as e:
+                error_msg = (
+                    f"Failed to initialize versioning components: {str(e)}\n\n"
+                    f"Troubleshooting:\n"
+                    f"• Check the application logs for more details\n"
+                    f"• Verify database permissions\n"
+                    f"• Restart the application"
+                )
+                logger.error(f"Versioning components initialization failed - Exception: {e}", exc_info=True)
+                self._initialization_errors.append(error_msg)
+                # Set components to None
+                self.version_db = None
+                self.differential_storage = None
+                self.contract_identity_detector = None
+                self.change_comparator = None
+                self.version_manager = None
             except ImportError as e:
                 # Module import failure
                 error_msg = (

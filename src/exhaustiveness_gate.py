@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from typing import Optional, Callable, List, Dict, Any
 
-from src.analysis_models import AnalysisResult
+from src.analysis_models import AnalysisResult, ComprehensiveAnalysisResult
 from src.exhaustiveness_models import (
     PresenceStatus, VerifiedFinding, VerifiedAnalysisResult,
     VerificationMetadata, CoverageReport, ConflictResolution,
@@ -108,8 +108,38 @@ class ExhaustivenessGate:
         if not contract_text:
             contract_text = self.analysis_engine.uploader.extract_text(file_path)
         
+        # Apply clause extraction if available
+        analysis_text = contract_text
+        if self.analysis_engine.extractor:
+            if progress_callback:
+                progress_callback("Extracting relevant clause sections...", 3)
+            
+            try:
+                focused_contract, extraction_metadata = self.analysis_engine.extractor.create_focused_contract(contract_text)
+                
+                # Log extraction statistics
+                original_len = extraction_metadata.get('original_length', len(contract_text))
+                focused_len = extraction_metadata.get('focused_length', len(focused_contract))
+                reduction_pct = extraction_metadata.get('reduction_percent', 0)
+                categories_found = extraction_metadata.get('total_categories', 0)
+                
+                logger.info(f"Exhaustive mode clause extraction: {original_len} chars -> {focused_len} chars ({reduction_pct:.1f}% reduction)")
+                logger.info(f"Found {categories_found} clause categories")
+                
+                # Use focused contract if extraction found substantial content
+                if focused_len >= original_len * 0.1:
+                    analysis_text = focused_contract
+                    logger.info("Using focused clause extraction for exhaustive analysis")
+                else:
+                    logger.warning(f"Clause extraction found minimal content, using full contract")
+                    analysis_text = contract_text
+                    
+            except Exception as e:
+                logger.warning(f"Clause extraction failed: {e}, using full contract text")
+                analysis_text = contract_text
+        
         # Check if chunking is needed
-        chunks = self.chunker.chunk_contract(contract_text)
+        chunks = self.chunker.chunk_contract(analysis_text)
         total_chunks = len(chunks)
         logger.info(f"Contract split into {total_chunks} chunks")
         
@@ -131,15 +161,18 @@ class ExhaustivenessGate:
             
             # Analyze each chunk
             chunk_results = []
+            chunk_errors = []
             for chunk_idx, chunk in enumerate(chunks):
                 try:
                     # Use a temporary file approach or direct text analysis
                     logger.info(f"Analyzing chunk {chunk_idx + 1}/{len(chunks)} ({chunk.estimated_tokens} tokens)")
                     result = self._analyze_chunk(chunk.text, file_path)
-                    logger.info(f"Chunk {chunk_idx + 1} result: {len(result.clauses)} clauses, {len(result.risks)} risks")
+                    logger.info(f"Chunk {chunk_idx + 1} analysis successful")
                     chunk_results.append(result)
                 except Exception as e:
-                    logger.error(f"Chunk {chunk_idx + 1} analysis failed: {e}", exc_info=True)
+                    error_msg = f"Chunk {chunk_idx + 1} analysis failed: {str(e)}"
+                    logger.error(error_msg, exc_info=True)
+                    chunk_errors.append(error_msg)
                     continue
             
             # Merge chunk results
@@ -148,7 +181,11 @@ class ExhaustivenessGate:
                 pass_results.append(merged_result)
         
         if not pass_results:
-            raise ValueError("All analysis passes failed")
+            # Provide detailed error message about what went wrong
+            error_details = "\n".join(chunk_errors) if chunk_errors else "Unknown error during analysis"
+            error_msg = f"All analysis passes failed. Details:\n{error_details}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         if progress_callback:
             progress_callback("Comparing analysis passes...", 40)
@@ -192,8 +229,19 @@ class ExhaustivenessGate:
         
         # Calculate metadata
         all_findings = verified_clauses + verified_risks + verified_compliance + verified_redlining
-        total_before = sum(len(r.clauses) + len(r.risks) + len(r.compliance_issues) + len(r.redlining_suggestions) 
-                         for r in pass_results)
+        
+        # Count findings from comprehensive results (count all clause blocks across all sections)
+        total_before = 0
+        for r in pass_results:
+            # Count clause blocks in each section
+            admin_count = sum(1 for field in vars(r.administrative_and_commercial_terms).values() if field is not None)
+            tech_count = sum(1 for field in vars(r.technical_and_performance_terms).values() if field is not None)
+            legal_count = sum(1 for field in vars(r.legal_risk_and_enforcement).values() if field is not None)
+            reg_count = sum(1 for field in vars(r.regulatory_and_compliance_terms).values() if field is not None)
+            data_count = sum(1 for field in vars(r.data_technology_and_deliverables).values() if field is not None)
+            supp_count = len(r.supplemental_operational_risks)
+            total_before += admin_count + tech_count + legal_count + reg_count + data_count + supp_count
+        
         total_after = len(all_findings)
         hallucinations = sum(1 for f in all_findings if f.is_hallucinated)
         avg_confidence = self.scorer.calculate_average_confidence(
@@ -237,7 +285,7 @@ class ExhaustivenessGate:
         return result
 
     
-    def _analyze_chunk(self, chunk_text: str, file_path: str) -> AnalysisResult:
+    def _analyze_chunk(self, chunk_text: str, file_path: str) -> ComprehensiveAnalysisResult:
         """
         Analyze a single chunk of contract text.
         
@@ -246,21 +294,33 @@ class ExhaustivenessGate:
             file_path: Original file path for metadata
             
         Returns:
-            AnalysisResult for the chunk
+            ComprehensiveAnalysisResult for the chunk
         """
         # Use the OpenAI client directly for chunk analysis
         try:
             logger.info(f"Sending chunk to OpenAI ({len(chunk_text)} chars)")
             response = self.openai_client.analyze_contract(chunk_text)
-            logger.info(f"OpenAI response received: {type(response)}, keys: {response.keys() if isinstance(response, dict) else 'N/A'}")
+            logger.info(f"OpenAI response received: {type(response)}")
             
-            # Parse the response into an AnalysisResult
-            from src.result_parser import ResultParser
-            parser = ResultParser()
+            if not isinstance(response, dict):
+                raise ValueError(f"Expected dict response from OpenAI, got {type(response)}")
+            
+            logger.debug(f"Response keys: {list(response.keys())}")
+            
+            # Parse the response into a ComprehensiveAnalysisResult
+            from src.result_parser import ComprehensiveResultParser
+            from src.schema_loader import SchemaLoader
+            from src.schema_validator import SchemaValidator
+            
+            # Create parser with required dependencies
+            schema_loader = SchemaLoader()
+            schema_validator = SchemaValidator(schema_loader)
+            parser = ComprehensiveResultParser(schema_validator)
             
             # Get file info for metadata
             file_info = self.analysis_engine.uploader.get_file_info(file_path)
             
+            logger.info("Parsing API response into ComprehensiveAnalysisResult")
             result = parser.parse_api_response(
                 api_response=response,
                 filename=file_info['filename'],
@@ -268,11 +328,11 @@ class ExhaustivenessGate:
                 page_count=file_info.get('page_count')
             )
             
-            logger.info(f"Parsed result: {len(result.clauses)} clauses, {len(result.risks)} risks")
+            logger.info(f"Parsed result successfully: schema_version={result.schema_version}")
             return result
             
         except Exception as e:
-            logger.error(f"Chunk analysis failed: {e}", exc_info=True)
+            logger.error(f"Chunk analysis failed with error: {type(e).__name__}: {str(e)}", exc_info=True)
             raise
     
     def _verify_findings(
@@ -363,7 +423,7 @@ class ExhaustivenessGate:
         query: str,
         response: str,
         contract_text: str,
-        analysis_result: Optional[AnalysisResult] = None
+        analysis_result: Optional[ComprehensiveAnalysisResult] = None
     ) -> VerifiedQueryResponse:
         """
         Verify a query response against the contract.

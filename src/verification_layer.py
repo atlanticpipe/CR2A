@@ -65,6 +65,11 @@ INSTRUCTIONS:
 2. Determine if the finding is accurately represented in the contract
 3. If found, quote the exact supporting text
 4. If not found or inaccurate, explain why
+5. For comprehensive schema findings (ClauseBlock format), verify:
+   - Clause language matches contract text
+   - Risk triggers are present in the clause
+   - Flow-down obligations are accurately identified
+   - Redline recommendations are justified by the clause content
 
 Respond in JSON format:
 {{
@@ -86,6 +91,11 @@ INSTRUCTIONS:
 1. Carefully search the contract for any mention of this finding
 2. Check if the finding could be reasonably inferred from the contract
 3. Determine if this finding appears to be fabricated or unsupported
+4. For comprehensive schema findings (ClauseBlock format), verify:
+   - Clause language exists in the contract
+   - Risk triggers are not fabricated
+   - Flow-down obligations are actually stated
+   - Redline recommendations are based on real issues
 
 Respond in JSON format:
 {{
@@ -306,6 +316,8 @@ Respond in JSON format:
         """
         Format a finding for inclusion in a prompt.
         
+        Handles both legacy format and comprehensive schema ClauseBlock format.
+        
         Args:
             finding: Finding dictionary
             finding_type: Type of finding
@@ -313,6 +325,38 @@ Respond in JSON format:
         Returns:
             Formatted string representation
         """
+        # Check if this is a ClauseBlock from comprehensive schema
+        if 'clause_language' in finding or 'Clause Language' in finding:
+            # Comprehensive schema ClauseBlock format
+            clause_lang = finding.get('clause_language', finding.get('Clause Language', ''))
+            clause_summary = finding.get('clause_summary', finding.get('Clause Summary', ''))
+            risk_triggers = finding.get('risk_triggers_identified', finding.get('Risk Triggers Identified', []))
+            flow_down = finding.get('flow_down_obligations', finding.get('Flow-Down Obligations', []))
+            redline_recs = finding.get('redline_recommendations', finding.get('Redline Recommendations', []))
+            harmful = finding.get('harmful_language_policy_conflicts', 
+                                 finding.get('Harmful Language / Policy Conflicts', []))
+            
+            parts = []
+            parts.append(f"Clause Language: {clause_lang}")
+            parts.append(f"Summary: {clause_summary}")
+            if risk_triggers:
+                parts.append(f"Risk Triggers: {', '.join(risk_triggers)}")
+            if flow_down:
+                parts.append(f"Flow-Down Obligations: {', '.join(flow_down)}")
+            if redline_recs:
+                rec_strs = []
+                for rec in redline_recs:
+                    if isinstance(rec, dict):
+                        action = rec.get('action', 'unknown')
+                        text = rec.get('text', '')[:50]
+                        rec_strs.append(f"{action}: {text}")
+                parts.append(f"Redline Recommendations: {'; '.join(rec_strs)}")
+            if harmful:
+                parts.append(f"Harmful Language: {', '.join(harmful)}")
+            
+            return '\n'.join(parts)
+        
+        # Legacy format handling
         if finding_type == "clause":
             return f"Clause Type: {finding.get('type', 'unknown')}\nText: {finding.get('text', '')}"
         elif finding_type == "risk":

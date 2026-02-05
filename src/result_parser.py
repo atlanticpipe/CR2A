@@ -30,6 +30,7 @@ from src.analysis_models import (
     DataTechnologyAndDeliverables,
 )
 from src.schema_validator import SchemaValidator
+from src.schema_completer import SchemaCompleter
 
 
 logger = logging.getLogger(__name__)

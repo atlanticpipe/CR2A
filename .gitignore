@@ -74,6 +74,14 @@ error.log
 secrets.json
 config.local.json
 
+# Code Signing Certificates - NEVER COMMIT
+certs/
+*.pfx
+*.p12
+*.cer
+*.crt
+*.pem
+
 # ============================================================================
 # Test and Sample Files
 # ============================================================================
