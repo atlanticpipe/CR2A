@@ -1,17 +1,31 @@
 # CR2A - Contract Review & Analysis
 
-AI-powered contract analysis and Q&A system using OpenAI.
+AI-powered contract analysis and Q&A system with version tracking and change comparison.
 
 ## 🚀 Quick Start
 
-### CLI Version (Recommended - No GUI Required)
+### Desktop GUI (Recommended)
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Launch the application
+python src/qt_gui.py
+# Or use the launcher: launch_gui.bat
+
+# 3. Configure your OpenAI API key in Settings
+# The app will prompt you on first launch
+```
+
+### Command Line Interface
 
 ```bash
 # 1. Set your OpenAI API key
 setx OPENAI_API_KEY "sk-your-key-here"
 
 # 2. Analyze a contract
-python src/cli_main.py test_contract.txt
+python src/cli_main.py contract.pdf
 
 # 3. Ask questions interactively
 ❓ Your question: Who are the parties?
@@ -19,137 +33,186 @@ python src/cli_main.py test_contract.txt
 ❓ Your question: exit
 ```
 
-### GUI Version (Requires tkinter)
-
-```bash
-python src/main.py
-```
-
 ## 📋 Features
 
-- ✅ **Contract Analysis** - Extracts parties, terms, dates, risks, obligations
-- ✅ **Natural Language Q&A** - Ask questions about analyzed contracts
-- ✅ **Multiple Formats** - Supports PDF, DOCX, TXT
-- ✅ **OCR Support** - Handles scanned/image-based PDFs
-- ✅ **CLI & GUI** - Choose your interface
-- ✅ **JSON Export/Import** - Save and load analysis results
+### Core Features
+- ✅ **Contract Analysis** - Extracts parties, terms, dates, risks, obligations, clauses
+- ✅ **Natural Language Q&A** - Ask questions about analyzed contracts using OpenAI
+- ✅ **Multiple Formats** - Supports PDF, DOCX, TXT files
+- ✅ **Desktop GUI** - Modern PyQt5 interface with tabbed navigation
+- ✅ **CLI Interface** - Command-line option for automation and scripting
+
+### Advanced Features
+- ✅ **Version Tracking** - Automatically detect and track contract versions
+- ✅ **Change Comparison** - Visual diff between contract versions with color-coded highlighting
+- ✅ **History Management** - Persistent storage of all analyzed contracts
+- ✅ **Duplicate Detection** - Identifies potential duplicate contracts by hash and filename
+- ✅ **Exhaustive Analysis** - Optional multi-pass verification with confidence scoring
+- ✅ **Export Options** - Export analysis reports and chat logs
 
 ## 📦 Installation
 
+### Prerequisites
+- **Python 3.11+**
+- **Windows 10/11** (primary platform)
+- **OpenAI API Key** - Get one from [OpenAI Platform](https://platform.openai.com/api-keys)
+
+### Setup
+
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone <repository-url>
 cd CR2A
 
-# Install dependencies
+# 2. Create virtual environment (recommended)
+python -m venv venv311
+venv311\Scripts\activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# Set OpenAI API key
-setx OPENAI_API_KEY "sk-your-key-here"
+# 4. Launch the application
+python src/qt_gui.py
 ```
 
-## 📖 Documentation
+The application will prompt you to enter your OpenAI API key on first launch.
 
-### Quick Guides
+## 🎯 Usage
 
-- **[Final Summary](docs/guides/FINAL_SUMMARY.md)** - Complete overview and solution
-- **[CLI Guide](docs/guides/CLI_GUIDE.md)** - Command-line interface usage
-- **[Quick Reference](docs/guides/QUICK_REFERENCE.md)** - Quick commands
+### Desktop GUI
 
-### Detailed Guides
+The GUI provides four main tabs:
 
-- **[Testing Guide](docs/guides/TESTING_GUIDE.md)** - How to test the application
-- **[OCR Setup Guide](docs/guides/OCR_SETUP_GUIDE.md)** - Tesseract OCR configuration
-- **[Integration Summary](docs/guides/INTEGRATION_SUMMARY.md)** - Technical details
+#### 📄 Upload Tab
+- Select contract files (PDF, DOCX, TXT)
+- Choose standard or exhaustive analysis mode
+- Configure multi-pass verification options
+- Automatic duplicate detection
 
-### Developer Documentation
+#### 📊 Analysis Tab
+- Structured view of analysis results
+- Contract overview with metadata
+- Clauses organized by category
+- Identified risks and compliance issues
+- Obligations and key terms
 
-- **[Build Guide](docs/developer/BUILD_GUIDE.md)** - Building executables
-- **[Testing Guide](docs/developer/TESTING_GUIDE.md)** - Running tests
-- **[Documentation Index](docs/developer/DOCUMENTATION_INDEX.md)** - All docs
+#### 💬 Chat Tab
+- Ask questions about the analyzed contract
+- Natural language Q&A powered by OpenAI
+- View conversation history
+- Export chat logs
 
-## 🎯 Usage Examples
+#### 📜 History Tab
+- View all previously analyzed contracts
+- See version information for each contract
+- Load historical analyses
+- Compare different versions side-by-side
+- Delete old analyses
 
-### Analyze a Contract
+### Command Line Interface
 
 ```bash
-# Text file
-python src/cli_main.py contract.txt
-
-# PDF file
+# Analyze a contract
 python src/cli_main.py contract.pdf
 
-# Word document
-python src/cli_main.py contract.docx
+# The CLI will:
+# 1. Extract text from the document
+# 2. Analyze with OpenAI
+# 3. Display a summary
+# 4. Save results to JSON
+# 5. Enter interactive Q&A mode
 
-# Pre-analyzed JSON
-python src/cli_main.py contract_analysis.json
+# Interactive commands:
+# - Type any question to ask about the contract
+# - 'summary' - Show analysis summary again
+# - 'help' - Show available commands
+# - 'exit' - Quit the application
 ```
 
-### Interactive Q&A
+## 🔄 Version Tracking
 
-After analysis, ask questions:
+CR2A automatically tracks contract versions and changes:
 
-```
-❓ Your question: What are the payment terms?
-💡 Answer: The initial license fee is $125,000...
+### How It Works
 
-❓ Your question: When does the contract expire?
-💡 Answer: The initial term is 3 years from January 15, 2026...
+1. **Upload a Contract** - First upload creates version 1
+2. **Upload Updated Version** - CR2A detects potential duplicates by:
+   - File hash (exact matches)
+   - Filename similarity (fuzzy matching)
+3. **Confirm Version Update** - You confirm if it's an updated version
+4. **Automatic Comparison** - CR2A compares versions and identifies:
+   - Modified clauses
+   - Added clauses
+   - Deleted clauses
+   - Unchanged clauses
+5. **View Changes** - Use the History tab to compare any two versions
 
-❓ Your question: What are the risks?
-💡 Answer: The identified risks include...
-```
+### Version Comparison Features
 
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `<question>` | Ask any question |
-| `summary` | Show analysis summary |
-| `help` | Show help |
-| `exit` | Exit |
-
-## 🔧 System Requirements
-
-### Minimum
-
-- **OS:** Windows 10/11, Linux, macOS
-- **Python:** 3.11+
-- **RAM:** 2 GB
-- **Disk:** 500 MB
-- **Internet:** Required for analysis
-
-### Recommended
-
-- **RAM:** 4 GB+
-- **Disk:** 1 GB
-- **Internet:** Broadband
+- **Side-by-side diff view** with color-coded changes
+- **Change summary** showing counts of modifications
+- **Clause-level tracking** with version numbers
+- **Text-level highlighting** showing exact changes within clauses
 
 ## 🏗️ Architecture
 
+### Application Structure
+
+```
+CR2A Desktop Application (PyQt5)
+├── Upload Tab → File selection & analysis options
+├── Analysis Tab → Structured results display
+├── Chat Tab → Q&A interface
+└── History Tab → Version tracking & comparison
+
+Core Components:
+├── Analysis Engine → OpenAI-powered contract analysis
+├── Query Engine → OpenAI-powered Q&A
+├── Contract Uploader → Text extraction (PDF/DOCX/TXT)
+├── Versioning System → Change tracking & comparison
+└── History Store → Persistent storage
+```
+
+### Technology Stack
+
+- **GUI Framework**: PyQt5
+- **AI/ML**: OpenAI GPT-4o API
+- **Text Extraction**: PyPDF2, python-docx
+- **Database**: SQLite (for version tracking)
+- **Testing**: pytest, unittest
+
 ### OpenAI-Only Design
 
-- **Analysis Engine** - Uses OpenAI API for contract analysis
-- **Query Engine** - Uses OpenAI API for Q&A
-- **Contract Uploader** - Extracts text from PDF/DOCX/TXT
-- **OCR Support** - Tesseract for scanned documents
-
-### No Local LLM Required
-
-- ✅ No large model downloads
-- ✅ No GPU required
-- ✅ Lower memory usage
-- ✅ Faster startup
+- Uses OpenAI API for all AI operations
+- No local LLM required
+- No GPU required
+- Lower memory usage
+- Faster startup
 
 ## 📊 Performance
 
 | Task | Time |
 |------|------|
-| Startup | 3 seconds |
+| Application startup | 2-3 seconds |
 | Analysis (< 5 pages) | 15-30 seconds |
 | Analysis (5-20 pages) | 30-60 seconds |
+| Analysis (20-50 pages) | 60-120 seconds |
 | Query response | 2-5 seconds |
+| Version comparison | < 1 second |
+
+## 🔧 System Requirements
+
+### Minimum
+- **OS:** Windows 10/11 (64-bit)
+- **Python:** 3.11+
+- **RAM:** 4 GB
+- **Disk:** 1 GB free space
+- **Internet:** Required for OpenAI API
+
+### Recommended
+- **RAM:** 8 GB+
+- **Disk:** 2 GB free space
+- **Internet:** Broadband connection
 
 ## 🧪 Testing
 
@@ -157,17 +220,21 @@ After analysis, ask questions:
 # Run all tests
 pytest tests/
 
-# Run specific test suite
-pytest tests/unit/
-pytest tests/integration/
+# Run specific test suites
+pytest tests/unit/           # Unit tests
+pytest tests/integration/    # Integration tests
+pytest tests/manual/         # Manual test scripts
 
 # Run with coverage
-pytest tests/ --cov=src
+pytest tests/ --cov=src --cov-report=html
+
+# Run performance benchmarks
+python tests/performance_benchmark.py
 ```
 
 ## 🐛 Troubleshooting
 
-### "OPENAI_API_KEY not set"
+### "OPENAI_API_KEY not set" (CLI)
 
 ```bash
 setx OPENAI_API_KEY "sk-your-key-here"
@@ -177,35 +244,89 @@ setx OPENAI_API_KEY "sk-your-key-here"
 
 - PDF may be image-based (scanned)
 - Install Tesseract OCR for automatic OCR support
-- See [OCR Setup Guide](docs/guides/OCR_SETUP_GUIDE.md)
+- Ensure PDF is not password-protected
 
-### "tkinter DLL load failed"
+### GUI won't start
 
-- Use the CLI version instead: `python src/cli_main.py`
-- See [CLI Guide](docs/guides/CLI_GUIDE.md)
+```bash
+# Check PyQt5 installation
+pip install --upgrade PyQt5
 
-## 📝 License
+# Or use CLI version
+python src/cli_main.py contract.pdf
+```
 
-[Your License Here]
+### Analysis fails with API error
+
+- Verify your OpenAI API key is valid
+- Check your internet connection
+- Ensure you have sufficient API credits
+- Check OpenAI service status
+
+### Version comparison not working
+
+- Ensure versioning system initialized correctly
+- Check logs in `%APPDATA%\CR2A\logs\`
+- Try restarting the application
+
+## 📖 Documentation
+
+### User Guides
+- **[User Manual](USER_MANUAL.md)** - Complete user guide
+- **[Versioning Guide](docs/VERSIONING_USER_GUIDE.md)** - Version tracking features
+
+### Developer Documentation
+- **[Database Schema](docs/DATABASE_SCHEMA.md)** - Versioning database structure
+- **[Code Signing Guide](CODE_SIGNING_GUIDE.md)** - Building signed executables
+
+## 🔨 Building Executables
+
+```bash
+# Build the application
+python -m build_tools.build
+
+# This creates:
+# - dist/CR2A.exe (main application)
+# - dist/CR2A_Setup.exe (installer)
+```
+
+See [CODE_SIGNING_GUIDE.md](CODE_SIGNING_GUIDE.md) for code signing instructions.
+
+## 📝 Configuration
+
+Configuration is stored in:
+- **Windows:** `%APPDATA%\CR2A\config.json`
+- **Logs:** `%APPDATA%\CR2A\logs\cr2a.log`
+- **Database:** `%APPDATA%\CR2A\versions.db`
+- **History:** `%APPDATA%\CR2A\history\`
 
 ## 🤝 Contributing
 
-Contributions welcome! Please read the contributing guidelines first.
+Contributions welcome! Areas for contribution:
+- Additional analysis features
+- UI/UX improvements
+- Performance optimizations
+- Test coverage
+- Documentation
 
 ## 📧 Support
 
-- **Documentation:** See `docs/guides/`
+- **Documentation:** See [USER_MANUAL.md](USER_MANUAL.md)
 - **Issues:** [GitHub Issues]
-- **Logs:** `%APPDATA%\CR2A\logs\cr2a.log`
+- **Logs:** Check `%APPDATA%\CR2A\logs\cr2a.log` for errors
 
 ## 🎉 Acknowledgments
 
-- OpenAI for GPT API
-- Tesseract OCR for text recognition
-- Python community for excellent libraries
+- **OpenAI** - GPT API for analysis and Q&A
+- **PyQt5** - Desktop GUI framework
+- **Python Community** - Excellent libraries and tools
+
+## 📄 License
+
+[Your License Here]
 
 ---
 
-**Ready to analyze contracts!** 🚀
+**Ready to analyze contracts with version tracking!** 🚀
 
-*Last Updated: February 3, 2026*
+*Last Updated: February 5, 2026*
