@@ -183,3 +183,85 @@ class ComprehensiveContractExtractor:
                 summary_parts.append(f"Found {len(matches)} {category.replace('_', ' ')} clauses")
         
         return "\n".join(summary_parts) if summary_parts else "No clauses extracted"
+    
+    def create_focused_contract(self, text: str) -> Tuple[str, Dict]:
+        """Create a focused version of the contract with extracted clauses.
+        
+        Args:
+            text: Full contract text
+            
+        Returns:
+            Tuple of (focused_contract_text, extraction_metadata)
+        """
+        try:
+            # Extract all clauses
+            extraction_results = self.extract_all_clauses(text)
+            
+            # Build focused contract text with all extracted clauses
+            focused_parts = []
+            
+            # Add sections
+            if extraction_results['sections']:
+                focused_parts.append("=== SECTIONS ===")
+                for section in extraction_results['sections']:
+                    focused_parts.append(f"\n{section['full_text']}")
+                    if section.get('context'):
+                        focused_parts.append(section['context'])
+            
+            # Add articles
+            if extraction_results['articles']:
+                focused_parts.append("\n\n=== ARTICLES ===")
+                for article in extraction_results['articles']:
+                    focused_parts.append(f"\n{article['full_text']}")
+                    if article.get('context'):
+                        focused_parts.append(article['context'])
+            
+            # Add important clause categories
+            if extraction_results['important_clauses']:
+                focused_parts.append("\n\n=== KEY CLAUSES ===")
+                for category, matches in extraction_results['important_clauses'].items():
+                    focused_parts.append(f"\n--- {category.replace('_', ' ').title()} ---")
+                    for match in matches:
+                        focused_parts.append(match['context'])
+            
+            # Add definitions if found
+            if extraction_results['definitions']:
+                focused_parts.append("\n\n=== DEFINITIONS ===")
+                for definition in extraction_results['definitions']:
+                    focused_parts.append(f"\n{definition['full_text']}")
+            
+            # Join all parts
+            focused_contract = "\n".join(focused_parts)
+            
+            # Create metadata
+            metadata = {
+                'original_length': len(text),
+                'focused_length': len(focused_contract),
+                'reduction_percent': ((len(text) - len(focused_contract)) / len(text) * 100) if len(text) > 0 else 0,
+                'total_categories': (
+                    len(extraction_results['sections']) +
+                    len(extraction_results['articles']) +
+                    len(extraction_results['important_clauses']) +
+                    len(extraction_results['definitions'])
+                ),
+                'sections_found': len(extraction_results['sections']),
+                'articles_found': len(extraction_results['articles']),
+                'definitions_found': len(extraction_results['definitions']),
+                'important_clause_categories': len(extraction_results['important_clauses'])
+            }
+            
+            logger.info(f"Created focused contract: {metadata['total_categories']} categories, "
+                       f"{metadata['reduction_percent']:.1f}% reduction")
+            
+            return focused_contract, metadata
+            
+        except Exception as e:
+            logger.error(f"Error creating focused contract: {e}")
+            # Return original text on error
+            return text, {
+                'original_length': len(text),
+                'focused_length': len(text),
+                'reduction_percent': 0,
+                'total_categories': 0,
+                'error': str(e)
+            }
