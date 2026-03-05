@@ -410,23 +410,59 @@ class BidReviewTab(QWidget):
     def _on_single_analyze(self, item_key: str):
         """User clicked per-item 'Analyze' button."""
         if not self.bid_engine or not self.prepared:
+            logger.warning("Bid engine or prepared data not set for item %s", item_key)
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "Not Ready",
+                "Bid review engine not initialized.\n"
+                "Please load a contract first."
+            )
+            return
+
+        # Prevent concurrent model access (llama_cpp is not thread-safe)
+        if self._current_thread and self._current_thread.isRunning():
+            logger.info("Waiting for previous analysis to finish before starting %s", item_key)
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Please Wait",
+                "Another analysis is in progress. Please wait for it to finish."
+            )
             return
 
         row = self._item_rows.get(item_key)
         if row:
             row["btn"].setEnabled(False)
             row["btn"].setText("...")
-            row["conf_label"].setText("...")
+            row["conf_label"].setText("Analyzing...")
             row["conf_label"].setStyleSheet(
                 "font-size: 10px; color: #2196F3; padding: 2px 4px;"
             )
 
+        # Show progress feedback
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+        _, display_name = BID_ITEM_MAP.get(item_key, ("", item_key))
+        self.progress_label.setVisible(True)
+        self.progress_label.setText(f"Analyzing: {display_name}...")
+
         thread = SingleBidItemThread(self.bid_engine, self.prepared, item_key)
-        thread.finished.connect(self._on_item_complete)
-        thread.error.connect(self._on_item_error)
+        thread.finished.connect(self._on_single_item_done)
+        thread.error.connect(self._on_single_item_error)
         # Keep reference to prevent GC
         self._current_thread = thread
         thread.start()
+
+    def _on_single_item_done(self, item_key, display_name, item):
+        """Handle single item analysis completion (hides progress, delegates to _on_item_complete)."""
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
+        self._on_item_complete(item_key, display_name, item)
+
+    def _on_single_item_error(self, item_key, error_msg):
+        """Handle single item analysis error (hides progress, delegates to _on_item_error)."""
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
+        self._on_item_error(item_key, error_msg)
 
     # ------------------------------------------------------------------
     # Start full analysis (called by main GUI after signal)
@@ -434,12 +470,21 @@ class BidReviewTab(QWidget):
 
     def start_analysis(self, engine, prepared):
         """Start analyzing all checklist items in background."""
+        # Cancel any running single-item thread first (llama_cpp not thread-safe)
+        if self._current_thread and self._current_thread.isRunning():
+            logger.info("Cancelling previous thread before starting full analysis")
+            if hasattr(self._current_thread, 'cancelled'):
+                self._current_thread.cancelled = True
+            self._current_thread.quit()
+            self._current_thread.wait(5000)
+
         self.bid_engine = engine
         self.prepared = prepared
 
         # Reset UI
         self.analyze_all_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_label.setVisible(True)
         self.progress_label.setText("Starting bid review...")

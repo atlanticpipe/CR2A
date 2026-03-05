@@ -2001,6 +2001,16 @@ class CR2A_GUI(QMainWindow):
             self.upload_status.setText("Please wait for the current analysis to finish...")
             return
 
+        # Prevent concurrent model access with bid review (llama_cpp not thread-safe)
+        bid_thread = getattr(self.bid_review_tab, '_current_thread', None) if self.bid_review_tab else None
+        if bid_thread and bid_thread.isRunning():
+            QMessageBox.warning(
+                self, "Please Wait",
+                "A bid review analysis is in progress.\n"
+                "Please wait for it to finish before analyzing contract categories."
+            )
+            return
+
         # Update status
         self.structured_view.update_category_status(
             cat_key, "loading", self.analysis_engine.CATEGORY_MAP
@@ -2167,6 +2177,15 @@ class CR2A_GUI(QMainWindow):
             QMessageBox.warning(
                 self, "Error",
                 "Analysis engine or AI client not initialized."
+            )
+            return
+
+        # Prevent concurrent model access (llama_cpp not thread-safe)
+        if self.active_category_thread and self.active_category_thread.isRunning():
+            QMessageBox.warning(
+                self, "Please Wait",
+                "A contract analysis is in progress on the Contract tab.\n"
+                "Please wait for it to finish before running bid review."
             )
             return
 
