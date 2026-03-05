@@ -7,15 +7,93 @@ Only stores changes (deltas) between versions to minimize redundancy.
 
 import json
 import logging
+import sqlite3
+import time
 import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from functools import wraps
+from typing import List, Optional, Dict, Any, Callable, TypeVar
 
 from src.version_database import VersionDatabase, VersionDatabaseError
 
 
 logger = logging.getLogger(__name__)
+
+
+# Type variable for generic function return type
+T = TypeVar('T')
+
+
+def retry_on_db_lock(max_retries: int = 3, initial_delay: float = 1.0) -> Callable:
+    """
+    Decorator to retry database operations on lock/busy errors with exponential backoff.
+
+    This is critical for multi-user scenarios on network drives where multiple users
+    may try to write to the database simultaneously.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds, doubles with each retry (default: 1.0)
+
+    Returns:
+        Decorated function that automatically retries on database lock errors
+
+    Example:
+        @retry_on_db_lock(max_retries=3, initial_delay=1.0)
+        def save_data(self, data):
+            # Database operation that might encounter locks
+            pass
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            delay = initial_delay
+            last_exception = None
+
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+
+                except (sqlite3.OperationalError, VersionDatabaseError) as e:
+                    error_msg = str(e).lower()
+
+                    # Check if this is a lock/busy error that we should retry
+                    if any(keyword in error_msg for keyword in ['locked', 'busy']):
+                        last_exception = e
+
+                        if attempt < max_retries - 1:  # Not the last attempt
+                            logger.warning(
+                                "Database locked, retrying in %.1f seconds (attempt %d/%d): %s",
+                                delay, attempt + 1, max_retries, func.__name__
+                            )
+                            time.sleep(delay)
+                            delay *= 2  # Exponential backoff
+                            continue
+                        else:
+                            logger.error(
+                                "Database locked after %d retries, giving up: %s",
+                                max_retries, func.__name__
+                            )
+                    else:
+                        # Not a lock error, don't retry
+                        raise
+
+                except Exception as e:
+                    # Other exceptions, don't retry
+                    raise
+
+            # If we exhausted all retries, raise the last exception
+            if last_exception:
+                raise DifferentialStorageError(
+                    f"Database operation failed after {max_retries} retries due to lock contention. "
+                    f"Another user may be saving data. Please try again in a moment."
+                ) from last_exception
+
+            return None  # Should never reach here
+
+        return wrapper
+    return decorator
 
 
 @dataclass
@@ -159,7 +237,8 @@ class DifferentialStorage:
         """
         self.db = database if database is not None else VersionDatabase()
         logger.info("DifferentialStorage initialized")
-    
+
+    @retry_on_db_lock(max_retries=3, initial_delay=1.0)
     def store_new_contract(self, contract: Contract, clauses: List[Clause]) -> None:
         """
         Store a new contract with version 1.
@@ -296,7 +375,8 @@ class DifferentialStorage:
                 conn.rollback()
                 logger.debug("Transaction rolled back due to error")
             raise DifferentialStorageError(f"Failed to store new contract: {e}")
-    
+
+    @retry_on_db_lock(max_retries=3, initial_delay=1.0)
     def store_contract_version(
         self,
         contract_id: str,

@@ -1,0 +1,21 @@
+{
+  "contract_metadata": {
+    "filename": "malformed.pdf",
+    "analyzed_at": "2024-01-15T19:00:00Z",
+    "page_count": "not a number",
+    "parties": "should be an array",
+    "contract_type": 12345,
+    "effective_date": null
+  },
+  "clauses": "should be an array",
+  "risks": [
+    {
+      "id": "risk_1",
+      "severity": "invalid_severity_level",
+      "description": 123,
+      "recommendation": null
+    }
+  ],
+  "compliance_issues": null,
+  "redlining_suggestions": {}
+}

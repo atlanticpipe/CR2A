@@ -1,0 +1,37 @@
+{
+  "contract_metadata": {
+    "filename": "partial_contract.pdf",
+    "analyzed_at": "2024-01-15T17:30:00Z",
+    "page_count": 8,
+    "parties": [
+      {
+        "name": "Service Provider Inc.",
+        "role": "provider"
+      },
+      {
+        "name": "Customer Corp.",
+        "role": "customer"
+      }
+    ],
+    "contract_type": "Service Level Agreement",
+    "effective_date": "2024-01-20"
+  },
+  "risks": [
+    {
+      "id": "risk_1",
+      "clause_id": "unknown",
+      "severity": "high",
+      "description": "No clear service level metrics defined",
+      "recommendation": "Add specific uptime guarantees and response time commitments"
+    }
+  ],
+  "compliance_issues": [
+    {
+      "id": "compliance_1",
+      "regulation": "ISO 27001",
+      "issue": "No information security controls specified",
+      "severity": "high"
+    }
+  ],
+  "redlining_suggestions": []
+}

@@ -176,7 +176,7 @@ class ChangeComparator:
                 clause_identifier=clause_identifier,
                 change_type=ClauseChangeType.ADDED,
                 old_content=None,
-                new_content=new_clause.clause_language,
+                new_content=new_clause.clause_location,
                 similarity_score=0.0
             )
         
@@ -186,15 +186,15 @@ class ChangeComparator:
             return ClauseComparison(
                 clause_identifier=clause_identifier,
                 change_type=ClauseChangeType.DELETED,
-                old_content=old_clause.clause_language,
+                old_content=old_clause.clause_location,
                 new_content=None,
                 similarity_score=0.0
             )
         
         # Case 3: Both clauses exist - compare content
         if old_clause is not None and new_clause is not None:
-            old_content = old_clause.clause_language
-            new_content = new_clause.clause_language
+            old_content = old_clause.clause_location
+            new_content = new_clause.clause_location
             
             # Calculate similarity
             similarity = self.calculate_text_similarity(old_content, new_content)
@@ -384,8 +384,7 @@ class ChangeComparator:
             clause_map['gis_digital_workflow'] = data_tech.gis_digital_workflow
         if data_tech.confidentiality:
             clause_map['confidentiality'] = data_tech.confidentiality
-        if data_tech.intellectual_property:
-            clause_map['intellectual_property'] = data_tech.intellectual_property
+
         if data_tech.cybersecurity:
             clause_map['cybersecurity'] = data_tech.cybersecurity
         

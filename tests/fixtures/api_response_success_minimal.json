@@ -1,0 +1,46 @@
+{
+  "contract_metadata": {
+    "filename": "simple_contract.pdf",
+    "analyzed_at": "2024-01-15T14:20:00Z",
+    "page_count": 5,
+    "parties": [
+      {
+        "name": "John Doe",
+        "role": "freelancer"
+      },
+      {
+        "name": "Tech Startup LLC",
+        "role": "client"
+      }
+    ],
+    "contract_type": "Consulting Agreement",
+    "effective_date": "2024-02-01"
+  },
+  "clauses": [
+    {
+      "id": "clause_1",
+      "type": "payment_terms",
+      "text": "Consultant will be paid $5,000 per month, payable on the first business day of each month.",
+      "page": 2,
+      "risk_level": "low"
+    },
+    {
+      "id": "clause_2",
+      "type": "termination",
+      "text": "Either party may terminate with 14 days notice.",
+      "page": 4,
+      "risk_level": "low"
+    }
+  ],
+  "risks": [
+    {
+      "id": "risk_1",
+      "clause_id": "clause_2",
+      "severity": "low",
+      "description": "Short termination notice period may not provide adequate transition time",
+      "recommendation": "Consider extending to 30 days for better planning"
+    }
+  ],
+  "compliance_issues": [],
+  "redlining_suggestions": []
+}

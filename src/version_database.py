@@ -37,33 +37,41 @@ class VersionDatabase:
     def __init__(self, db_path: Optional[Path] = None):
         """
         Initialize version database.
-        
+
         Args:
             db_path: Path to database file.
-                    Defaults to %APPDATA%/CR2A/versions.db
+                    If None, defaults to %APPDATA%/CR2A/versions.db (legacy mode).
+                    If provided, uses custom path (project mode).
         """
         if db_path is None:
-            # Use %APPDATA%/CR2A/versions.db on Windows
+            # Use %APPDATA%/CR2A/versions.db on Windows (legacy mode)
             appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
             db_dir = Path(appdata) / 'CR2A'
             db_dir.mkdir(parents=True, exist_ok=True)
             db_path = db_dir / 'versions.db'
-        
+        else:
+            # Project mode: ensure parent directory exists
+            db_path = Path(db_path)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+
         self.db_path = Path(db_path)
         self.connection: Optional[sqlite3.Connection] = None
-        
+
         logger.info("Version database initialized at: %s", self.db_path)
-        
+
         # Initialize database schema
         self._initialize_schema()
     
     def connect(self) -> sqlite3.Connection:
         """
         Get or create database connection.
-        
+
+        Enables WAL mode for better concurrent access on network shares
+        and sets a busy timeout to handle lock contention gracefully.
+
         Returns:
             SQLite connection object
-            
+
         Raises:
             VersionDatabaseError: If connection fails
         """
@@ -73,14 +81,25 @@ class VersionDatabase:
                     str(self.db_path),
                     check_same_thread=False
                 )
+                # Enable WAL mode for better concurrent access
+                # WAL (Write-Ahead Logging) allows multiple readers + one writer
+                self.connection.execute("PRAGMA journal_mode=WAL")
+
+                # Set busy timeout to 30 seconds to handle lock contention
+                # Increased timeout for network drive scenarios where multiple users
+                # may be accessing the database concurrently (e.g., FileCloud F:\ drive)
+                self.connection.execute("PRAGMA busy_timeout=30000")
+
                 # Enable foreign key constraints
-                self.connection.execute("PRAGMA foreign_keys = ON")
+                self.connection.execute("PRAGMA foreign_keys=ON")
+
                 # Use Row factory for dict-like access
                 self.connection.row_factory = sqlite3.Row
-                logger.debug("Database connection established")
-            
+
+                logger.debug("Database connection established with WAL mode")
+
             return self.connection
-            
+
         except sqlite3.Error as e:
             logger.error("Failed to connect to database: %s", e)
             raise VersionDatabaseError(f"Failed to connect to database: {e}")

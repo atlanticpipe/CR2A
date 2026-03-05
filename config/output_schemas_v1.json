@@ -195,7 +195,6 @@
         "Digital Surveillance, GIS-Tagged Deliverables & Monitoring Requirements",
         "GIS, Digital Workflow Integration & Electronic Submittals",
         "Confidentiality, Data Security & Records Retention Obligations",
-        "Intellectual Property, Licensing & Ownership of Work Product",
         "Cybersecurity Standards, Breach Notification & IT System Use Policies"
       ],
       "properties": {
@@ -204,7 +203,6 @@
         "Digital Surveillance, GIS-Tagged Deliverables & Monitoring Requirements": { "$ref": "#/$defs/ClauseBlock" },
         "GIS, Digital Workflow Integration & Electronic Submittals": { "$ref": "#/$defs/ClauseBlock" },
         "Confidentiality, Data Security & Records Retention Obligations": { "$ref": "#/$defs/ClauseBlock" },
-        "Intellectual Property, Licensing & Ownership of Work Product": { "$ref": "#/$defs/ClauseBlock" },
         "Cybersecurity Standards, Breach Notification & IT System Use Policies": { "$ref": "#/$defs/ClauseBlock" }
       }
     },
@@ -223,32 +221,20 @@
       "additionalProperties": false,
       "$comment": "Reusable block used for every clause in the template.",
       "required": [
-        "Clause Language",
+        "Clause Location",
         "Clause Summary",
-        "Risk Triggers Identified",
-        "Flow-Down Obligations",
         "Redline Recommendations",
         "Harmful Language / Policy Conflicts"
       ],
       "properties": {
-        "Clause Language": {
+        "Clause Location": {
           "type": "string",
           "minLength": 1,
-          "$comment": "Verbatim or quoted clause text."
+          "$comment": "Where in the contract this clause is found (section, page, article references)."
         },
         "Clause Summary": {
           "type": "string",
-          "minLength": 1,
-          "$comment": "Plain-English summary of the clause."
-        },
-        "Risk Triggers Identified": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "uniqueItems": false
-        },
-        "Flow-Down Obligations": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "$comment": "Brief, concise summary of what the clause covers and its key obligations."
         },
         "Redline Recommendations": {
           "type": "array",
@@ -271,12 +257,7 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
         }
-      },
-      "allOf": [
-        {
-          "$comment": "If there is clause language, a summary must be present (already required)."
-        }
-      ]
+      }
     }
   }
 }

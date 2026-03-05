@@ -76,77 +76,68 @@ class RedlineRecommendation:
 class ClauseBlock:
     """
     Analysis block for a single clause category.
-    
-    Contains comprehensive analysis of a contract clause including the original
-    language, summary, identified risks, obligations, and recommendations.
-    
+
+    Contains comprehensive analysis of a contract clause including the location
+    reference, a concise summary, and recommendations.
+
     Attributes:
-        clause_language: The original text/language of the clause from the contract
-        clause_summary: A summary of what the clause covers
-        risk_triggers_identified: List of specific conditions or language indicating potential risk
-        flow_down_obligations: List of contractual requirements that must be passed to subcontractors
+        clause_location: Where in the contract this clause is found (section, page, article references)
+        clause_summary: Brief, non-verbose summary of what the clause covers
         redline_recommendations: List of structured recommendations for contract modifications
         harmful_language_policy_conflicts: List of language that conflicts with policies or is harmful
     """
-    clause_language: str
+    clause_location: str
     clause_summary: str
-    risk_triggers_identified: List[str]
-    flow_down_obligations: List[str]
     redline_recommendations: List[RedlineRecommendation]
     harmful_language_policy_conflicts: List[str]
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert to dictionary for JSON serialization.
-        
+
         Maps Python field names to schema field names:
-        - clause_language -> "Clause Language"
-        - clause_summary -> "Clause Summary"
-        - risk_triggers_identified -> "Risk Triggers Identified"
-        - flow_down_obligations -> "Flow-Down Obligations"
+        - clause_location -> "Clause Location"
         - redline_recommendations -> "Redline Recommendations"
         - harmful_language_policy_conflicts -> "Harmful Language / Policy Conflicts"
-        
+
         Returns:
             Dictionary representation matching the output_schemas_v1.json ClauseBlock structure
         """
         return {
-            'Clause Language': self.clause_language,
+            'Clause Location': self.clause_location,
             'Clause Summary': self.clause_summary,
-            'Risk Triggers Identified': self.risk_triggers_identified,
-            'Flow-Down Obligations': self.flow_down_obligations,
             'Redline Recommendations': [rec.to_dict() for rec in self.redline_recommendations],
             'Harmful Language / Policy Conflicts': self.harmful_language_policy_conflicts
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ClauseBlock':
         """
         Create a ClauseBlock from a dictionary.
-        
+
         Handles both schema format (with spaces in keys) and Python format (with underscores).
         Parses nested RedlineRecommendation objects from the redline_recommendations array.
-        
+
         Args:
             data: Dictionary containing clause block data. Accepts keys in either format:
-                  - Schema format: "Clause Language", "Risk Triggers Identified", etc.
-                  - Python format: "clause_language", "risk_triggers_identified", etc.
-            
+                  - Schema format: "Clause Location", etc.
+                  - Python format: "clause_location", etc.
+
         Returns:
             ClauseBlock instance with all fields populated
-            
+
         Raises:
             KeyError: If required fields are missing from the data
         """
         # Support both schema format (with spaces) and Python format (with underscores)
-        clause_language = data.get('Clause Language', data.get('clause_language', ''))
+        # Also support legacy "Clause Language" / "clause_language" keys for backward compatibility
+        clause_location = (data.get('Clause Location') or data.get('clause_location')
+                          or data.get('Clause Language') or data.get('clause_language', ''))
         clause_summary = data.get('Clause Summary', data.get('clause_summary', ''))
-        risk_triggers = data.get('Risk Triggers Identified', data.get('risk_triggers_identified', []))
-        flow_down = data.get('Flow-Down Obligations', data.get('flow_down_obligations', []))
         redline_recs_data = data.get('Redline Recommendations', data.get('redline_recommendations', []))
-        harmful_language = data.get('Harmful Language / Policy Conflicts', 
+        harmful_language = data.get('Harmful Language / Policy Conflicts',
                                     data.get('harmful_language_policy_conflicts', []))
-        
+
         # Parse nested RedlineRecommendation objects
         redline_recommendations = []
         for rec_data in redline_recs_data:
@@ -154,12 +145,10 @@ class ClauseBlock:
                 redline_recommendations.append(RedlineRecommendation.from_dict(rec_data))
             elif isinstance(rec_data, RedlineRecommendation):
                 redline_recommendations.append(rec_data)
-        
+
         return cls(
-            clause_language=clause_language,
+            clause_location=clause_location,
             clause_summary=clause_summary,
-            risk_triggers_identified=risk_triggers,
-            flow_down_obligations=flow_down,
             redline_recommendations=redline_recommendations,
             harmful_language_policy_conflicts=harmful_language
         )
@@ -204,17 +193,11 @@ class ContractOverview:
     notes: str
     
     def __post_init__(self) -> None:
-        """Validate that enum fields have valid values."""
+        """Validate and normalize enum fields to valid values."""
         if self.general_risk_level not in VALID_RISK_LEVELS:
-            raise ValueError(
-                f"Invalid general_risk_level '{self.general_risk_level}'. "
-                f"Must be one of: {', '.join(sorted(VALID_RISK_LEVELS))}"
-            )
+            self.general_risk_level = "Medium"
         if self.bid_model not in VALID_BID_MODELS:
-            raise ValueError(
-                f"Invalid bid_model '{self.bid_model}'. "
-                f"Must be one of: {', '.join(sorted(VALID_BID_MODELS))}"
-            )
+            self.bid_model = "Other"
     
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -607,7 +590,6 @@ DATA_TECHNOLOGY_FIELD_MAPPING = {
     'digital_surveillance': 'Digital Surveillance, GIS-Tagged Deliverables & Monitoring Requirements',
     'gis_digital_workflow': 'GIS, Digital Workflow Integration & Electronic Submittals',
     'confidentiality': 'Confidentiality, Data Security & Records Retention Obligations',
-    'intellectual_property': 'Intellectual Property, Licensing & Ownership of Work Product',
     'cybersecurity': 'Cybersecurity Standards, Breach Notification & IT System Use Policies',
 }
 
@@ -921,14 +903,13 @@ class DataTechnologyAndDeliverables:
     Section VI: Data, Technology & Deliverables (7 clause types).
     
     Contains clause blocks for data, technology, and deliverables aspects of contracts
-    including data ownership, AI use, cybersecurity, and intellectual property.
+    including data ownership, AI use, and cybersecurity.
     """
     data_ownership: Optional[ClauseBlock] = None
     ai_technology_use: Optional[ClauseBlock] = None
     digital_surveillance: Optional[ClauseBlock] = None
     gis_digital_workflow: Optional[ClauseBlock] = None
     confidentiality: Optional[ClauseBlock] = None
-    intellectual_property: Optional[ClauseBlock] = None
     cybersecurity: Optional[ClauseBlock] = None
     
     def to_dict(self) -> Dict[str, Any]:

@@ -1,7 +1,7 @@
 """
 Result Parser Module
 
-Handles parsing and validation of OpenAI API responses into AnalysisResult objects.
+Handles parsing and validation of AI model responses into AnalysisResult objects.
 Provides robust handling of partial or malformed responses.
 
 Supports both legacy simplified schema (AnalysisResult) and comprehensive 8-section
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 class ResultParser:
     """
-    Parses OpenAI API JSON responses into AnalysisResult objects.
+    Parses AI model JSON responses into AnalysisResult objects.
     
     This class handles:
     - Parsing structured JSON responses
@@ -59,10 +59,10 @@ class ResultParser:
         page_count: Optional[int] = None
     ) -> AnalysisResult:
         """
-        Parse OpenAI API JSON response into AnalysisResult.
+        Parse AI model JSON response into AnalysisResult.
         
         Args:
-            api_response: JSON response from OpenAI API
+            api_response: JSON response from AI model
             filename: Name of the analyzed contract file
             file_size_bytes: Size of the file in bytes
             page_count: Number of pages (optional)
@@ -207,17 +207,23 @@ class ResultParser:
         text = clause_data.get('text', '')
         page = clause_data.get('page', 0)
         risk_level = clause_data.get('risk_level', 'low')
-        
+
         # Validate risk level
-        if risk_level not in ['low', 'medium', 'high']:
-            logger.warning("Invalid risk level '%s' for clause %s, defaulting to 'low'", 
+        if risk_level not in ['low', 'medium', 'high', 'critical']:
+            logger.warning("Invalid risk level '%s' for clause %s, defaulting to 'low'",
                          risk_level, clause_id)
             risk_level = 'low'
-        
-        # Skip clauses with no text
+
+        # Use fallback fields if text is empty
         if not text:
-            logger.warning("Skipping clause %s with empty text", clause_id)
-            return None
+            text = (clause_data.get('clause_location', '')
+                    or clause_data.get('clause_language', '')
+                    or clause_data.get('description', ''))
+            if text:
+                logger.info("Using fallback field for clause %s text", clause_id)
+            else:
+                logger.warning("Skipping clause %s with no text in any field", clause_id)
+                return None
         
         return Clause(
             id=clause_id,
@@ -286,10 +292,15 @@ class ResultParser:
                          severity, risk_id)
             severity = 'low'
         
-        # Skip risks with no description
+        # Use fallback fields if description is empty
         if not description:
-            logger.warning("Skipping risk %s with empty description", risk_id)
-            return None
+            description = (risk_data.get('recommendation', '')
+                           or risk_data.get('risk_description', ''))
+            if description:
+                logger.info("Using fallback field for risk %s description", risk_id)
+            else:
+                logger.warning("Skipping risk %s with no description in any field", risk_id)
+                return None
         
         return Risk(
             id=risk_id,
@@ -421,9 +432,20 @@ class ResultParser:
         suggested_text = suggestion_data.get('suggested_text', '')
         rationale = suggestion_data.get('rationale', '')
         
-        # Skip suggestions with missing required fields
-        if not clause_id or not original_text or not suggested_text:
-            logger.warning("Skipping redlining suggestion %d with missing required fields", index)
+        # Allow partial suggestions with placeholder defaults
+        if not clause_id:
+            clause_id = f'clause_unknown_{index + 1}'
+            logger.info("Redlining suggestion %d missing clause_id, using placeholder", index)
+        if not original_text:
+            original_text = suggestion_data.get('current_text', '') or '[not specified]'
+            logger.info("Redlining suggestion %d missing original_text, using fallback", index)
+        if not suggested_text:
+            suggested_text = suggestion_data.get('proposed_text', '') or '[not specified]'
+            logger.info("Redlining suggestion %d missing suggested_text, using fallback", index)
+
+        # Only skip if both texts are placeholders (no useful content at all)
+        if original_text == '[not specified]' and suggested_text == '[not specified]':
+            logger.warning("Skipping redlining suggestion %d with no text content", index)
             return None
         
         return RedliningSuggestion(
@@ -443,7 +465,7 @@ class ComprehensiveResultParser:
     Parses API responses into ComprehensiveAnalysisResult objects.
     
     This class handles parsing of the comprehensive 8-section schema responses
-    from the OpenAI API. It validates responses against the schema and converts
+    from the AI model. It validates responses against the schema and converts
     them into strongly-typed Python dataclass objects.
     
     Validates: Requirements 4.1, 4.2
@@ -547,12 +569,12 @@ class ComprehensiveResultParser:
         Parse and validate API response into ComprehensiveAnalysisResult object.
         
         This method parses the comprehensive 8-section schema response from the
-        OpenAI API into a strongly-typed ComprehensiveAnalysisResult object.
+        AI model into a strongly-typed ComprehensiveAnalysisResult object.
         
         Validates: Requirements 4.1, 4.2, 6.2, 6.4
         
         Args:
-            api_response: JSON response from OpenAI API matching output_schemas_v1.json
+            api_response: JSON response from AI model matching output_schemas_v1.json
             filename: Name of the analyzed contract file
             file_size_bytes: Size of the file in bytes
             page_count: Number of pages (optional)
@@ -700,7 +722,7 @@ class ComprehensiveResultParser:
         
         Args:
             data: Dictionary containing clause block data from API response.
-                  Expects schema format keys (e.g., "Clause Language", "Risk Triggers Identified").
+                  Expects schema format keys (e.g., "Clause Location", "Redline Recommendations").
         
         Returns:
             ClauseBlock object if data is valid, None if data is empty or invalid.
@@ -709,9 +731,10 @@ class ComprehensiveResultParser:
             return None
         
         # Check if the clause block has meaningful content
-        clause_language = data.get('Clause Language', data.get('clause_language', ''))
-        if not clause_language:
-            logger.debug("Skipping clause block with empty clause language")
+        clause_location = (data.get('Clause Location') or data.get('clause_location')
+                          or data.get('Clause Language') or data.get('clause_language', ''))
+        if not clause_location:
+            logger.debug("Skipping clause block with empty clause location")
             return None
         
         try:
@@ -821,7 +844,7 @@ class ComprehensiveResultParser:
         schema structure:
         
         1. Maps legacy clauses to appropriate schema sections based on clause type
-        2. Maps legacy risks to risk_triggers_identified in relevant clause blocks
+        2. Maps legacy risks to supplemental clause blocks
         3. Maps legacy redlining_suggestions to redline_recommendations
         4. Preserves all original data
         
@@ -982,7 +1005,6 @@ class ComprehensiveResultParser:
             # Data & Technology
             'data': ('data_technology_and_deliverables', 'data_ownership'),
             'confidentiality': ('data_technology_and_deliverables', 'confidentiality'),
-            'intellectual_property': ('data_technology_and_deliverables', 'intellectual_property'),
         }
         
         # Map each legacy clause to a section
@@ -1016,22 +1038,18 @@ class ComprehensiveResultParser:
         unmapped_risks = [r for r in legacy.risks if not any(c.id == r.clause_id for c in legacy.clauses)]
         for risk in unmapped_risks:
             clause_block = ClauseBlock(
-                clause_language=f"Risk identified: {risk.description}",
-                clause_summary=risk.description,
-                risk_triggers_identified=[risk.description],
-                flow_down_obligations=[],
+                clause_location=f"Risk identified: {risk.description}",
+                clause_summary="",
                 redline_recommendations=[],
                 harmful_language_policy_conflicts=[]
             )
             supplemental_risks.append(clause_block)
-        
+
         # Add any unmapped compliance issues to supplemental operational risks
         for issue in legacy.compliance_issues:
             clause_block = ClauseBlock(
-                clause_language=f"Compliance issue: {issue.issue}",
-                clause_summary=f"{issue.regulation}: {issue.issue}",
-                risk_triggers_identified=[issue.issue],
-                flow_down_obligations=[],
+                clause_location=f"Compliance issue: {issue.issue}",
+                clause_summary="",
                 redline_recommendations=[],
                 harmful_language_policy_conflicts=[issue.issue]
             )
@@ -1081,12 +1099,10 @@ class ComprehensiveResultParser:
             redline_recommendations.append(recommendation)
         
         return ClauseBlock(
-            clause_language=clause.text,
-            clause_summary=f"{clause.type} clause (page {clause.page})",
-            risk_triggers_identified=risk_triggers,
-            flow_down_obligations=[],  # Not available in legacy format
+            clause_location=f"Page {clause.page}" if hasattr(clause, 'page') and clause.page else clause.text[:200],
+            clause_summary="",
             redline_recommendations=redline_recommendations,
-            harmful_language_policy_conflicts=[]  # Not available in legacy format
+            harmful_language_policy_conflicts=[]
         )
     
     def _populate_section_from_mapping(

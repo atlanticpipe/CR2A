@@ -1,0 +1,133 @@
+{
+  "contract_metadata": {
+    "filename": "sample_contract.pdf",
+    "analyzed_at": "2024-01-15T10:30:00Z",
+    "page_count": 25,
+    "parties": [
+      {
+        "name": "Acme Corporation",
+        "role": "contractor"
+      },
+      {
+        "name": "Global Industries Inc.",
+        "role": "client"
+      }
+    ],
+    "contract_type": "Service Agreement",
+    "effective_date": "2024-01-01"
+  },
+  "clauses": [
+    {
+      "id": "clause_1",
+      "type": "payment_terms",
+      "text": "Payment shall be made within 30 days of invoice receipt. Late payments will incur a 1.5% monthly interest charge.",
+      "page": 3,
+      "risk_level": "low"
+    },
+    {
+      "id": "clause_2",
+      "type": "liability",
+      "text": "The Contractor shall be liable for any damages arising from negligence or breach of contract, with no limitation on liability amount.",
+      "page": 7,
+      "risk_level": "high"
+    },
+    {
+      "id": "clause_3",
+      "type": "termination",
+      "text": "Either party may terminate this agreement with 30 days written notice. Termination for cause may be immediate.",
+      "page": 12,
+      "risk_level": "medium"
+    },
+    {
+      "id": "clause_4",
+      "type": "confidentiality",
+      "text": "All confidential information disclosed during the term of this agreement shall remain confidential for a period of 5 years.",
+      "page": 15,
+      "risk_level": "low"
+    },
+    {
+      "id": "clause_5",
+      "type": "intellectual_property",
+      "text": "All intellectual property created during the performance of services shall be owned by the Client.",
+      "page": 18,
+      "risk_level": "medium"
+    },
+    {
+      "id": "clause_6",
+      "type": "indemnification",
+      "text": "Contractor agrees to indemnify and hold harmless the Client from any claims, damages, or expenses arising from the services provided.",
+      "page": 20,
+      "risk_level": "high"
+    }
+  ],
+  "risks": [
+    {
+      "id": "risk_1",
+      "clause_id": "clause_2",
+      "severity": "critical",
+      "description": "Unlimited liability clause exposes contractor to potentially catastrophic financial risk",
+      "recommendation": "Negotiate a liability cap, typically 1-2x the contract value, or obtain appropriate insurance coverage"
+    },
+    {
+      "id": "risk_2",
+      "clause_id": "clause_6",
+      "severity": "high",
+      "description": "Broad indemnification clause without carve-outs for client's own negligence",
+      "recommendation": "Add language limiting indemnification to contractor's negligence or willful misconduct, excluding client-caused issues"
+    },
+    {
+      "id": "risk_3",
+      "clause_id": "clause_3",
+      "severity": "medium",
+      "description": "Termination for cause is not clearly defined, creating ambiguity",
+      "recommendation": "Define specific events that constitute 'cause' for termination (e.g., material breach, bankruptcy)"
+    },
+    {
+      "id": "risk_4",
+      "clause_id": "clause_5",
+      "severity": "medium",
+      "description": "IP ownership transfer may include pre-existing contractor IP",
+      "recommendation": "Clarify that only new IP created specifically for this project transfers; exclude pre-existing IP and tools"
+    }
+  ],
+  "compliance_issues": [
+    {
+      "id": "compliance_1",
+      "regulation": "GDPR",
+      "issue": "No data processing terms or data protection obligations specified",
+      "severity": "high"
+    },
+    {
+      "id": "compliance_2",
+      "regulation": "SOX",
+      "issue": "Missing audit rights and record retention requirements for financial services",
+      "severity": "medium"
+    },
+    {
+      "id": "compliance_3",
+      "regulation": "CCPA",
+      "issue": "No provisions for California consumer privacy rights if personal data is processed",
+      "severity": "medium"
+    }
+  ],
+  "redlining_suggestions": [
+    {
+      "clause_id": "clause_2",
+      "original_text": "The Contractor shall be liable for any damages arising from negligence or breach of contract, with no limitation on liability amount.",
+      "suggested_text": "The Contractor shall be liable for any damages arising from negligence or breach of contract, provided that the total liability shall not exceed the total fees paid under this agreement in the twelve months preceding the claim.",
+      "rationale": "Adds a reasonable liability cap to protect contractor from unlimited exposure while maintaining accountability"
+    },
+    {
+      "clause_id": "clause_3",
+      "original_text": "Either party may terminate this agreement with 30 days written notice. Termination for cause may be immediate.",
+      "suggested_text": "Either party may terminate this agreement with 30 days written notice. Either party may terminate immediately for cause, including: (a) material breach not cured within 15 days of written notice, (b) bankruptcy or insolvency, or (c) violation of confidentiality obligations.",
+      "rationale": "Clarifies what constitutes 'cause' for termination and provides cure period for material breaches"
+    },
+    {
+      "clause_id": "clause_5",
+      "original_text": "All intellectual property created during the performance of services shall be owned by the Client.",
+      "suggested_text": "All intellectual property created specifically for the Client during the performance of services shall be owned by the Client. Pre-existing intellectual property and general tools or methodologies used by Contractor shall remain Contractor's property.",
+      "rationale": "Protects contractor's pre-existing IP and reusable tools while transferring project-specific IP to client"
+    }
+  ]
+}

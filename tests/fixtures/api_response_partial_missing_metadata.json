@@ -1,0 +1,22 @@
+{
+  "clauses": [
+    {
+      "id": "clause_1",
+      "type": "payment_terms",
+      "text": "Payment terms not clearly specified in contract.",
+      "page": 1,
+      "risk_level": "high"
+    }
+  ],
+  "risks": [
+    {
+      "id": "risk_1",
+      "clause_id": "clause_1",
+      "severity": "high",
+      "description": "Ambiguous payment terms can lead to disputes",
+      "recommendation": "Clarify payment schedule, amounts, and methods"
+    }
+  ],
+  "compliance_issues": [],
+  "redlining_suggestions": []
+}

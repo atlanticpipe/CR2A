@@ -2,18 +2,15 @@
 Query Engine for Contract Analysis Chat Interface.
 
 This module provides the QueryEngine class that manages the query workflow,
-integrating with OpenAI API for response generation and handling context
+integrating with the local AI model for response generation and handling context
 formatting and relevance extraction.
 
 Supports optional verification mode for answer validation.
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Union
-from src.openai_fallback_client import OpenAIClient
+from typing import Dict, List, Any, Optional
 from src.analysis_models import AnalysisResult
-from src.exhaustiveness_models import VerifiedQueryResponse
-from openai import RateLimitError, APIConnectionError, AuthenticationError, APIError
 
 logger = logging.getLogger(__name__)
 
@@ -21,205 +18,141 @@ logger = logging.getLogger(__name__)
 class QueryEngine:
     """
     Query engine that manages query-response workflow.
-    
-    Integrates with OpenAI API to process user queries against analyzed
+
+    Integrates with local AI model to process user queries against analyzed
     contract data, handling context formatting and relevance extraction.
-    
+
     Memory optimizations:
     - Limits context data to most relevant information
     - Truncates large data structures to fit within token limits
     - Passes empty conversation history to reduce memory usage
     """
-    
+
     # Maximum number of items to include in context
     MAX_CLAUSES = 10
     MAX_RISKS = 10
     MAX_COMPLIANCE = 5
     MAX_REDLINING = 5
-    
-    def __init__(self, openai_client: OpenAIClient):
+
+    def __init__(self, ai_client, chat_history_manager=None, retriever=None):
         """
-        Initialize QueryEngine with an OpenAIClient instance.
-        
+        Initialize QueryEngine with an AI client instance.
+
         Args:
-            openai_client: Initialized OpenAIClient for response generation
+            ai_client: Initialized AI client with process_query() method
+            chat_history_manager: Optional ChatHistoryManager for saving chat history
+            retriever: Optional DocumentRetriever for searching raw contract sections
         """
-        self.openai_client = openai_client
-        self._verification_layer = None
-        self._exhaustiveness_gate = None
+        self.ai_client = ai_client
+        self.chat_history_manager = chat_history_manager
+        self.retriever = retriever
+        self.indexed_contract = None  # Set when a contract is loaded
         logger.info("QueryEngine initialized with memory optimization limits")
     
     def process_query(
         self,
         query: str,
-        analysis_result: Dict[str, Any],
-        verify: bool = False,
-        contract_text: Optional[str] = None
-    ) -> Union[str, VerifiedQueryResponse]:
+        analysis_result: Dict[str, Any]
+    ) -> str:
         """
         Process query and return response.
-        
-        This is the main entry point for query processing. It formats the
-        analysis result as context, extracts relevant information, and
-        generates a natural language response using the OpenAI API.
-        
-        When verify=True, the response is verified against the contract text
-        to detect hallucinations and provide source references.
-        
+
+        Uses tri-layer retrieval to search the full contract text if available,
+        falling back to analysis results only if no retriever is configured.
+
         Args:
             query: User's question
             analysis_result: Full analysis result dictionary (from AnalysisResult.to_dict())
-            verify: If True, verify the response against contract text
-            contract_text: Contract text for verification (required if verify=True)
-            
+
         Returns:
-            Formatted response text (standard mode), or
-            VerifiedQueryResponse (verification mode)
-            
-        Raises:
-            ValueError: If analysis_result is invalid or verify=True without contract_text
-            APIError: If OpenAI API returns an error
-            APIConnectionError: If network connection fails
-            RateLimitError: If rate limit is exceeded
-            AuthenticationError: If API key is invalid
+            Formatted response text
         """
         if not query or not query.strip():
-            if verify:
-                return VerifiedQueryResponse(
-                    query=query,
-                    response="Please provide a question about the contract.",
-                    is_verified=False,
-                    verification_status="not_found",
-                    verified_portions=[],
-                    unverified_portions=[],
-                    source_references=[],
-                    confidence_score=0.0
-                )
             return "Please provide a question about the contract."
-        
+
         if not analysis_result:
-            if verify:
-                return VerifiedQueryResponse(
-                    query=query,
-                    response="No contract analysis data available. Please analyze a contract first.",
-                    is_verified=False,
-                    verification_status="not_found",
-                    verified_portions=[],
-                    unverified_portions=[],
-                    source_references=[],
-                    confidence_score=0.0
-                )
             return "No contract analysis data available. Please analyze a contract first."
-        
-        if verify and not contract_text:
-            raise ValueError("contract_text is required when verify=True")
-        
+
         try:
-            logger.info(f"Processing query: {query} (verify={verify})")
-            clauses = analysis_result.get('clauses', [])
-            logger.info(f"Analysis result has {len(clauses)} clauses")
-            if clauses:
-                logger.debug(f"First clause keys: {list(clauses[0].keys()) if clauses else 'N/A'}")
-            
-            # Format context for the LLM
+            logger.info(f"Processing query: {query}")
+
+            # Try retriever-based search first (searches full contract text)
+            retrieved_sections = ""
+            if self.retriever and self.indexed_contract:
+                results = self.retriever.retrieve_for_query(query, top_k=5)
+                if results:
+                    retrieved_sections = self.retriever.format_sections_for_ai(results, max_chars=4000)
+                    logger.info(f"Retrieved {len(results)} sections for query")
+
+            # Also get analysis context (existing clause summaries)
             formatted_context = self.format_context(analysis_result, query)
             logger.info(f"Formatted context has {len(formatted_context.get('clauses', []))} clauses")
-            
-            # Generate response using OpenAI API
-            # Note: We pass empty conversation history to reduce memory usage
-            response = self.openai_client.process_query(
+
+            # If we have retrieved sections, inject them into the context
+            if retrieved_sections:
+                formatted_context['_retrieved_sections'] = retrieved_sections
+
+            # Generate response using AI model
+            response = self.ai_client.process_query(
                 query=query,
                 context=formatted_context,
-                conversation_history=[]  # Empty context to reduce memory usage
+                conversation_history=[]
             )
-            
+
             logger.info("Query processed successfully")
-            
-            # If verification is requested, verify the response
-            if verify:
-                return self._verify_response(query, response, contract_text, analysis_result)
-            
+
+            # Save to chat history if available
+            self._save_chat_history(query, response, analysis_result)
+
             return response
-            
-        except (RateLimitError, APIConnectionError, AuthenticationError, APIError) as e:
-            logger.error(f"OpenAI API error processing query: {e}")
-            # Return user-friendly error messages
-            error_msg = self._get_error_message(e)
-            
-            if verify:
-                return VerifiedQueryResponse(
-                    query=query,
-                    response=error_msg,
-                    is_verified=False,
-                    verification_status="error",
-                    verified_portions=[],
-                    unverified_portions=[],
-                    source_references=[],
-                    confidence_score=0.0
-                )
-            return error_msg
+
         except Exception as e:
             logger.error(f"Error processing query: {e}")
-            error_msg = f"I encountered an error processing your question: {str(e)}"
-            
-            if verify:
-                return VerifiedQueryResponse(
-                    query=query,
-                    response=error_msg,
-                    is_verified=False,
-                    verification_status="error",
-                    verified_portions=[],
-                    unverified_portions=[],
-                    source_references=[],
-                    confidence_score=0.0
-                )
-            return error_msg
-    
-    def _get_error_message(self, error: Exception) -> str:
-        """Get user-friendly error message for API errors."""
-        if isinstance(error, RateLimitError):
-            return "The AI service is busy. Please try again in a moment."
-        elif isinstance(error, APIConnectionError):
-            return "Unable to connect to the AI service. Please check your internet connection."
-        elif isinstance(error, AuthenticationError):
-            return "API key is invalid. Please update your API key in Settings."
-        else:
-            return "An error occurred while processing your question. Please try again."
-    
-    def _verify_response(
-        self,
-        query: str,
-        response: str,
-        contract_text: str,
-        analysis_result: Dict[str, Any]
-    ) -> VerifiedQueryResponse:
+            return f"I encountered an error processing your question: {str(e)}"
+
+    def _save_chat_history(self, question: str, answer: str, analysis_result: Dict[str, Any]) -> None:
         """
-        Verify a query response against the contract text.
-        
+        Save chat entry to history with user attribution.
+
         Args:
-            query: User's question
-            response: Generated response to verify
-            contract_text: Original contract text
-            analysis_result: Analysis result for context
-            
-        Returns:
-            VerifiedQueryResponse with verification status and sources
+            question: User's question
+            answer: AI's answer (can be string or VerifiedQueryResponse)
+            analysis_result: Analysis result dictionary
         """
-        # Lazy initialization of verification components
-        if self._exhaustiveness_gate is None:
-            from src.exhaustiveness_gate import ExhaustivenessGate
-            # Create a minimal gate just for query verification
-            self._exhaustiveness_gate = ExhaustivenessGate(
-                analysis_engine=None,  # Not needed for query verification
-                openai_client=self.openai_client,
-                num_passes=2
+        if not self.chat_history_manager:
+            return
+
+        try:
+            answer_text = answer
+            if hasattr(answer, 'response'):
+                answer_text = answer.response
+
+            # Get contract metadata
+            metadata = analysis_result.get('metadata', {})
+            contract_file = metadata.get('filename', 'unknown')
+            contract_version = metadata.get('version', 1)
+
+            # Get model info
+            model_metadata = {
+                'model': getattr(self.ai_client, 'model', 'unknown')
+            }
+
+            # Create and save chat entry
+            from src.chat_history_manager import ChatHistoryManager
+            chat_entry = ChatHistoryManager.create_chat_entry(
+                question=question,
+                answer=answer_text,
+                contract_file=contract_file,
+                contract_version=contract_version,
+                metadata=model_metadata
             )
-        
-        return self._exhaustiveness_gate.verify_query_response(
-            query=query,
-            response=response,
-            contract_text=contract_text
-        )
+
+            self.chat_history_manager.append_chat(chat_entry)
+            logger.info(f"Chat entry saved: {chat_entry.get('chat_id')}")
+
+        except Exception as e:
+            # Don't fail the query if chat history fails
+            logger.warning(f"Failed to save chat history: {e}")
 
     def format_context(self, analysis_result: Dict[str, Any], query: str) -> Dict[str, Any]:
         """
@@ -437,23 +370,18 @@ class QueryEngine:
         for block in clause_blocks:
             score = 0
             
-            # Check clause language
-            clause_language = block.get('Clause Language', block.get('clause_language', '')).lower()
-            clause_summary = block.get('Clause Summary', block.get('clause_summary', '')).lower()
-            
+            # Check clause location
+            clause_location = (block.get('Clause Location') or block.get('clause_location')
+                             or block.get('Clause Language') or block.get('clause_language', '')).lower()
+            clause_summary = (block.get('Clause Summary') or block.get('clause_summary', '')).lower()
+
             # Count matching words
             for word in query_words:
                 if len(word) > 3:  # Only count words longer than 3 chars
-                    if word in clause_language:
+                    if word in clause_location:
                         score += 2
                     if word in clause_summary:
-                        score += 1
-            
-            # Check risk triggers
-            risk_triggers = block.get('Risk Triggers Identified', block.get('risk_triggers_identified', []))
-            for trigger in risk_triggers:
-                if isinstance(trigger, str) and any(word in trigger.lower() for word in query_words if len(word) > 3):
-                    score += 3
+                        score += 2
             
             # Check clause name
             clause_name = block.get('_clause_name', '').lower()
@@ -541,8 +469,7 @@ class QueryEngine:
                         'termination': ['termination', 'terminate', 'end', 'cancel', 'exit'],
                         'warranty': ['warranty', 'guarantee', 'assurance'],
                         'indemnity': ['indemnity', 'indemnification', 'protect', 'defend'],
-                        'confidentiality': ['confidential', 'secret', 'private', 'nda'],
-                        'intellectual_property': ['ip', 'intellectual', 'property', 'patent', 'copyright', 'trademark']
+                        'confidentiality': ['confidential', 'secret', 'private', 'nda']
                     }
                     
                     for clause_category, category_keywords in type_keywords.items():

@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bid Specification Review Checklist",
+  "description": "Schema for extracting bid specification details for sales and division managers",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "project_info",
+    "standard_contract_items",
+    "site_conditions",
+    "cleaning",
+    "cctv",
+    "cipp",
+    "manhole_rehab"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^v1\\.\\d+\\.\\d+$"
+    },
+    "project_info": {
+      "type": "object",
+      "properties": {
+        "Project Name": { "type": "string" },
+        "Owner/Agency": { "type": "string" },
+        "Bid Date": { "type": "string" },
+        "Estimator": { "type": "string" },
+        "Location": { "type": "string" }
+      }
+    },
+    "standard_contract_items": {
+      "type": "object",
+      "properties": {
+        "Pre-Bid": { "$ref": "#/$defs/ChecklistItem" },
+        "Submission Format": { "$ref": "#/$defs/ChecklistItem" },
+        "Bid Bond": { "$ref": "#/$defs/ChecklistItem" },
+        "Payment & Performance Bonds": { "$ref": "#/$defs/ChecklistItem" },
+        "Contract Time": { "$ref": "#/$defs/ChecklistItem" },
+        "Liquidated Damages": { "$ref": "#/$defs/ChecklistItem" },
+        "Warranty": { "$ref": "#/$defs/ChecklistItem" },
+        "Contractor License": { "$ref": "#/$defs/ChecklistItem" },
+        "Insurance": { "$ref": "#/$defs/ChecklistItem" },
+        "Minority/DBE Goals": { "$ref": "#/$defs/ChecklistItem" },
+        "Working Hours": { "$ref": "#/$defs/ChecklistItem" },
+        "Subcontracting": { "$ref": "#/$defs/ChecklistItem" },
+        "Funding": { "$ref": "#/$defs/ChecklistItem" },
+        "Certified Payroll": { "$ref": "#/$defs/ChecklistItem" },
+        "Retainage": { "$ref": "#/$defs/ChecklistItem" },
+        "Safety": { "$ref": "#/$defs/ChecklistItem" },
+        "Qualifications": { "$ref": "#/$defs/ChecklistItem" }
+      }
+    },
+    "site_conditions": {
+      "type": "object",
+      "properties": {
+        "Site Access": { "$ref": "#/$defs/ChecklistItem" },
+        "Site Restoration": { "$ref": "#/$defs/ChecklistItem" },
+        "Bypass": { "$ref": "#/$defs/ChecklistItem" },
+        "Traffic Control": { "$ref": "#/$defs/ChecklistItem" },
+        "Disposal": { "$ref": "#/$defs/ChecklistItem" },
+        "Water & Hydrant Meter": { "$ref": "#/$defs/ChecklistItem" }
+      }
+    },
+    "cleaning": {
+      "type": "object",
+      "properties": {
+        "Cleaning Method": { "$ref": "#/$defs/ChecklistItem" },
+        "Cleaning Passes": { "$ref": "#/$defs/ChecklistItem" },
+        "Notifications": { "$ref": "#/$defs/ChecklistItem" }
+      }
+    },
+    "cctv": {
+      "type": "object",
+      "properties": {
+        "NASSCO": { "$ref": "#/$defs/ChecklistItem" },
+        "CCTV Submittal Format": { "$ref": "#/$defs/ChecklistItem" },
+        "Notifications": { "$ref": "#/$defs/ChecklistItem" }
+      }
+    },
+    "cipp": {
+      "type": "object",
+      "properties": {
+        "Curing Method": { "$ref": "#/$defs/ChecklistItem" },
+        "Cure Water": { "$ref": "#/$defs/ChecklistItem" },
+        "Warranty": { "$ref": "#/$defs/ChecklistItem" },
+        "Notifications": { "$ref": "#/$defs/ChecklistItem" },
+        "Contractor Qualifications": { "$ref": "#/$defs/ChecklistItem" },
+        "Wet-Out Facility": { "$ref": "#/$defs/ChecklistItem" },
+        "End Seals": { "$ref": "#/$defs/ChecklistItem" },
+        "Mudding the Ends": { "$ref": "#/$defs/ChecklistItem" },
+        "Conditions Above Pipes/Overhead": { "$ref": "#/$defs/ChecklistItem" },
+        "Pre-Liner": { "$ref": "#/$defs/ChecklistItem" },
+        "Pipe Information": { "$ref": "#/$defs/ChecklistItem" },
+        "Resin Type": { "$ref": "#/$defs/ChecklistItem" },
+        "Testing": { "$ref": "#/$defs/ChecklistItem" },
+        "Engineered Design Stamp": { "$ref": "#/$defs/ChecklistItem" },
+        "Calculations": { "$ref": "#/$defs/ChecklistItem" },
+        "Air Testing": { "$ref": "#/$defs/ChecklistItem" },
+        "design_performance_requirements": {
+          "type": "object",
+          "properties": {
+            "Design Life": { "$ref": "#/$defs/ChecklistItem" },
+            "ASTM Standard": { "$ref": "#/$defs/ChecklistItem" },
+            "Gravity Pipe Conditions": { "$ref": "#/$defs/ChecklistItem" },
+            "Flexural Strength": { "$ref": "#/$defs/ChecklistItem" },
+            "Flexural Modulus": { "$ref": "#/$defs/ChecklistItem" },
+            "Tensile Strength": { "$ref": "#/$defs/ChecklistItem" },
+            "Design Safety Factor": { "$ref": "#/$defs/ChecklistItem" },
+            "Short-Term Flexural Modulus": { "$ref": "#/$defs/ChecklistItem" },
+            "Long-Term Flexural Modulus": { "$ref": "#/$defs/ChecklistItem" },
+            "Creep Retention Factor": { "$ref": "#/$defs/ChecklistItem" },
+            "Ovality": { "$ref": "#/$defs/ChecklistItem" },
+            "Soil Modulus": { "$ref": "#/$defs/ChecklistItem" },
+            "Soil Density": { "$ref": "#/$defs/ChecklistItem" },
+            "Groundwater Depth": { "$ref": "#/$defs/ChecklistItem" },
+            "Live Load": { "$ref": "#/$defs/ChecklistItem" },
+            "Poisson's Ratio": { "$ref": "#/$defs/ChecklistItem" }
+          }
+        }
+      }
+    },
+    "manhole_rehab": {
+      "type": "object",
+      "properties": {
+        "MH Information": { "$ref": "#/$defs/ChecklistItem" },
+        "Product Type": { "$ref": "#/$defs/ChecklistItem" },
+        "Products": { "$ref": "#/$defs/ChecklistItem" },
+        "Testing": { "$ref": "#/$defs/ChecklistItem" },
+        "Warranty": { "$ref": "#/$defs/ChecklistItem" },
+        "Thickness": { "$ref": "#/$defs/ChecklistItem" },
+        "Compressive Strength": { "$ref": "#/$defs/ChecklistItem" },
+        "Bond Strength": { "$ref": "#/$defs/ChecklistItem" },
+        "Shrinkage": { "$ref": "#/$defs/ChecklistItem" },
+        "Grout": { "$ref": "#/$defs/ChecklistItem" },
+        "Measurement & Payment": { "$ref": "#/$defs/ChecklistItem" },
+        "External Coating": { "$ref": "#/$defs/ChecklistItem" },
+        "Notifications": { "$ref": "#/$defs/ChecklistItem" },
+        "NACE": { "$ref": "#/$defs/ChecklistItem" },
+        "Bypass": { "$ref": "#/$defs/ChecklistItem" },
+        "Substitution Requirements": { "$ref": "#/$defs/ChecklistItem" },
+        "spincast": {
+          "type": "object",
+          "properties": {
+            "Product Type": { "$ref": "#/$defs/ChecklistItem" },
+            "Testing": { "$ref": "#/$defs/ChecklistItem" },
+            "Warranty": { "$ref": "#/$defs/ChecklistItem" },
+            "Thickness": { "$ref": "#/$defs/ChecklistItem" },
+            "Corrugations": { "$ref": "#/$defs/ChecklistItem" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ChecklistItem": {
+      "type": "object",
+      "required": ["value", "confidence"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "The extracted value, requirement, or answer from the bid spec"
+        },
+        "location": {
+          "type": "string",
+          "description": "Where in the document this was found (section, page, article)"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low", "not_found"],
+          "description": "Confidence level of the extraction"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional context, conditions, or flags"
+        }
+      }
+    }
+  }
+}

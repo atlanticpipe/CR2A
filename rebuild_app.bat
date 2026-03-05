@@ -19,7 +19,7 @@ echo Building application...
 echo.
 
 REM Run the build
-python -m build_tools.build_manager build all
+python build_tools\build.py --target all
 
 if errorlevel 1 (
     echo.

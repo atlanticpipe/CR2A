@@ -107,7 +107,7 @@ class InstallerConfig:
 
 CLI_CONFIG = BuildConfig(
     name="ContractAnalysisCLI",
-    entry_point=Path("analyzer/contract_analysis_cli.py"),
+    entry_point=Path("src/cli_main.py"),
     output_name="ContractAnalysisCLI",
     console_mode=True,
     onefile=True,
@@ -126,22 +126,29 @@ CLI_CONFIG = BuildConfig(
         "pdfminer.pdfinterp",
         "pdfminer.converter",
         "docx",
-        "openai",
         "jsonschema",
         "pytesseract",
         "pdf2image",
         "PIL",
         "PIL.Image",
+        "src.cli_main",
+        "src.contract_uploader",
+        "src.local_model_client",
+        "src.model_manager",
+        "src.analysis_engine",
+        "src.query_engine",
+        "src.result_parser",
+        "src.analysis_models",
         "analyzer",
-        "analyzer.extract",
-        "analyzer.openai_client",
-        "analyzer.validator",
-        "analyzer.contract_extractor",
+        "llama_cpp",
+        "llama_cpp.llama_cpp",
+        "llama_cpp.llama",
     ],
-    collect_packages=["pdfminer"],
+    collect_packages=["pdfminer", "llama_cpp"],
     excludes=["pytest", "hypothesis", "IPython", "jupyter"],
 )
 
+# Standard build configuration (without bundled model)
 GUI_CONFIG = BuildConfig(
     name="CR2A",
     entry_point=Path("src/qt_gui.py"),
@@ -152,15 +159,21 @@ GUI_CONFIG = BuildConfig(
     data_files=[
         ("assets", "assets"),
         ("config", "config"),
+        ("build_tools/poppler", "poppler"),  # Poppler binaries for OCR (pdf2image)
     ],
     hidden_imports=[
         # Core dependencies
         "tokenizers",
         "tkinter",
-        "openai",
         "PyPDF2",
         "docx",
         "cryptography",
+        # PyQt5 and Qt submodules (critical for GUI)
+        "PyQt5",
+        "PyQt5.QtCore",
+        "PyQt5.QtGui",
+        "PyQt5.QtWidgets",
+        "PyQt5.sip",
         # Cryptography submodules (often missed by PyInstaller)
         "cryptography.fernet",
         "cryptography.hazmat",
@@ -192,27 +205,153 @@ GUI_CONFIG = BuildConfig(
         "src.contract_uploader",
         "src.ui_styles",
         "src.settings_dialog",
-        "src.openai_fallback_client",
+        "src.local_model_client",
         "src.contract_chat_ui",
         # History feature modules
         "src.history_models",
         "src.history_store",
         "src.history_tab",
+        "src.chat_history_manager",
         # Structured analysis view
         "src.structured_analysis_view",
         "src.schema_loader",
         "src.schema_validator",
-        # Exhaustiveness modules
-        "src.exhaustiveness_models",
-        "src.exhaustiveness_gate",
-        "src.verification_layer",
-        "src.confidence_scorer",
-        "src.conflict_resolver",
-        "src.coverage_checker",
-        "src.result_comparator",
-        "src.contract_chunker",
+        "src.schema_completer",
+        # Hybrid analysis engine
+        "src.hybrid_analysis_engine",
+        # Versioning and storage modules
+        "src.project_storage",
+        "src.differential_storage",
+        "src.version_manager",
+        "src.version_database",
+        "src.version_comparison_view",
+        "src.change_comparator",
+        "src.contract_identity_detector",
+        # Local Llama model support
+        "src.model_manager",
+        "src.agent_tools",
+        "src.fuzzy_matcher",
+        "llama_cpp",
+        "llama_cpp.llama_cpp",
+        "llama_cpp.llama",
+        # Analyzer modules
+        "analyzer",
+        "analyzer.template_patterns",
+        # Fuzzy matching
+        "rapidfuzz",
+        "rapidfuzz.fuzz",
+        "rapidfuzz.process",
+        # OCR support
+        "pytesseract",
+        "pdf2image",
+        "PIL",
+        "PIL.Image",
     ],
-    collect_packages=["tokenizers", "cryptography"],
+    collect_packages=["PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract"],
+    excludes=["pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook"],
+)
+
+# Full build configuration (with bundled Llama model)
+GUI_FULL_CONFIG = BuildConfig(
+    name="CR2A_Full",
+    entry_point=Path("src/qt_gui.py"),
+    output_name="CR2A_Full",
+    console_mode=False,
+    onefile=False,
+    icon_path=Path("assets/icon.ico"),
+    data_files=[
+        ("assets", "assets"),
+        ("config", "config"),
+        ("models", "models"),  # Bundle Llama model files
+        ("build_tools/poppler", "poppler"),  # Poppler binaries for OCR (pdf2image)
+    ],
+    hidden_imports=[
+        # Core dependencies
+        "tokenizers",
+        "tkinter",
+        "PyPDF2",
+        "docx",
+        "cryptography",
+        # PyQt5 and Qt submodules (critical for GUI)
+        "PyQt5",
+        "PyQt5.QtCore",
+        "PyQt5.QtGui",
+        "PyQt5.QtWidgets",
+        "PyQt5.sip",
+        # Cryptography submodules (often missed by PyInstaller)
+        "cryptography.fernet",
+        "cryptography.hazmat",
+        "cryptography.hazmat.primitives",
+        "cryptography.hazmat.primitives.ciphers",
+        "cryptography.hazmat.primitives.kdf",
+        "cryptography.hazmat.primitives.hashes",
+        "cryptography.hazmat.backends",
+        "cryptography.hazmat.backends.openssl",
+        "cryptography.hazmat.bindings",
+        "cryptography.hazmat.bindings.openssl",
+        "cryptography.hazmat.bindings._rust",
+        "cryptography.x509",
+        # All src modules
+        "src.qt_gui",
+        "src.application_controller",
+        "src.config_manager",
+        "src.gui_manager",
+        "src.data_store",
+        "src.json_loader",
+        "src.error_handler",
+        "src.upload_screen",
+        "src.analysis_screen",
+        "src.chat_screen",
+        "src.analysis_engine",
+        "src.analysis_models",
+        "src.query_engine",
+        "src.result_parser",
+        "src.contract_uploader",
+        "src.ui_styles",
+        "src.settings_dialog",
+        "src.local_model_client",
+        "src.contract_chat_ui",
+        # History feature modules
+        "src.history_models",
+        "src.history_store",
+        "src.history_tab",
+        "src.chat_history_manager",
+        # Structured analysis view
+        "src.structured_analysis_view",
+        "src.schema_loader",
+        "src.schema_validator",
+        "src.schema_completer",
+        # Hybrid analysis engine
+        "src.hybrid_analysis_engine",
+        # Versioning and storage modules
+        "src.project_storage",
+        "src.differential_storage",
+        "src.version_manager",
+        "src.version_database",
+        "src.version_comparison_view",
+        "src.change_comparator",
+        "src.contract_identity_detector",
+        # Local Llama model support
+        "src.model_manager",
+        "src.agent_tools",
+        "src.fuzzy_matcher",
+        "llama_cpp",
+        "llama_cpp.llama_cpp",
+        "llama_cpp.llama",
+        # Analyzer modules
+        "analyzer",
+        "analyzer.template_patterns",
+        # Fuzzy matching
+        "rapidfuzz",
+        "rapidfuzz.fuzz",
+        "rapidfuzz.process",
+        # OCR support
+        "pytesseract",
+        "pdf2image",
+        "PIL",
+        "PIL.Image",
+    ],
+    collect_packages=["PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract"],
     excludes=["pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook"],
 )
 
@@ -226,6 +365,18 @@ INSTALLER_CONFIG = InstallerConfig(
     input_dir=Path("dist/CR2A"),
     output_dir=Path("dist"),
     output_name="CR2A_Setup.exe",
+)
+
+INSTALLER_FULL_CONFIG = InstallerConfig(
+    app_name="CR2A Contract Analysis (Full - Offline)",
+    app_version="1.0.0",
+    publisher="CR2A",
+    exe_name="CR2A_Full.exe",
+    icon_path=Path("assets/icon.ico"),
+    nsis_script_path=Path("installer/cr2a_installer.nsi"),
+    input_dir=Path("dist/CR2A_Full"),
+    output_dir=Path("dist"),
+    output_name="CR2A_Setup_Full.exe",
 )
 
 
@@ -386,12 +537,20 @@ class SpecGenerator:
         lines.append(f"a = Analysis(")
         lines.append(f"    [r'{entry_point_str}'],")
         lines.append(f"    pathex=[r'{project_root_str}'],")
+        # Add hookspath for custom PyInstaller hooks (e.g., hook-llama_cpp.py)
+        hooks_dir = str(self.project_root / "build_tools").replace("\\", "/")
+
         lines.append(f"    binaries={all_binaries},")
         lines.append(f"    datas={all_datas},")
         lines.append(f"    hiddenimports={all_hiddenimports},")
-        lines.append(f"    hookspath=[],")
+        lines.append(f"    hookspath=[r'{hooks_dir}'],")
         lines.append(f"    hooksconfig={{}},")
-        lines.append(f"    runtime_hooks=[],")
+        # Add PyQt5 runtime hook if PyQt5 is being used
+        if "PyQt5" in config.collect_packages or "PyQt5" in config.hidden_imports:
+            runtime_hook_path = str(self.project_root / "build_tools" / "runtime_hook_pyqt5.py").replace("\\", "/")
+            lines.append(f"    runtime_hooks=[r'{runtime_hook_path}'],")
+        else:
+            lines.append(f"    runtime_hooks=[],")
         lines.append(f"    excludes={excludes_str},")
         lines.append(f"    noarchive=False,")
         lines.append(f")")
@@ -714,11 +873,17 @@ class InstallerBuilder:
         # Step 3: Execute NSIS compiler
         print(f"[2/3] Compiling NSIS script...")
         try:
+            # Pass configuration as NSIS defines
+            nsis_cmd = [
+                str(nsis_path),
+                f"/DOUTPUT_NAME={config.output_name}",
+                f"/DINPUT_DIR={config.input_dir}",
+                f"/DEXE_NAME={config.exe_name}",
+                str(nsis_script_path)
+            ]
+
             result = subprocess.run(
-                [
-                    str(nsis_path),
-                    str(nsis_script_path)
-                ],
+                nsis_cmd,
                 cwd=str(self.project_root),
                 capture_output=True,
                 text=True
@@ -856,23 +1021,25 @@ class BuildManager:
     
     def build(self, target: str) -> BuildResult:
         """Execute build for specified target.
-        
+
         Builds the specified target(s) by coordinating spec generation,
         artifact cleanup, and PyInstaller execution. For 'all' target,
         builds both GUI and CLI sequentially.
-        
+
         Args:
-            target: One of 'gui', 'cli', or 'all'
-            
+            target: One of 'gui', 'gui-full', 'cli', 'all', 'installer', or 'installer-full'
+
         Returns:
             BuildResult with success/failure info. For 'all' target,
             returns the result of the last build (CLI), with success=True
             only if both builds succeeded.
         """
         target = target.lower()
-        
+
         if target == 'gui':
             return self._build_target(GUI_CONFIG)
+        elif target == 'gui-full':
+            return self._build_target(GUI_FULL_CONFIG)
         elif target == 'cli':
             return self._build_target(CLI_CONFIG)
         elif target == 'all':
@@ -880,9 +1047,9 @@ class BuildManager:
             gui_result = self._build_target(GUI_CONFIG)
             if not gui_result.success:
                 return gui_result
-            
+
             cli_result = self._build_target(CLI_CONFIG)
-            
+
             # Return combined result - success only if both succeeded
             return BuildResult(
                 success=cli_result.success,
@@ -893,7 +1060,7 @@ class BuildManager:
                 duration_seconds=gui_result.duration_seconds + cli_result.duration_seconds
             )
         elif target == 'installer':
-            # Build Windows installer using NSIS
+            # Build Windows installer using NSIS (standard, no bundled model)
             installer_builder = InstallerBuilder(self.project_root)
             if not installer_builder.verify_prerequisites():
                 return BuildResult(
@@ -905,13 +1072,26 @@ class BuildManager:
                     duration_seconds=0.0
                 )
             return installer_builder.build(INSTALLER_CONFIG)
+        elif target == 'installer-full':
+            # Build Windows installer with bundled Llama model
+            installer_builder = InstallerBuilder(self.project_root)
+            if not installer_builder.verify_prerequisites():
+                return BuildResult(
+                    success=False,
+                    target_name='installer-full',
+                    output_path=None,
+                    output_size=None,
+                    error_message="Installer prerequisites not met. See errors above.",
+                    duration_seconds=0.0
+                )
+            return installer_builder.build(INSTALLER_FULL_CONFIG)
         else:
             return BuildResult(
                 success=False,
                 target_name=target,
                 output_path=None,
                 output_size=None,
-                error_message=f"Invalid target: '{target}'. Must be 'gui', 'cli', 'all', or 'installer'.",
+                error_message=f"Invalid target: '{target}'. Must be 'gui', 'gui-full', 'cli', 'all', 'installer', or 'installer-full'.",
                 duration_seconds=0.0
             )
     
@@ -939,6 +1119,10 @@ class BuildManager:
         print(f"{'='*60}")
         print(f"[1/4] Cleaning previous build artifacts...")
         self.artifact_cleaner.clean_pre_build(config.name)
+
+        # Ensure build directory exists (PyInstaller requires it)
+        build_dir = self.project_root / "build" / config.name
+        build_dir.mkdir(parents=True, exist_ok=True)
         
         # Step 2: Generate spec file content
         print(f"[2/4] Generating PyInstaller spec file...")
@@ -965,7 +1149,6 @@ class BuildManager:
             result = subprocess.run(
                 [
                     'pyinstaller',
-                    '--clean',
                     '--noconfirm',
                     str(spec_file_path)
                 ],
@@ -1085,19 +1268,21 @@ def parse_args() -> argparse.Namespace:
         description='Build CR2A executables using PyInstaller.',
         epilog='''
 Examples:
-  python build.py --target gui       Build only the GUI application (CR2A.exe)
-  python build.py --target cli       Build only the CLI tool (ContractAnalysisCLI.exe)
-  python build.py --target all       Build both executables
-  python build.py --target installer Build the Windows installer (CR2A_Setup.exe)
+  python build.py --target gui             Build GUI (download-on-demand model)
+  python build.py --target gui-full        Build GUI with bundled Llama model
+  python build.py --target cli             Build CLI tool
+  python build.py --target all             Build both GUI and CLI
+  python build.py --target installer       Build standard installer (~8MB)
+  python build.py --target installer-full  Build full installer with model (~3-4GB)
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    
+
     parser.add_argument(
         '--target',
-        choices=['gui', 'cli', 'all', 'installer'],
+        choices=['gui', 'gui-full', 'cli', 'all', 'installer', 'installer-full'],
         required=True,
-        help='Build target: gui (CR2A.exe), cli (ContractAnalysisCLI.exe), all (both), or installer (CR2A_Setup.exe)'
+        help='Build target: gui (standard), gui-full (bundled model), cli, all, installer (standard), installer-full (bundled model)'
     )
     
     # If no arguments provided, print help and exit

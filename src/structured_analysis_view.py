@@ -20,20 +20,23 @@ logger = logging.getLogger(__name__)
 
 class CollapsibleSection(QFrame):
     """A collapsible section widget with expand/collapse functionality."""
-    
+
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.is_collapsed = False
         self.content_widget = None
-        
+        self.analyze_btn = None
+        self.status_label = None
+        self.cat_key = None
+
         # Main layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
+
         # Header with toggle button
-        header = QFrame()
-        header.setStyleSheet("""
+        self.header_frame = QFrame()
+        self.header_frame.setStyleSheet("""
             QFrame {
                 background-color: #f5f5f5;
                 border: 1px solid #ddd;
@@ -43,9 +46,9 @@ class CollapsibleSection(QFrame):
                 background-color: #e8e8e8;
             }
         """)
-        header_layout = QHBoxLayout(header)
+        header_layout = QHBoxLayout(self.header_frame)
         header_layout.setContentsMargins(10, 8, 10, 8)
-        
+
         # Toggle button
         self.toggle_btn = QPushButton("▼")
         self.toggle_btn.setFixedSize(20, 20)
@@ -59,17 +62,17 @@ class CollapsibleSection(QFrame):
         """)
         self.toggle_btn.clicked.connect(self.toggle)
         header_layout.addWidget(self.toggle_btn)
-        
+
         # Title label
         self.title_label = QLabel(title)
         self.title_label.setStyleSheet("font-weight: bold; font-size: 13px;")
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
-        
+
         # Make header clickable
-        header.mousePressEvent = lambda e: self.toggle()
-        
-        layout.addWidget(header)
+        self.header_frame.mousePressEvent = lambda e: self.toggle()
+
+        layout.addWidget(self.header_frame)
         
         # Content container
         self.content_container = QFrame()
@@ -119,12 +122,15 @@ class CollapsibleSection(QFrame):
 class StructuredAnalysisView(QWidget):
     """
     Structured view of contract analysis results based on output_schemas_v1.json.
-    
+
     Uses a template-based approach where all sections and categories are pre-created
     in __init__, then filled with data when display_analysis() is called. This ensures
     all sections and categories are always visible, with empty ones auto-minimized.
     """
-    
+
+    # Signal emitted when user clicks Analyze on a category box (emits cat_key)
+    analyze_requested = pyqtSignal(str)
+
     # Section display names and icons
     SECTION_INFO = {
         "contract_overview": ("📄 Contract Overview", "#e3f2fd"),
@@ -134,7 +140,6 @@ class StructuredAnalysisView(QWidget):
         "regulatory_and_compliance_terms": ("📋 Regulatory & Compliance Terms", "#e8f5e9"),
         "data_technology_and_deliverables": ("💾 Data, Technology & Deliverables", "#e0f2f1"),
         "supplemental_operational_risks": ("⚠️ Supplemental Operational Risks", "#fff9c4"),
-        "final_analysis": ("📊 Final Analysis", "#f5f5f5")
     }
     
     def __init__(self, parent=None):
@@ -142,6 +147,8 @@ class StructuredAnalysisView(QWidget):
         self.analysis_data = None
         self.sections = {}
         self.category_boxes = {}  # Maps "section_key.category_name" to CollapsibleSection widget
+        self.box_key_to_cat_key = {}  # Maps box_key to analysis engine cat_key
+        self._analyze_buttons_enabled = False
         
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -274,24 +281,7 @@ class StructuredAnalysisView(QWidget):
             self.content_layout.addWidget(section)
             logger.debug(f"Created section: {section_key}")
         
-        # Create final analysis section (special handling - text content)
-        section_key = "final_analysis"
-        if section_key in self.SECTION_INFO:
-            title, bg_color = self.SECTION_INFO[section_key]
-            section = CollapsibleSection(title)
-            
-            # Create empty content widget for final analysis
-            content = QWidget()
-            content_layout = QVBoxLayout(content)
-            content_layout.setContentsMargins(0, 0, 0, 0)
-            
-            # Store reference for later filling
-            section.content_widget_layout = content_layout
-            section.set_content(content)
-            
-            self.sections[section_key] = section
-            self.content_layout.addWidget(section)
-            logger.debug(f"Created section: {section_key}")
+        # Final analysis section removed per user request
         
         # Add stretch at the end
         self.content_layout.addStretch()
@@ -325,28 +315,64 @@ class StructuredAnalysisView(QWidget):
     
     def _create_category_box(self, category_name: str) -> CollapsibleSection:
         """
-        Create an empty category box that will be filled with data later.
-        
+        Create an empty category box with Analyze button and status indicator.
+
         Args:
             category_name: The name of the category
-            
+
         Returns:
-            CollapsibleSection widget with empty content
+            CollapsibleSection widget with empty content and Analyze button in header
         """
         box = CollapsibleSection(category_name)
-        
+
+        # Add status label to header (before stretch)
+        box.status_label = QLabel("")
+        box.status_label.setStyleSheet("font-size: 10px; color: #999; font-style: italic;")
+        # Insert before the stretch
+        box.header_frame.layout().insertWidget(box.header_frame.layout().count() - 1, box.status_label)
+
+        # Add Analyze button to header (after stretch)
+        box.analyze_btn = QPushButton("Analyze")
+        box.analyze_btn.setFixedSize(70, 22)
+        box.analyze_btn.setStyleSheet("""
+            QPushButton {
+                background: #1976D2;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 2px 8px;
+            }
+            QPushButton:hover {
+                background: #1565C0;
+            }
+            QPushButton:disabled {
+                background: #bbb;
+                color: #eee;
+            }
+        """)
+        box.analyze_btn.setVisible(False)  # Hidden until contract is loaded
+        box.analyze_btn.clicked.connect(lambda checked, b=box: self._on_analyze_clicked(b))
+        box.header_frame.layout().addWidget(box.analyze_btn)
+
         # Pre-create empty content widget with placeholders
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setSpacing(10)
         content_layout.setContentsMargins(5, 5, 5, 5)
-        
+
         # Store reference to layout for later filling
         box.content_widget_layout = content_layout
         box.is_empty = True  # Flag to track if box has content
-        
+
         box.set_content(content)
         return box
+
+    def _on_analyze_clicked(self, box: CollapsibleSection):
+        """Handle Analyze button click on a category box."""
+        if box.cat_key:
+            self.analyze_requested.emit(box.cat_key)
     
     def display_analysis(self, analysis_result):
         """
@@ -746,11 +772,10 @@ class StructuredAnalysisView(QWidget):
         Returns:
             True if clause is "Not found", False otherwise
         """
-        clause_language = clause_data.get('Clause Language') or clause_data.get('clause_language', '')
-        clause_summary = clause_data.get('Clause Summary') or clause_data.get('clause_summary', '')
-        
-        return (str(clause_language).strip().lower() == 'not found' or 
-                str(clause_summary).strip().lower() == 'not found')
+        clause_location = (clause_data.get('Clause Location') or clause_data.get('clause_location')
+                          or clause_data.get('Clause Language') or clause_data.get('clause_language', ''))
+
+        return str(clause_location).strip().lower() == 'not found'
     
     def _auto_minimize_empty_boxes(self):
         """
@@ -845,10 +870,9 @@ class StructuredAnalysisView(QWidget):
                 continue
             
             # Check if clause has any content OR if it's a "not found" clause
-            clause_language = clause_data.get('Clause Language') or clause_data.get('clause_language', '')
-            clause_summary = clause_data.get('Clause Summary') or clause_data.get('clause_summary', '')
-            is_not_found = (str(clause_language).strip().lower() == 'not found' or 
-                           str(clause_summary).strip().lower() == 'not found')
+            clause_location = (clause_data.get('Clause Location') or clause_data.get('clause_location')
+                              or clause_data.get('Clause Language') or clause_data.get('clause_language', ''))
+            is_not_found = str(clause_location).strip().lower() == 'not found'
             has_content = any(clause_data.values()) or is_not_found
             
             if not has_content:
@@ -871,10 +895,9 @@ class StructuredAnalysisView(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         
         # Check if this is a "Not found" clause
-        clause_language = data.get('Clause Language') or data.get('clause_language', '')
-        clause_summary = data.get('Clause Summary') or data.get('clause_summary', '')
-        is_not_found = (str(clause_language).strip().lower() == 'not found' or 
-                       str(clause_summary).strip().lower() == 'not found')
+        clause_location = (data.get('Clause Location') or data.get('clause_location')
+                          or data.get('Clause Language') or data.get('clause_language', ''))
+        is_not_found = str(clause_location).strip().lower() == 'not found'
         
         # If not found, show a simple message
         if is_not_found:
@@ -895,17 +918,13 @@ class StructuredAnalysisView(QWidget):
             layout.addWidget(not_found_frame)
             return widget
         
-        # Define all 6 required fields in order with their display names
+        # Display Clause Location and Clause Summary
         required_fields = [
-            ('Clause Language', 'clause_language', 'Clause Language'),
-            ('Clause Summary', 'clause_summary', 'Clause Summary (BLUF)'),
-            ('Risk Triggers Identified', 'risk_triggers_identified', 'Risk Triggers Identified'),
-            ('Flow-Down Obligations', 'flow_down_obligations', 'Flow-Down Obligations'),
-            ('Redline Recommendations', 'redline_recommendations', 'Redline Recommendations'),
-            ('Harmful Language / Policy Conflicts', 'harmful_language_policy_conflicts', 'Harmful Language / Policy Conflicts')
+            ('Clause Location', 'clause_location', 'Clause Location'),
+            ('Clause Summary', 'clause_summary', 'Clause Summary'),
         ]
-        
-        # Display all 6 fields in order
+
+        # Display fields in order
         for title_case_key, snake_case_key, display_name in required_fields:
             # Try both naming conventions
             value = data.get(title_case_key) or data.get(snake_case_key)
@@ -1085,5 +1104,156 @@ class StructuredAnalysisView(QWidget):
             if box_key.startswith(f"{section_key}."):
                 if not box.is_empty:
                     return False
-        
+
         return True
+
+    # --- Public methods for per-item on-demand analysis ---
+
+    def set_category_key_map(self, category_map: dict):
+        """
+        Map category box keys to analysis engine cat_keys.
+
+        Args:
+            category_map: The AnalysisEngine.CATEGORY_MAP dict
+                          {cat_key: (section_key, display_name)}
+        """
+        self.box_key_to_cat_key = {}
+        for cat_key, (section_key, display_name) in category_map.items():
+            box_key = f"{section_key}.{display_name}"
+            if box_key in self.category_boxes:
+                self.category_boxes[box_key].cat_key = cat_key
+                self.box_key_to_cat_key[box_key] = cat_key
+
+        logger.info(f"Mapped {len(self.box_key_to_cat_key)} category boxes to cat_keys")
+
+    def set_regex_indicators(self, extracted_clauses: dict, category_map: dict):
+        """
+        After loading a contract, mark which categories had regex hits.
+
+        Args:
+            extracted_clauses: {cat_key: [matches]} from regex extraction
+            category_map: AnalysisEngine.CATEGORY_MAP
+        """
+        hit_count = 0
+        for cat_key, matches in extracted_clauses.items():
+            if not matches:
+                continue
+            mapping = category_map.get(cat_key)
+            if not mapping:
+                continue
+            section_key, display_name = mapping
+            box_key = f"{section_key}.{display_name}"
+            box = self.category_boxes.get(box_key)
+            if box and box.status_label:
+                box.status_label.setText("Pattern match found")
+                box.status_label.setStyleSheet("font-size: 10px; color: #4CAF50; font-style: italic;")
+                hit_count += 1
+
+        # Mark categories with no regex hits
+        for box_key, box in self.category_boxes.items():
+            if box.status_label and not box.status_label.text():
+                box.status_label.setText("No pattern match")
+                box.status_label.setStyleSheet("font-size: 10px; color: #999; font-style: italic;")
+
+        logger.info(f"Regex indicators: {hit_count} categories with pattern matches")
+
+    def enable_analyze_buttons(self, enabled: bool):
+        """Show/hide all per-category Analyze buttons."""
+        self._analyze_buttons_enabled = enabled
+        for box_key, box in self.category_boxes.items():
+            if box.analyze_btn:
+                box.analyze_btn.setVisible(enabled)
+                box.analyze_btn.setEnabled(enabled)
+
+    def update_category_status(self, cat_key: str, status: str, category_map: dict):
+        """
+        Update the status indicator for a single category.
+
+        Args:
+            cat_key: The category key
+            status: One of "loading", "analyzed", "error", "regex_hit", "empty"
+            category_map: AnalysisEngine.CATEGORY_MAP
+        """
+        mapping = category_map.get(cat_key)
+        if not mapping:
+            return
+        section_key, display_name = mapping
+        box_key = f"{section_key}.{display_name}"
+        box = self.category_boxes.get(box_key)
+        if not box:
+            return
+
+        if status == "loading":
+            if box.status_label:
+                box.status_label.setText("Analyzing...")
+                box.status_label.setStyleSheet("font-size: 10px; color: #FF9800; font-weight: bold;")
+            if box.analyze_btn:
+                box.analyze_btn.setEnabled(False)
+                box.analyze_btn.setText("...")
+        elif status == "analyzed":
+            if box.status_label:
+                box.status_label.setText("Analyzed")
+                box.status_label.setStyleSheet("font-size: 10px; color: #4CAF50; font-weight: bold;")
+            if box.analyze_btn:
+                box.analyze_btn.setEnabled(True)
+                box.analyze_btn.setText("Redo")
+                box.analyze_btn.setStyleSheet("""
+                    QPushButton {
+                        background: #757575;
+                        color: white;
+                        border: none;
+                        border-radius: 3px;
+                        font-size: 11px;
+                        font-weight: bold;
+                        padding: 2px 8px;
+                    }
+                    QPushButton:hover {
+                        background: #616161;
+                    }
+                """)
+        elif status == "error":
+            if box.status_label:
+                box.status_label.setText("Error")
+                box.status_label.setStyleSheet("font-size: 10px; color: #f44336; font-weight: bold;")
+            if box.analyze_btn:
+                box.analyze_btn.setEnabled(True)
+                box.analyze_btn.setText("Retry")
+        elif status == "not_found":
+            if box.status_label:
+                box.status_label.setText("Not found")
+                box.status_label.setStyleSheet("font-size: 10px; color: #999; font-style: italic;")
+            if box.analyze_btn:
+                box.analyze_btn.setEnabled(True)
+                box.analyze_btn.setText("Analyze")
+
+    def fill_single_category(self, cat_key: str, clause_data: dict, category_map: dict):
+        """
+        Fill a single category box with clause data.
+
+        Args:
+            cat_key: The category key
+            clause_data: ClauseBlock dict
+            category_map: AnalysisEngine.CATEGORY_MAP
+        """
+        mapping = category_map.get(cat_key)
+        if not mapping:
+            return
+        section_key, display_name = mapping
+        box_key = f"{section_key}.{display_name}"
+        box = self.category_boxes.get(box_key)
+        if not box:
+            logger.warning(f"Category box not found for: {box_key}")
+            return
+
+        # Clear existing content
+        if hasattr(box, 'content_widget_layout'):
+            while box.content_widget_layout.count():
+                child = box.content_widget_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
+        # Fill with new data
+        self._fill_category_box(box, clause_data)
+
+        # Expand the box to show the result
+        box.expand()

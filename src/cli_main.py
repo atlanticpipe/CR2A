@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Use absolute imports for PyInstaller compatibility
 from src.contract_uploader import ContractUploader
-from src.openai_fallback_client import OpenAIClient
 from src.analysis_engine import AnalysisEngine
 from src.query_engine import QueryEngine
 
@@ -31,42 +30,36 @@ logger = logging.getLogger(__name__)
 
 class CR2A_CLI:
     """Command-line interface for CR2A."""
-    
+
     def __init__(self):
         """Initialize CLI."""
-        self.api_key = os.environ.get('OPENAI_API_KEY')
-        if not self.api_key:
-            print("\n❌ ERROR: OPENAI_API_KEY environment variable not set")
-            print("Please set it with: set OPENAI_API_KEY=sk-your-key-here")
-            sys.exit(1)
-        
         self.analysis_engine = None
         self.query_engine = None
         self.current_analysis = None
         self.current_file = None
-        
+
     def analyze_contract(self, file_path: str) -> bool:
         """
         Analyze a contract file.
-        
+
         Args:
             file_path: Path to contract file (PDF, DOCX, or TXT)
-            
+
         Returns:
             True if analysis succeeded, False otherwise
         """
-        print(f"\n📄 Analyzing contract: {file_path}")
+        print(f"\n Analyzing contract: {file_path}")
         print("=" * 60)
-        
+
         try:
             # Initialize analysis engine if needed
             if not self.analysis_engine:
-                print("🔧 Initializing analysis engine...")
-                self.analysis_engine = AnalysisEngine(openai_api_key=self.api_key)
-            
+                print("Initializing local AI engine...")
+                self.analysis_engine = AnalysisEngine()
+
             # Analyze the contract
-            print("🤖 Sending to OpenAI for analysis...")
-            print("⏳ This may take 30-60 seconds...")
+            print("Running local AI analysis...")
+            print("This may take a few minutes...")
             
             self.current_analysis = self.analysis_engine.analyze_contract(file_path)
             self.current_file = file_path
@@ -212,8 +205,7 @@ class CR2A_CLI:
         try:
             # Initialize query engine if needed
             if not self.query_engine:
-                openai_client = OpenAIClient(api_key=self.api_key)
-                self.query_engine = QueryEngine(openai_client)
+                self.query_engine = QueryEngine(self.analysis_engine.ai_client)
             
             # Convert analysis to dict for query engine
             analysis_dict = {

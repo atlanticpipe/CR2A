@@ -17,8 +17,16 @@
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define PRODUCT_UNINST_ROOT_KEY "HKLM"
 
-; Executable name
-!define EXE_NAME "CR2A.exe"
+; Build-time parameters (can be overridden via command line)
+!ifndef OUTPUT_NAME
+  !define OUTPUT_NAME "CR2A_Setup.exe"
+!endif
+!ifndef INPUT_DIR
+  !define INPUT_DIR "dist\CR2A"
+!endif
+!ifndef EXE_NAME
+  !define EXE_NAME "CR2A.exe"
+!endif
 
 ;--------------------------------
 ; General Settings
@@ -27,8 +35,8 @@
 ; Installer name displayed in title bar
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 
-; Output installer filename
-OutFile "..\dist\CR2A_Setup.exe"
+; Output installer filename (can be customized via /DOUTPUT_NAME)
+OutFile "..\dist\${OUTPUT_NAME}"
 
 ; Default installation directory
 InstallDir "$PROGRAMFILES\CR2A"
@@ -48,6 +56,7 @@ ShowUnInstDetails show
 ;--------------------------------
 
 ; Use LZMA compression for best compression ratio
+; Dictionary size 64MB (balanced for large files and memory usage)
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64
 
@@ -221,9 +230,9 @@ Section "!${PRODUCT_NAME}" SEC_MAIN
     ; SetDetailsPrint textonly shows file names during extraction (Requirement 7.2)
     SetDetailsPrint textonly
     
-    ; Copy main application files
+    ; Copy main application files (path can be customized via /DINPUT_DIR)
     DetailPrint "Extracting application files..."
-    File /r "..\dist\CR2A\*.*"
+    File /r "..\${INPUT_DIR}\*.*"
     
     ; Restore normal detail printing
     SetDetailsPrint both

@@ -7,6 +7,7 @@ Supports PDF and DOCX file formats with optional OCR for image-based PDFs.
 
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Tuple, Dict, Optional
 try:
@@ -442,26 +443,39 @@ class ContractUploader:
     def _extract_text_with_ocr(self, file_path: str) -> str:
         """
         Extract text from image-based PDF using Tesseract OCR.
-        
+
         Args:
             file_path: Path to PDF file
-            
+
         Returns:
             Extracted text content from OCR
-            
+
         Raises:
             Exception: If OCR extraction fails
             RuntimeError: If Tesseract is not available
         """
         if not self.enable_ocr:
             raise RuntimeError("OCR is not enabled or Tesseract is not available")
-        
+
         logger.info("Starting OCR extraction for: %s", file_path)
-        
+
         try:
+            # Detect bundled poppler path for frozen applications
+            poppler_path = None
+            if getattr(sys, 'frozen', False):
+                # Running in PyInstaller bundle - use _MEIPASS to get resource path
+                base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+                bundled_poppler = os.path.join(base_path, 'poppler', 'bin')
+                if os.path.exists(bundled_poppler):
+                    poppler_path = bundled_poppler
+                    logger.debug("Using bundled poppler at: %s", poppler_path)
+
             # Convert PDF pages to images
             logger.debug("Converting PDF to images...")
-            images = pdf2image.convert_from_path(file_path)
+            if poppler_path:
+                images = pdf2image.convert_from_path(file_path, poppler_path=poppler_path)
+            else:
+                images = pdf2image.convert_from_path(file_path)
             logger.info("Converted PDF to %d images", len(images))
             
             # Extract text from each page image

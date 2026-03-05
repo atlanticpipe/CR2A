@@ -1,8 +1,8 @@
 """
 Configuration Manager Module
 
-Handles loading and saving application configuration including OpenAI API key
-with obfuscation for the Unified CR2A Application.
+Handles loading and saving application configuration for the CR2A Application.
+Uses local Llama 3.1 8B model for all AI analysis (no cloud API required).
 """
 
 import json
@@ -10,8 +10,6 @@ import logging
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
-import base64
-import hashlib
 
 
 logger = logging.getLogger(__name__)
@@ -20,24 +18,31 @@ logger = logging.getLogger(__name__)
 class ConfigManager:
     """
     Manages application configuration and settings persistence.
-    
-    This class handles reading and writing configuration files in JSON format,
-    with obfuscated storage of the OpenAI API key. Configuration is stored in
-    %APPDATA%/CR2A/config.json on Windows.
+
+    Configuration is stored in %APPDATA%/CR2A/config.json on Windows.
     """
-    
+
     # Default configuration values
     DEFAULT_CONFIG = {
         "window_width": 1024,
         "window_height": 768,
         "theme": "light",
         "max_file_size": 250 * 1024 * 1024,  # 250 MB default
+        "large_file_threshold_mb": 10,  # Disable multi-pass for files > 10MB
+        # Local model settings (Llama 3.1 8B)
+        "local_model_name": "llama-3.1-8b-q4",  # Default model (8B for better accuracy)
+        "local_model_threads": None,  # None = auto-detect CPU cores
+        "local_model_path": None,  # Custom model path (overrides model_name)
+        # Storage settings for multi-user network drive support
+        "storage_mode": "local",  # "local" = %APPDATA%, "shared" = network drive
+        "shared_storage_path": None,  # Path to network drive (e.g., "F:\\ContractAnalysis")
+        "storage_description": None,  # User-friendly description (e.g., "FileCloud F: Drive")
     }
-    
+
     def __init__(self, config_path: Optional[str] = None):
         """
         Initialize configuration manager.
-        
+
         Args:
             config_path: Optional custom path to configuration file.
                         If None, uses %APPDATA%/CR2A/config.json
@@ -50,204 +55,101 @@ class ConfigManager:
             self.config_path = config_dir / 'config.json'
         else:
             self.config_path = Path(config_path)
-        
+
         self.config: Dict[str, Any] = self.DEFAULT_CONFIG.copy()
-        self._obfuscation_key = self._get_obfuscation_key()
         logger.debug("ConfigManager initialized with path: %s", self.config_path)
-    
-    def _get_obfuscation_key(self) -> bytes:
-        """
-        Get obfuscation key for API key storage.
-        
-        The key is derived from a machine-specific identifier to provide
-        basic obfuscation. This is not cryptographically secure but prevents
-        casual inspection of the API key.
-        
-        Returns:
-            Obfuscation key bytes
-        """
-        machine_id = os.environ.get('COMPUTERNAME', 'default_machine')
-        key_material = f"CR2A_{machine_id}_key".encode()
-        return hashlib.sha256(key_material).digest()
-    
-    def _obfuscate(self, data: str) -> str:
-        """
-        Obfuscate a string using XOR with the obfuscation key.
-        
-        Args:
-            data: String to obfuscate
-            
-        Returns:
-            Base64-encoded obfuscated string
-        """
-        data_bytes = data.encode('utf-8')
-        key = self._obfuscation_key
-        obfuscated = bytes(b ^ key[i % len(key)] for i, b in enumerate(data_bytes))
-        return base64.urlsafe_b64encode(obfuscated).decode('ascii')
-    
-    def _deobfuscate(self, data: str) -> str:
-        """
-        Deobfuscate a string that was obfuscated with _obfuscate.
-        
-        Args:
-            data: Base64-encoded obfuscated string
-            
-        Returns:
-            Original string
-        """
-        obfuscated = base64.urlsafe_b64decode(data.encode('ascii'))
-        key = self._obfuscation_key
-        deobfuscated = bytes(b ^ key[i % len(key)] for i, b in enumerate(obfuscated))
-        return deobfuscated.decode('utf-8')
-    
+
     def load_config(self) -> Dict[str, Any]:
         """
         Load configuration from file.
-        
+
         If the config file doesn't exist or is corrupted, returns default
         configuration without raising an error.
-        
+
         Returns:
             Configuration dictionary
         """
         logger.info("Loading configuration from: %s", self.config_path)
-        
+
         if not self.config_path.exists():
             logger.info("Config file not found, using defaults")
             return self.config.copy()
-        
+
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 loaded_config = json.load(f)
-            
+
             self.config = self.DEFAULT_CONFIG.copy()
             self.config.update(loaded_config)
-            
+
             # Ensure max_file_size exists for backward compatibility
             if "max_file_size" not in self.config:
                 logger.info("max_file_size not found in config, using default: %d bytes (%.0f MB)",
                            self.DEFAULT_CONFIG["max_file_size"],
                            self.DEFAULT_CONFIG["max_file_size"] / (1024 * 1024))
                 self.config["max_file_size"] = self.DEFAULT_CONFIG["max_file_size"]
-            
+
+
             logger.info("Configuration loaded successfully")
             return self.config.copy()
-            
+
         except json.JSONDecodeError as e:
             logger.warning("Error parsing config file: %s. Using defaults.", e)
             return self.config.copy()
         except Exception as e:
             logger.warning("Error loading config file: %s. Using defaults.", e)
             return self.config.copy()
-    
+
     def save_config(self, config: Optional[Dict[str, Any]] = None) -> bool:
         """
         Save configuration to file.
-        
+
         Args:
             config: Optional configuration dictionary to save.
                    If None, saves current internal config.
-            
+
         Returns:
             True if saved successfully, False otherwise
         """
         logger.info("Saving configuration to: %s", self.config_path)
-        
+
         try:
             if config is not None:
                 self.config.update(config)
-            
+
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=2)
-            
+
             logger.info("Configuration saved successfully")
             return True
-            
+
         except Exception as e:
             logger.error("Error saving config file: %s", e)
             return False
-    
-    def get_openai_key(self) -> Optional[str]:
-        """
-        Get OpenAI API key from config.
-        
-        The API key is stored obfuscated and is deobfuscated when retrieved.
-        
-        Returns:
-            Deobfuscated API key or None if not configured
-        """
-        obfuscated_key = self.config.get("openai_api_key_encrypted")
-        
-        if not obfuscated_key:
-            logger.debug("No OpenAI API key found in config")
-            return None
-        
-        try:
-            deobfuscated_key = self._deobfuscate(obfuscated_key)
-            logger.debug("OpenAI API key retrieved from config")
-            return deobfuscated_key
-        except Exception as e:
-            logger.error("Error deobfuscating API key: %s", e)
-            return None
-    
-    def set_openai_key(self, api_key: str) -> None:
-        """
-        Set OpenAI API key in config.
-        
-        The API key is obfuscated before storage.
-        
-        Args:
-            api_key: OpenAI API key to store
-        """
-        try:
-            obfuscated_key = self._obfuscate(api_key)
-            self.config["openai_api_key_encrypted"] = obfuscated_key
-            logger.debug("OpenAI API key obfuscated and stored in config")
-        except Exception as e:
-            logger.error("Error obfuscating API key: %s", e)
-            raise
-    
+
     def validate_config(self) -> Tuple[bool, list[str]]:
         """
         Validate configuration completeness and correctness.
-        
+
         Returns:
             Tuple of (is_valid, list of error messages)
         """
         errors = []
-        
-        api_key = self.get_openai_key()
-        if not api_key:
-            errors.append("OpenAI API key is missing")
-        elif not self._validate_api_key_format(api_key):
-            errors.append("OpenAI API key format is invalid (must start with 'sk-')")
-        
+
         width = self.config.get("window_width", 0)
         height = self.config.get("window_height", 0)
         if width < 800 or height < 600:
             errors.append("Window dimensions must be at least 800x600")
-        
+
         is_valid = len(errors) == 0
         return is_valid, errors
-    
-    def _validate_api_key_format(self, api_key: str) -> bool:
-        """
-        Validate OpenAI API key format.
-        
-        Args:
-            api_key: API key to validate
-            
-        Returns:
-            True if format is valid, False otherwise
-        """
-        return api_key.startswith("sk-") and len(api_key) >= 20
-    
+
     def get_window_settings(self) -> Dict[str, int]:
         """
         Get window size settings.
-        
+
         Returns:
             Dictionary with window_width and window_height
         """
@@ -255,11 +157,11 @@ class ConfigManager:
             "window_width": self.config.get("window_width", self.DEFAULT_CONFIG["window_width"]),
             "window_height": self.config.get("window_height", self.DEFAULT_CONFIG["window_height"]),
         }
-    
+
     def set_window_settings(self, width: int, height: int) -> None:
         """
         Set window size settings.
-        
+
         Args:
             width: Window width in pixels
             height: Window height in pixels
@@ -267,68 +169,277 @@ class ConfigManager:
         self.config["window_width"] = width
         self.config["window_height"] = height
         logger.debug("Window settings updated: %dx%d", width, height)
-    
+
     def get_theme(self) -> str:
         """
         Get UI theme setting.
-        
+
         Returns:
             Theme string ("light" or "dark")
         """
         return self.config.get("theme", self.DEFAULT_CONFIG["theme"])
-    
+
     def set_theme(self, theme: str) -> None:
         """
         Set UI theme.
-        
+
         Args:
             theme: Theme string ("light" or "dark")
         """
         if theme not in ("light", "dark"):
             logger.warning("Invalid theme: %s. Using default.", theme)
             theme = self.DEFAULT_CONFIG["theme"]
-        
+
         self.config["theme"] = theme
         logger.debug("Theme set to: %s", theme)
-    
+
     def get_max_file_size(self) -> int:
         """
         Get configured maximum file size in bytes.
-        
+
         Returns:
-            Maximum file size in bytes (default: 200 MB)
+            Maximum file size in bytes (default: 250 MB)
         """
         return self.config.get("max_file_size", self.DEFAULT_CONFIG["max_file_size"])
-    
+
     def set_max_file_size(self, size_bytes: int) -> None:
         """
         Set maximum file size.
-        
+
         Args:
             size_bytes: Maximum file size in bytes
         """
         if size_bytes < 1024 * 1024:  # Minimum 1 MB
             logger.warning("File size too small: %d bytes. Using minimum 1 MB.", size_bytes)
             size_bytes = 1024 * 1024
-        
+
         self.config["max_file_size"] = size_bytes
         logger.debug("Max file size set to: %d bytes (%.2f MB)", size_bytes, size_bytes / (1024*1024))
-    
+
+    def get_large_file_threshold_mb(self) -> int:
+        """
+        Get threshold for disabling multi-pass analysis (in MB).
+
+        Returns:
+            Threshold in megabytes (default: 10 MB)
+        """
+        return self.config.get("large_file_threshold_mb",
+                              self.DEFAULT_CONFIG["large_file_threshold_mb"])
+
+    def set_large_file_threshold_mb(self, threshold_mb: int) -> None:
+        """
+        Set large file threshold for disabling multi-pass.
+
+        Args:
+            threshold_mb: Threshold in megabytes (minimum 1 MB)
+        """
+        if threshold_mb < 1:
+            logger.warning("Threshold too small: %d MB. Using minimum 1 MB.", threshold_mb)
+            threshold_mb = 1
+
+        self.config["large_file_threshold_mb"] = threshold_mb
+        logger.info("Large file threshold set to: %d MB", threshold_mb)
+
     def get_all_settings(self) -> Dict[str, Any]:
         """
         Get all configuration settings.
-        
-        Note: The obfuscated API key is not included in the returned dictionary.
-        Use get_openai_key() to retrieve the deobfuscated API key.
-        
+
         Returns:
-            Configuration dictionary (without sensitive data)
+            Configuration dictionary
         """
-        config_copy = self.config.copy()
-        config_copy.pop("openai_api_key_encrypted", None)
-        return config_copy
-    
+        return self.config.copy()
+
     def reset_to_defaults(self) -> None:
         """Reset configuration to default values."""
         logger.info("Resetting configuration to defaults")
         self.config = self.DEFAULT_CONFIG.copy()
+
+    # =========================================================================
+    # Local Model Settings
+    # =========================================================================
+
+    def get_local_model_name(self) -> str:
+        """
+        Get name of local model to use.
+
+        Returns:
+            Model name (e.g., "llama-3.2-3b-q4")
+        """
+        return self.config.get("local_model_name", self.DEFAULT_CONFIG["local_model_name"])
+
+    def set_local_model_name(self, model_name: str) -> None:
+        """
+        Set local model name.
+
+        Args:
+            model_name: Model identifier (e.g., "llama-3.2-3b-q4")
+        """
+        self.config["local_model_name"] = model_name
+        logger.info(f"Local model name set to: {model_name}")
+
+    def get_local_model_threads(self) -> Optional[int]:
+        """
+        Get number of CPU threads to use for local model inference.
+
+        Returns:
+            Number of threads, or None to auto-detect
+        """
+        return self.config.get("local_model_threads", self.DEFAULT_CONFIG["local_model_threads"])
+
+    def set_local_model_threads(self, threads: Optional[int]) -> None:
+        """
+        Set number of CPU threads for local model.
+
+        Args:
+            threads: Number of threads, or None to auto-detect
+        """
+        if threads is not None and threads < 1:
+            logger.warning("Invalid thread count: %d. Using auto-detect.", threads)
+            threads = None
+
+        self.config["local_model_threads"] = threads
+        logger.info(f"Local model threads set to: {threads or 'auto-detect'}")
+
+    def get_local_model_path(self) -> Optional[str]:
+        """
+        Get custom path to local model file (overrides model_name).
+
+        Returns:
+            Path to custom model file, or None to use model_name
+        """
+        return self.config.get("local_model_path", self.DEFAULT_CONFIG["local_model_path"])
+
+    def set_local_model_path(self, model_path: Optional[str]) -> None:
+        """
+        Set custom path to local model file.
+
+        Args:
+            model_path: Path to custom GGUF model file, or None to use model_name
+        """
+        self.config["local_model_path"] = model_path
+        logger.info(f"Local model path set to: {model_path}")
+
+    def get_local_model_settings(self) -> Dict[str, Any]:
+        """
+        Get all local model settings as a dictionary.
+
+        Returns:
+            Dictionary with local model configuration
+        """
+        return {
+            "local_model_name": self.get_local_model_name(),
+            "local_model_threads": self.get_local_model_threads(),
+            "local_model_path": self.get_local_model_path()
+        }
+
+    # ===== Storage Settings (Multi-User Network Drive Support) =====
+
+    def get_storage_mode(self) -> str:
+        """
+        Get storage mode: "local" or "shared".
+
+        Returns:
+            "local" for %APPDATA% storage, "shared" for network drive storage
+        """
+        return self.config.get("storage_mode", self.DEFAULT_CONFIG["storage_mode"])
+
+    def set_storage_mode(self, mode: str) -> None:
+        """
+        Set storage mode.
+
+        Args:
+            mode: "local" for %APPDATA% storage, "shared" for network drive
+
+        Raises:
+            ValueError: If mode is not "local" or "shared"
+        """
+        if mode not in ["local", "shared"]:
+            raise ValueError(f"Invalid storage mode: {mode}. Must be 'local' or 'shared'")
+
+        self.config["storage_mode"] = mode
+        logger.info(f"Storage mode set to: {mode}")
+
+    def get_shared_storage_path(self) -> Optional[str]:
+        """
+        Get path to shared network drive for storage.
+
+        Returns:
+            Path to network drive (e.g., "F:\\ContractAnalysis"), or None if not configured
+        """
+        return self.config.get("shared_storage_path", self.DEFAULT_CONFIG["shared_storage_path"])
+
+    def set_shared_storage_path(self, path: Optional[str]) -> None:
+        """
+        Set path to shared network drive.
+
+        Args:
+            path: Path to network drive (e.g., "F:\\ContractAnalysis"), or None to clear
+        """
+        self.config["shared_storage_path"] = path
+        if path:
+            logger.info(f"Shared storage path set to: {path}")
+        else:
+            logger.info("Shared storage path cleared")
+
+    def get_storage_description(self) -> Optional[str]:
+        """
+        Get user-friendly description of storage location.
+
+        Returns:
+            Description string (e.g., "FileCloud F: Drive"), or None
+        """
+        return self.config.get("storage_description", self.DEFAULT_CONFIG["storage_description"])
+
+    def set_storage_description(self, description: Optional[str]) -> None:
+        """
+        Set user-friendly description of storage location.
+
+        Args:
+            description: Description string (e.g., "FileCloud F: Drive")
+        """
+        self.config["storage_description"] = description
+        logger.info(f"Storage description set to: {description}")
+
+    def get_effective_storage_root(self) -> Path:
+        """
+        Get the effective storage root directory based on current settings.
+
+        Returns:
+            Path to storage root directory
+
+        Raises:
+            ValueError: If shared mode is configured but path is not set
+        """
+        mode = self.get_storage_mode()
+
+        if mode == "local":
+            appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+            return Path(appdata) / 'CR2A'
+
+        elif mode == "shared":
+            shared_path = self.get_shared_storage_path()
+            if not shared_path:
+                raise ValueError(
+                    "Shared storage mode is enabled but no network path is configured. "
+                    "Please configure the shared storage path in settings."
+                )
+            return Path(shared_path)
+
+        else:
+            logger.warning(f"Unknown storage mode '{mode}', falling back to local")
+            appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+            return Path(appdata) / 'CR2A'
+
+    def get_storage_settings(self) -> Dict[str, Any]:
+        """
+        Get all storage settings as a dictionary.
+
+        Returns:
+            Dictionary with storage configuration
+        """
+        return {
+            "storage_mode": self.get_storage_mode(),
+            "shared_storage_path": self.get_shared_storage_path(),
+            "storage_description": self.get_storage_description(),
+            "effective_storage_root": str(self.get_effective_storage_root())
+        }

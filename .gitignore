@@ -2,7 +2,6 @@
 # Contract Analysis Tool - .gitignore
 # ============================================================================
 config.txt
-tests/
 
 # ============================================================================
 # Python
@@ -31,6 +30,7 @@ venv.bak/
 build/
 dist/
 *.spec
+!CR2A.spec
 
 # Executables - DO NOT COMMIT (distribute via GitHub Releases)
 *.exe
@@ -87,7 +87,6 @@ certs/
 # ============================================================================
 # Sample contracts (keep one for testing, ignore others)
 Contract*.pdf
-!Contract\ #1.pdf
 Contract*_analysis.json
 Contract*_analysis.pdf
 
@@ -177,3 +176,30 @@ installer/output/
 
 # Virtual environment (project specific)
 venv311/
+
+# AI coding tool configs (local only)
+.kilocode/
+.kiro/
+
+# Project data directory (generated at runtime)
+.cr2a/
+
+# Generated reports
+analysis_report.txt
+
+# ============================================================================
+# External Binaries - OCR Dependencies
+# ============================================================================
+# Poppler binaries for PDF to image conversion (23 MB)
+# Download separately for builds - see docs/OCR_CONFIGURATION.md
+build_tools/poppler/
+
+# ============================================================================
+# Local AI Models - Bundled for Corporate Distribution
+# ============================================================================
+# NOTE: For bundled corporate distribution, .gguf model files in models/
+# directory are intentionally NOT ignored so they can be committed.
+# If you don't want to commit large model files to your repo, add:
+# models/*.gguf
+#
+# For now, models are tracked to enable bundled installer distribution.

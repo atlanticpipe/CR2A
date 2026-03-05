@@ -111,7 +111,6 @@ class SchemaCompleter:
         "Digital Surveillance, GIS-Tagged Deliverables & Monitoring Requirements",
         "GIS, Digital Workflow Integration & Electronic Submittals",
         "Confidentiality, Data Security & Records Retention Obligations",
-        "Intellectual Property, Licensing & Ownership of Work Product",
         "Cybersecurity Standards, Breach Notification & IT System Use Policies"
     ]
     
@@ -119,10 +118,8 @@ class SchemaCompleter:
     def create_not_found_clause() -> ClauseBlock:
         """Create a ClauseBlock for categories not found in the contract."""
         return ClauseBlock(
-            clause_language="Not found",
-            clause_summary="Not found",
-            risk_triggers_identified=[],
-            flow_down_obligations=[],
+            clause_location="Not found",
+            clause_summary="",
             redline_recommendations=[],
             harmful_language_policy_conflicts=[]
         )
@@ -133,7 +130,7 @@ class SchemaCompleter:
         Add missing clause categories to the analysis result.
         
         Args:
-            result: The analysis result from OpenAI
+            result: The analysis result from AI
             
         Returns:
             Complete analysis result with all categories
@@ -213,10 +210,8 @@ class SchemaCompleter:
             Complete dictionary with all categories
         """
         not_found_clause = {
-            "Clause Language": "Not found",
-            "Clause Summary": "Not found",
-            "Risk Triggers Identified": [],
-            "Flow-Down Obligations": [],
+            "Clause Location": "Not found",
+            "Clause Summary": "",
             "Redline Recommendations": [],
             "Harmful Language / Policy Conflicts": []
         }

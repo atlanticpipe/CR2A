@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "Request timed out. Please try again.",
+    "type": "timeout_error",
+    "code": "request_timeout",
+    "status": 408
+  }
+}

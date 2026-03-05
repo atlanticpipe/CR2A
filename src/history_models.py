@@ -33,7 +33,8 @@ class AnalysisRecord:
     clause_count: int
     risk_count: int
     file_path: Path
-    
+    analysis_type: str = "comprehensive"  # "comprehensive" or "bid_checklist"
+
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert to dictionary for JSON serialization.
@@ -47,7 +48,8 @@ class AnalysisRecord:
             'analyzed_at': self.analyzed_at.isoformat(),
             'clause_count': self.clause_count,
             'risk_count': self.risk_count,
-            'file_path': str(self.file_path)
+            'file_path': str(self.file_path),
+            'analysis_type': self.analysis_type,
         }
     
     @classmethod
@@ -71,7 +73,8 @@ class AnalysisRecord:
             analyzed_at=datetime.fromisoformat(data['analyzed_at']),
             clause_count=data['clause_count'],
             risk_count=data['risk_count'],
-            file_path=Path(data['file_path'])
+            file_path=Path(data['file_path']),
+            analysis_type=data.get('analysis_type', 'comprehensive'),
         )
     
     def validate(self) -> bool:

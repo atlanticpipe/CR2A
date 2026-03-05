@@ -8,15 +8,95 @@ Stores analysis results as JSON files in the application data directory.
 import json
 import logging
 import os
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import uuid
+
+# Platform-specific file locking
+if os.name == 'nt':  # Windows
+    import msvcrt
+else:  # Unix/Linux/Mac
+    import fcntl
 
 from src.history_models import AnalysisRecord
 from src.analysis_models import AnalysisResult
 
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def file_lock(file_handle, timeout: float = 30.0):
+    """
+    Context manager for cross-platform file locking.
+
+    Acquires an exclusive lock on the file for writing, preventing
+    concurrent modifications from other processes/users on network drives.
+
+    Args:
+        file_handle: Open file handle
+        timeout: Maximum time to wait for lock in seconds (default: 30)
+
+    Raises:
+        HistoryStoreError: If lock cannot be acquired within timeout
+
+    Example:
+        with open(path, 'r+') as f:
+            with file_lock(f, timeout=30):
+                # Exclusive access to file
+                data = json.load(f)
+                data['records'].append(new_record)
+                f.seek(0)
+                json.dump(data, f)
+    """
+    start_time = time.time()
+    lock_acquired = False
+
+    try:
+        # Try to acquire lock with retry
+        while time.time() - start_time < timeout:
+            try:
+                if os.name == 'nt':  # Windows
+                    # Lock first byte of file (exclusive lock)
+                    msvcrt.locking(file_handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:  # Unix/Linux/Mac
+                    fcntl.flock(file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                lock_acquired = True
+                logger.debug("File lock acquired")
+                break
+
+            except (IOError, OSError):
+                # Lock is held by another process, wait and retry
+                time.sleep(0.1)
+                continue
+
+        if not lock_acquired:
+            elapsed = time.time() - start_time
+            raise HistoryStoreError(
+                f"Could not acquire file lock after {elapsed:.1f} seconds. "
+                f"Another user may be saving data. Please try again."
+            )
+
+        # Lock acquired, yield control to caller
+        yield
+
+    finally:
+        # Release lock
+        if lock_acquired:
+            try:
+                if os.name == 'nt':  # Windows
+                    # Unlock first byte
+                    msvcrt.locking(file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:  # Unix/Linux/Mac
+                    fcntl.flock(file_handle.fileno(), fcntl.LOCK_UN)
+
+                logger.debug("File lock released")
+
+            except (IOError, OSError) as e:
+                logger.warning("Error releasing file lock: %s", e)
 
 
 class HistoryStoreError(Exception):
@@ -124,22 +204,149 @@ class HistoryStore:
     
     def _write_index(self, index_data: Dict[str, Any]) -> None:
         """
-        Write the index file.
-        
+        Write the index file with file locking for concurrent access.
+
+        Uses file locking to prevent concurrent modifications from multiple
+        users on network drives, ensuring data integrity.
+
         Args:
             index_data: Index data dictionary
-            
+
         Raises:
-            HistoryStoreError: If index cannot be written
+            HistoryStoreError: If index cannot be written or lock cannot be acquired
         """
         try:
-            with open(self.index_path, 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, indent=2)
-            logger.debug("Index file updated")
+            # For writing with lock, we need to handle file creation
+            if not self.index_path.exists():
+                # Create file first without lock (atomic operation)
+                with open(self.index_path, 'w', encoding='utf-8') as f:
+                    json.dump(index_data, f, indent=2)
+                logger.debug("Index file created")
+            else:
+                # File exists, use locked write
+                # Open in r+ mode to allow locking
+                with open(self.index_path, 'r+', encoding='utf-8') as f:
+                    with file_lock(f, timeout=30.0):
+                        # Truncate and write new content
+                        f.seek(0)
+                        f.truncate()
+                        json.dump(index_data, f, indent=2)
+                logger.debug("Index file updated (locked write)")
+
+        except HistoryStoreError:
+            # Re-raise lock errors as-is
+            raise
         except Exception as e:
             logger.error("Failed to write index file: %s", e)
             raise HistoryStoreError(f"Failed to write index file: {e}")
-    
+
+    def _append_to_index(self, record: Dict[str, Any]) -> None:
+        """
+        Atomically append a record to the index file.
+
+        This method performs a read-modify-write operation under a single
+        file lock, preventing race conditions when multiple users save
+        analyses concurrently on network drives.
+
+        Args:
+            record: Record dictionary to append
+
+        Raises:
+            HistoryStoreError: If operation fails or lock cannot be acquired
+        """
+        try:
+            # Ensure index file exists
+            if not self.index_path.exists():
+                self._create_empty_index()
+
+            # Atomic read-modify-write under lock
+            with open(self.index_path, 'r+', encoding='utf-8') as f:
+                with file_lock(f, timeout=30.0):
+                    # Read current index
+                    f.seek(0)
+                    try:
+                        index_data = json.load(f)
+                    except json.JSONDecodeError:
+                        logger.warning("Corrupted index during append, rebuilding")
+                        index_data = {"version": self.INDEX_VERSION, "records": []}
+
+                    # Append new record
+                    if "records" not in index_data:
+                        index_data["records"] = []
+                    index_data["records"].append(record)
+
+                    # Write updated index
+                    f.seek(0)
+                    f.truncate()
+                    json.dump(index_data, f, indent=2)
+
+            logger.debug("Record appended to index (atomic operation)")
+
+        except HistoryStoreError:
+            raise
+        except Exception as e:
+            logger.error("Failed to append to index: %s", e)
+            raise HistoryStoreError(f"Failed to append to index: {e}")
+
+    def _remove_from_index(self, record_id: str) -> bool:
+        """
+        Atomically remove a record from the index file.
+
+        This method performs a read-modify-write operation under a single
+        file lock, preventing race conditions when multiple users delete
+        analyses concurrently on network drives.
+
+        Args:
+            record_id: ID of the record to remove
+
+        Returns:
+            True if record was found and removed, False if not found
+
+        Raises:
+            HistoryStoreError: If operation fails or lock cannot be acquired
+        """
+        try:
+            if not self.index_path.exists():
+                logger.warning("Index file not found for deletion")
+                return False
+
+            # Atomic read-modify-write under lock
+            with open(self.index_path, 'r+', encoding='utf-8') as f:
+                with file_lock(f, timeout=30.0):
+                    # Read current index
+                    f.seek(0)
+                    try:
+                        index_data = json.load(f)
+                    except json.JSONDecodeError:
+                        logger.warning("Corrupted index during delete, rebuilding")
+                        index_data = {"version": self.INDEX_VERSION, "records": []}
+
+                    # Remove record
+                    original_count = len(index_data.get("records", []))
+                    index_data["records"] = [
+                        r for r in index_data.get("records", [])
+                        if r.get("id") != record_id
+                    ]
+                    new_count = len(index_data["records"])
+
+                    if original_count == new_count:
+                        # Record not found
+                        return False
+
+                    # Write updated index
+                    f.seek(0)
+                    f.truncate()
+                    json.dump(index_data, f, indent=2)
+
+            logger.debug("Record removed from index (atomic operation)")
+            return True
+
+        except HistoryStoreError:
+            raise
+        except Exception as e:
+            logger.error("Failed to remove from index: %s", e)
+            raise HistoryStoreError(f"Failed to remove from index: {e}")
+
     def _rebuild_index(self) -> Dict[str, Any]:
         """
         Rebuild index from individual analysis files.
@@ -217,7 +424,8 @@ class HistoryStore:
         try:
             # Import here to avoid circular dependency
             from src.analysis_models import ComprehensiveAnalysisResult
-            
+            from src.bid_review_models import BidChecklistResult
+
             # Log result type at start
             result_type = type(analysis_result).__name__
             logger.info("Saving analysis result of type: %s", result_type)
@@ -272,10 +480,7 @@ class HistoryStore:
                                     for category_name, clause_block in section_data.items():
                                         if clause_block and isinstance(clause_block, dict):
                                             clauses.append(clause_block)
-                                            risk_triggers = clause_block.get('Risk Triggers Identified', 
-                                                                            clause_block.get('risk_triggers_identified', []))
-                                            if risk_triggers:
-                                                risks.extend(risk_triggers)
+                                            pass  # Risk triggers removed from schema
                             
                             # Add supplemental operational risks
                             supplemental = base_result.get('supplemental_operational_risks', [])
@@ -283,10 +488,7 @@ class HistoryStore:
                                 clauses.extend(supplemental)
                                 for block in supplemental:
                                     if isinstance(block, dict):
-                                        risk_triggers = block.get('Risk Triggers Identified',
-                                                                 block.get('risk_triggers_identified', []))
-                                        if risk_triggers:
-                                            risks.extend(risk_triggers)
+                                        pass  # Risk triggers removed from schema
                         else:
                             # Legacy format
                             logger.debug("Counting clauses from legacy result dict")
@@ -328,13 +530,13 @@ class HistoryStore:
                                         clause_block = getattr(section, field_name)
                                         if clause_block is not None:
                                             clauses.append(clause_block)
-                                            risks.extend(clause_block.risk_triggers_identified)
+                                            pass  # Risk triggers removed from schema
                             
                             # Add supplemental operational risks
                             if base_result.supplemental_operational_risks:
                                 clauses.extend(base_result.supplemental_operational_risks)
                                 for block in base_result.supplemental_operational_risks:
-                                    risks.extend(block.risk_triggers_identified)
+                                    pass  # Risk triggers removed from schema
                             
                             logger.debug("Counted %d clauses and %d risks from ComprehensiveAnalysisResult", 
                                        len(clauses), len(risks))
@@ -384,7 +586,7 @@ class HistoryStore:
                             if clause_block is not None:
                                 clauses.append(clause_block)
                                 section_clause_count += 1
-                                risks.extend(clause_block.risk_triggers_identified)
+                                pass  # Risk triggers removed from schema
                         
                         logger.debug("Section %s: %d clauses", section_name, section_clause_count)
                     
@@ -394,8 +596,7 @@ class HistoryStore:
                         clauses.extend(analysis_result.supplemental_operational_risks)
                         logger.debug("Added %d supplemental operational risks", supplemental_count)
                         
-                        for block in analysis_result.supplemental_operational_risks:
-                            risks.extend(block.risk_triggers_identified)
+                        pass  # Risk triggers removed from schema
                     
                     logger.debug("Total: %d clauses and %d risks", len(clauses), len(risks))
                     
@@ -403,6 +604,21 @@ class HistoryStore:
                     logger.error("Error extracting metadata from ComprehensiveAnalysisResult: %s", e, exc_info=True)
                     raise HistoryStoreError(f"Failed to extract metadata from ComprehensiveAnalysisResult: {e}")
                     
+            elif isinstance(analysis_result, BidChecklistResult):
+                # This is a BidChecklistResult
+                logger.debug("Processing BidChecklistResult")
+
+                try:
+                    filename = analysis_result.metadata.filename if analysis_result.metadata else "unknown"
+                    analyzed_at = analysis_result.metadata.analyzed_at.isoformat() if analysis_result.metadata else ""
+                    stats = analysis_result.get_completion_stats()
+                    clauses = [None] * stats.get("found_count", 0)  # placeholder list for count
+                    risks = []
+                    logger.debug("BidChecklistResult: %s, %d items found", filename, len(clauses))
+                except Exception as e:
+                    logger.error("Error extracting metadata from BidChecklistResult: %s", e, exc_info=True)
+                    raise HistoryStoreError(f"Failed to extract metadata from BidChecklistResult: {e}")
+
             else:
                 # This is a standard AnalysisResult
                 logger.debug("Processing standard AnalysisResult")
@@ -431,22 +647,23 @@ class HistoryStore:
                 json.dump(analysis_data, f, indent=2)
             
             logger.debug("Saved analysis to: %s", analysis_file)
-            
-            # Update index
+
+            # Update index with atomic read-modify-write under file lock
             logger.debug("Updating index with new record")
-            index_data = self._read_index()
-            
+            # Determine analysis type for index record
+            analysis_type = "bid_checklist" if isinstance(analysis_result, BidChecklistResult) else "comprehensive"
+
             record = {
                 "id": record_id,
                 "filename": filename,
                 "analyzed_at": analyzed_at if isinstance(analyzed_at, str) else analyzed_at.isoformat(),
                 "clause_count": len(clauses),
                 "risk_count": len(risks),
-                "file_path": f"{record_id}.json"
+                "file_path": f"{record_id}.json",
+                "analysis_type": analysis_type,
             }
-            
-            index_data["records"].append(record)
-            self._write_index(index_data)
+
+            self._append_to_index(record)
             
             logger.info("Successfully saved analysis record: %s (%s) with %d clauses and %d risks", 
                        record_id, filename, len(clauses), len(risks))
@@ -596,24 +813,14 @@ class HistoryStore:
                 logger.debug("Deleted analysis file: %s", record_id)
             else:
                 logger.warning("Analysis file not found for deletion: %s", record_id)
-            
-            # Update index
-            index_data = self._read_index()
-            original_count = len(index_data["records"])
-            
-            index_data["records"] = [
-                r for r in index_data["records"] 
-                if r.get("id") != record_id
-            ]
-            
-            new_count = len(index_data["records"])
-            
-            if original_count == new_count:
+
+            # Update index with atomic remove operation
+            removed = self._remove_from_index(record_id)
+
+            if not removed:
                 logger.warning("Record not found in index: %s", record_id)
                 return False
-            
-            self._write_index(index_data)
-            
+
             logger.info("Deleted analysis record: %s", record_id)
             return True
             

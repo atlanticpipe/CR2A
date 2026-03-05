@@ -1,0 +1,10 @@
+{
+  "contract_metadata": {
+    "filename": "incomplete.pdf",
+    "analyzed_at": "2024-01-15T20:00:00Z",
+    "page_count": 10
+  },
+  "clauses": [
+    {
+      "id": "clause_1",
+      "type": "payment_terms"

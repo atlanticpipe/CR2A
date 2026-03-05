@@ -1,0 +1,51 @@
+{
+  "contract_metadata": {
+    "filename": "incomplete_analysis.pdf",
+    "analyzed_at": "2024-01-15T16:45:00Z",
+    "page_count": 15,
+    "parties": [
+      {
+        "name": "ABC Company",
+        "role": "vendor"
+      },
+      {
+        "name": "XYZ Corporation",
+        "role": "purchaser"
+      }
+    ],
+    "contract_type": "Purchase Agreement",
+    "effective_date": "2024-01-10"
+  },
+  "clauses": [
+    {
+      "id": "clause_1",
+      "type": "payment_terms",
+      "text": "Payment due upon delivery of goods.",
+      "page": 3,
+      "risk_level": "low"
+    },
+    {
+      "id": "clause_2",
+      "type": "warranty",
+      "text": "Vendor warrants goods are free from defects for 90 days.",
+      "page": 8,
+      "risk_level": "medium"
+    }
+  ],
+  "compliance_issues": [
+    {
+      "id": "compliance_1",
+      "regulation": "UCC",
+      "issue": "Missing provisions for inspection and acceptance of goods",
+      "severity": "medium"
+    }
+  ],
+  "redlining_suggestions": [
+    {
+      "clause_id": "clause_2",
+      "original_text": "Vendor warrants goods are free from defects for 90 days.",
+      "suggested_text": "Vendor warrants goods are free from defects in materials and workmanship for 90 days from delivery. Warranty excludes damage from misuse or normal wear.",
+      "rationale": "Clarifies scope of warranty and adds reasonable exclusions"
+    }
+  ]
+}

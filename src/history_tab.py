@@ -185,14 +185,17 @@ class HistoryTab(QWidget):
                 record = AnalysisRecord(
                     id=contract.contract_id,
                     filename=contract.filename,
-                    timestamp=contract.updated_at,  # Use updated_at to show latest version time
+                    analyzed_at=contract.updated_at,  # Use updated_at to show latest version time
+                    clause_count=0,  # Not tracked at contract level
+                    risk_count=0,  # Not tracked at contract level
                     file_path=None,  # Not stored in version database
-                    summary=f"Version {contract.current_version}"
                 )
+                # Attach version info for display purposes
+                record._version_summary = f"Version {contract.current_version}"
                 records.append(record)
-            
-            # Sort by timestamp (newest first)
-            records.sort(key=lambda r: r.timestamp, reverse=True)
+
+            # Sort by analyzed_at (newest first)
+            records.sort(key=lambda r: r.analyzed_at, reverse=True)
             
             return records
             
@@ -203,10 +206,12 @@ class HistoryTab(QWidget):
     def add_record(self, record: AnalysisRecord) -> None:
         """
         Add a new record to the list without full refresh.
-        
+
         This method adds a new record at the top of the list (newest first)
-        and removes the empty state message if present.
-        
+        and removes the empty state message if present. If a record with the
+        same filename already exists, it replaces the old entry rather than
+        creating a duplicate.
+
         Args:
             record: The new analysis record to add
         """
@@ -220,13 +225,25 @@ class HistoryTab(QWidget):
                         self.history_layout.removeWidget(widget)
                         widget.deleteLater()
                         break
-            
+
+            # Remove existing entry with the same filename to avoid duplicates
+            for i in range(self.history_layout.count()):
+                item = self.history_layout.itemAt(i)
+                if item and item.widget() and isinstance(item.widget(), QFrame):
+                    existing = item.widget()
+                    existing_filename = getattr(existing, 'record_filename', None)
+                    if existing_filename and existing_filename == record.filename:
+                        self.history_layout.removeWidget(existing)
+                        existing.deleteLater()
+                        logger.info("Replaced existing entry for %s", record.filename)
+                        break
+
             # Create and insert the new record widget at the top
             record_widget = self._create_record_widget(record)
             self.history_layout.insertWidget(0, record_widget)
-            
+
             logger.info("Added record to history list: %s", record.id)
-            
+
         except Exception as e:
             logger.error("Failed to add record to history list: %s", e)
     
@@ -297,8 +314,9 @@ class HistoryTab(QWidget):
             "}"
         )
         
-        # Store record_id as an attribute for later reference
+        # Store record_id and filename as attributes for later reference
         frame.record_id = record.id
+        frame.record_filename = record.filename
         
         layout = QVBoxLayout()
         frame.setLayout(layout)
@@ -310,7 +328,23 @@ class HistoryTab(QWidget):
         filename_label.setFont(QFont("Arial", 12, QFont.Bold))
         filename_label.setStyleSheet("color: #333;")
         top_layout.addWidget(filename_label)
-        
+
+        # Analysis type badge
+        analysis_type = getattr(record, 'analysis_type', 'comprehensive')
+        if analysis_type == "bid_checklist":
+            type_label = QLabel("Bid Review")
+            type_label.setStyleSheet(
+                "background: #E3F2FD; color: #1565C0; font-size: 10px; "
+                "padding: 2px 6px; border-radius: 3px; font-weight: bold;"
+            )
+        else:
+            type_label = QLabel("Contract")
+            type_label.setStyleSheet(
+                "background: #F3E5F5; color: #7B1FA2; font-size: 10px; "
+                "padding: 2px 6px; border-radius: 3px; font-weight: bold;"
+            )
+        top_layout.addWidget(type_label)
+
         top_layout.addStretch()
         
         date_label = QLabel(record.analyzed_at.strftime("%Y-%m-%d %H:%M:%S"))
@@ -582,15 +616,19 @@ class HistoryTab(QWidget):
             return None
         
         try:
-            # Try to find contract by filename (simplified approach)
-            # In a real implementation, you'd need a mapping from record_id to contract_id
-            # For now, we'll search by filename
+            # Match by contract_id (record.id is set to contract.contract_id
+            # in _load_from_differential_storage), with filename fallback
             all_contracts = self.differential_storage.get_all_contracts()
-            
+
+            for contract in all_contracts:
+                if contract.contract_id == record.id:
+                    return contract
+
+            # Fallback: match by filename if ID didn't match
             for contract in all_contracts:
                 if contract.filename == record.filename:
                     return contract
-            
+
             return None
         except Exception as e:
             logger.error("Failed to get contract for record %s: %s", record.id, e)

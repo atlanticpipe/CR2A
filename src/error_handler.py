@@ -228,12 +228,29 @@ class ErrorHandler:
         )
     
     def _handle_memory_error(self, error: MemoryError) -> ErrorResponse:
-        """Handle memory errors."""
+        """Handle memory errors (especially important for local models)."""
+        try:
+            import psutil
+            mem_available = psutil.virtual_memory().available / (1024**3)  # GB
+            mem_info = f" (Available RAM: {mem_available:.1f}GB)"
+        except:
+            mem_info = ""
+
         return ErrorResponse(
-            message="Insufficient memory to complete this operation. Try using Pythia-410M instead of Pythia-1B, or close other applications.",
+            message=(
+                f"Insufficient memory to complete this operation{mem_info}.\n\n"
+                "Local AI models require significant RAM:\n"
+                "- Pythia 2.8B: ~4GB RAM\n"
+                "- Pythia 1.4B: ~2GB RAM"
+            ),
             severity="error",
             recoverable=True,
-            suggested_action="Change model in settings or free up system memory",
+            suggested_action=(
+                "Options:\n"
+                "1. Close other applications to free up RAM\n"
+                "2. Use smaller model: Settings → AI Model → Select Q3 variant\n"
+                "3. Restart your computer to free up memory"
+            ),
             technical_details=str(error)
         )
     
@@ -248,12 +265,12 @@ class ErrorHandler:
         )
     
     def _handle_connection_error(self, error: ConnectionError) -> ErrorResponse:
-        """Handle connection errors (e.g., OpenAI API)."""
+        """Handle connection errors (e.g., model download)."""
         return ErrorResponse(
-            message="Network connection failed. Check your internet connection if using OpenAI fallback.",
+            message="Network connection failed. Check your internet connection.",
             severity="warning",
             recoverable=True,
-            suggested_action="Check internet connection or disable OpenAI fallback in settings",
+            suggested_action="Check internet connection and try again",
             technical_details=str(error)
         )
     
@@ -275,14 +292,39 @@ class ErrorHandler:
         )
     
     def _handle_runtime_error(self, error: RuntimeError, context: str) -> ErrorResponse:
-        """Handle runtime errors."""
-        if "model not loaded" in str(error).lower():
-            message = "The language model is not loaded. Please wait for initialization to complete."
-            action = "Wait for model loading or restart the application"
+        """Handle runtime errors (including model loading failures)."""
+        error_str = str(error).lower()
+
+        # Model-specific errors
+        if "model" in context.lower() or "pythia" in error_str or "llama" in error_str:
+            if "failed to load" in error_str or "model file not found" in error_str:
+                message = "Failed to load the local AI model. The model file may be missing or corrupted."
+                action = (
+                    "Options:\n"
+                    "1. Download model: Settings → AI Model → Manage Models\n"
+                    "2. Check if model file exists and is not corrupted"
+                )
+            elif "insufficient memory" in error_str or "memory" in error_str:
+                message = "Insufficient memory to load the local AI model."
+                action = (
+                    "Options:\n"
+                    "1. Close other applications to free up RAM\n"
+                    "2. Use smaller model: Settings → AI Model → Select Q3 variant"
+                )
+            elif "model not loaded" in error_str:
+                message = "The language model is not loaded. Please wait for initialization to complete."
+                action = "Wait for model loading or restart the application"
+            else:
+                message = "Local AI model initialization failed."
+                action = (
+                    "Options:\n"
+                    "1. Try downloading model again\n"
+                    "2. Check error details and logs"
+                )
         else:
             message = "A runtime error occurred during operation."
             action = "Try the operation again or restart the application"
-        
+
         return ErrorResponse(
             message=message,
             severity="error",
@@ -293,6 +335,26 @@ class ErrorHandler:
     
     def _handle_import_error(self, error: ImportError) -> ErrorResponse:
         """Handle import errors (missing dependencies)."""
+        error_str = str(error).lower()
+
+        # llama-cpp-python specific error
+        if "llama" in error_str or "llama_cpp" in error_str:
+            return ErrorResponse(
+                message=(
+                    "Local AI model support (llama-cpp-python) is not installed.\n\n"
+                    "This is required for using the local Llama AI model."
+                ),
+                severity="error",
+                recoverable=True,
+                suggested_action=(
+                    "Options:\n"
+                    "1. Reinstall application with full dependencies\n"
+                    "2. Install manually: pip install llama-cpp-python"
+                ),
+                technical_details=str(error)
+            )
+
+        # Generic import error
         return ErrorResponse(
             message=f"Missing required dependency: {error.name if hasattr(error, 'name') else 'unknown'}. The application may not be properly installed.",
             severity="error",
@@ -355,16 +417,9 @@ class ErrorHandler:
         # Model loading errors - disable AI features
         if isinstance(error, (MemoryError, RuntimeError)) and "model" in context.lower():
             strategy["continue_operation"] = True
-            strategy["disable_features"] = ["pythia_queries"]
+            strategy["disable_features"] = ["ai_queries"]
             strategy["fallback_mode"] = "basic_search"
             strategy["user_notification"] = "AI features disabled. Using basic search only."
-        
-        # OpenAI errors - disable fallback
-        elif isinstance(error, ConnectionError) and "openai" in context.lower():
-            strategy["continue_operation"] = True
-            strategy["disable_features"] = ["openai_fallback"]
-            strategy["fallback_mode"] = "pythia_only"
-            strategy["user_notification"] = "OpenAI fallback disabled. Using local model only."
         
         # File loading errors - require new file
         elif isinstance(error, (FileNotFoundError, json.JSONDecodeError)):

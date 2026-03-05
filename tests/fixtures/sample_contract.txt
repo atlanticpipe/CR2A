@@ -1,0 +1,3 @@
+Sample contract text for testing purposes.
+
+This is a test contract.
