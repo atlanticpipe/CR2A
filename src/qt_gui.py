@@ -185,6 +185,93 @@ class PrepareContractThread(QThread):
             self.error.emit(str(e))
 
 
+class PrepareFolderThread(QThread):
+    """Background thread for loading multiple files as combined context (no AI)."""
+    finished = pyqtSignal(object)  # PreparedContract (combined)
+    progress = pyqtSignal(str, int)
+    error = pyqtSignal(str)
+
+    def __init__(self, engine, files):
+        super().__init__()
+        self.engine = engine
+        self.files = files
+
+    def run(self):
+        try:
+            from analyzer.template_patterns import (
+                extract_all_template_clauses, parse_contract_sections, detect_exclude_zones
+            )
+            from src.document_retriever import DocumentRetriever
+
+            combined_text_parts = []
+            combined_file_info = {
+                'filename': f"{len(self.files)} files",
+                'file_count': len(self.files),
+                'files': [],
+            }
+
+            total = len(self.files)
+            for idx, file_path in enumerate(self.files):
+                filename = file_path.name
+                pct = int(((idx) / total) * 60)  # 0-60% for extraction
+                self.progress.emit(f"Extracting text from {filename}...", pct)
+
+                try:
+                    text = self.engine.uploader.extract_text(str(file_path))
+                    if text and text.strip():
+                        # Add file separator so AI knows which file content came from
+                        combined_text_parts.append(
+                            f"\n{'='*60}\n"
+                            f"FILE: {filename}\n"
+                            f"{'='*60}\n\n"
+                            f"{text}"
+                        )
+                        file_info = self.engine.uploader.get_file_info(str(file_path))
+                        combined_file_info['files'].append({
+                            'filename': filename,
+                            'path': str(file_path),
+                            'size': file_info.get('file_size', 0),
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to extract text from {filename}: {e}")
+
+            if not combined_text_parts:
+                self.error.emit("No text could be extracted from any file in the folder")
+                return
+
+            contract_text = "\n".join(combined_text_parts)
+            logger.info(f"Combined {len(combined_text_parts)} files, {len(contract_text)} total characters")
+
+            self.progress.emit("Parsing contract structure...", 65)
+            exclude_zones = detect_exclude_zones(contract_text)
+            section_index = parse_contract_sections(contract_text, exclude_zones=exclude_zones)
+
+            self.progress.emit("Running pattern matching...", 75)
+            extracted_clauses = extract_all_template_clauses(contract_text, section_index=section_index)
+            regex_count = sum(len(v) for v in extracted_clauses.values())
+            logger.info(f"Regex found {regex_count} clauses across {len(extracted_clauses)} categories")
+
+            self.progress.emit("Building search index...", 90)
+            retriever = DocumentRetriever()
+            indexed = retriever.index_contract(contract_text, section_index, extracted_clauses)
+
+            self.progress.emit("All files loaded!", 100)
+
+            prepared = PreparedContract(
+                file_path=str(self.files[0]),  # Primary file for storage
+                contract_text=contract_text,
+                file_info=combined_file_info,
+                section_index=section_index,
+                exclude_zones=exclude_zones,
+                extracted_clauses=extracted_clauses,
+                indexed=indexed,
+            )
+            self.finished.emit(prepared)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class SingleCategoryThread(QThread):
     """Background thread for analyzing a single clause category."""
     finished = pyqtSignal(str, str, object, str, str)  # cat_key, display_name, clause_block, prompt, response
@@ -613,12 +700,17 @@ class CR2A_GUI(QMainWindow):
         self.load_btn.setToolTip("Extract text and run pattern matching (fast, no AI)")
         file_bar.addWidget(self.load_btn)
 
-        # Hidden batch analyze button (only shown in folder mode)
-        self.analyze_btn = QPushButton("Batch Analyze")
-        self.analyze_btn.clicked.connect(self.analyze_contract)
-        self.analyze_btn.setEnabled(False)
-        self.analyze_btn.setVisible(False)
-        file_bar.addWidget(self.analyze_btn)
+        # Load All button (only shown in folder mode)
+        self.load_all_btn = QPushButton("Load All")
+        self.load_all_btn.clicked.connect(self._load_folder)
+        self.load_all_btn.setEnabled(False)
+        self.load_all_btn.setVisible(False)
+        self.load_all_btn.setStyleSheet(
+            "padding: 6px 16px; font-size: 13px; font-weight: bold; "
+            "background: #4CAF50; color: white;"
+        )
+        self.load_all_btn.setToolTip("Load all files as context for analysis")
+        file_bar.addWidget(self.load_all_btn)
 
         layout.addLayout(file_bar)
 
@@ -1130,7 +1222,7 @@ class CR2A_GUI(QMainWindow):
             self.upload_mode_label.setText("Mode: Single File")
             self.load_btn.setEnabled(True)
             self.load_btn.setVisible(True)
-            self.analyze_btn.setVisible(False)
+            self.load_all_btn.setVisible(False)
             self.analyze_all_btn.setEnabled(False)
             self.upload_status.setText(f"File selected: {os.path.basename(filename)} — Click 'Load Contract' to begin.")
 
@@ -1186,12 +1278,12 @@ class CR2A_GUI(QMainWindow):
         self.folder_files = files
         self.current_file = None
 
-        # Update UI - folder mode shows batch analyze button
+        # Update UI - folder mode shows Load All button
         self.file_label.setText(f"{folder.name} ({len(files)} files)")
-        self.upload_mode_label.setText(f"Mode: Folder Batch ({len(files)} files)")
+        self.upload_mode_label.setText(f"Mode: Folder ({len(files)} files)")
         self.load_btn.setVisible(False)
-        self.analyze_btn.setVisible(True)
-        self.analyze_btn.setEnabled(True)
+        self.load_all_btn.setVisible(True)
+        self.load_all_btn.setEnabled(True)
         self.analyze_all_btn.setEnabled(False)
 
         # Show file list
@@ -1199,7 +1291,61 @@ class CR2A_GUI(QMainWindow):
         if len(files) > 10:
             file_list += f"\n  ... and {len(files) - 10} more"
 
-        self.upload_status.setText(f"Ready to analyze {len(files)} files:\n{file_list}")
+        self.upload_status.setText(f"Ready to load {len(files)} files:\n{file_list}")
+
+    def _load_folder(self):
+        """Load all folder files as combined context (no AI). Same as Load Contract but for multiple files."""
+        if not self.analysis_engine:
+            QMessageBox.warning(self, "Error", "Analysis engine not initialized. Check API key.")
+            return
+
+        if not self.folder_files:
+            QMessageBox.warning(self, "Error", "No folder selected.")
+            return
+
+        # Reset previous state
+        self.prepared_contract = None
+        self.category_results = {}
+        self.current_analysis = None
+        if self.specs_tab:
+            self.specs_tab.clear()
+
+        # Initialize project storage for the folder
+        from pathlib import Path
+        from src.project_storage import ProjectStorage
+        try:
+            source_path = Path(self.current_folder)
+            self.project_storage = ProjectStorage(source_path)
+            valid, error = self.project_storage.is_valid_project_directory()
+            if valid:
+                self.project_storage.initialize_structure()
+                self._reinit_storage_for_project()
+                if self.session_manager:
+                    self.session_manager.set_contract_info(
+                        contract_file=f"{len(self.folder_files)} files",
+                        contract_file_path=self.current_folder,
+                        upload_mode=self.upload_mode,
+                    )
+        except Exception as e:
+            logger.warning(f"Project storage init failed: {e}")
+
+        # Update UI
+        self.load_all_btn.setEnabled(False)
+        self.analyze_all_btn.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.upload_status.setText("Loading files...")
+        self.statusBar().showMessage(f"Loading {len(self.folder_files)} files...")
+
+        # Start preparation in background
+        self.prepare_folder_thread = PrepareFolderThread(
+            self.analysis_engine, self.folder_files
+        )
+        self.prepare_folder_thread.finished.connect(self.on_prepare_complete)
+        self.prepare_folder_thread.error.connect(self.on_prepare_error)
+        self.prepare_folder_thread.progress.connect(self.on_analysis_progress)
+        self.prepare_folder_thread.start()
 
     def analyze_contract(self):
         """Start contract analysis (single file or folder batch)."""
@@ -1306,7 +1452,7 @@ class CR2A_GUI(QMainWindow):
     def _analyze_single_file(self):
         """Analyze a single file."""
         # Disable button and show progress
-        self.analyze_btn.setEnabled(False)
+        self.load_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -1333,7 +1479,7 @@ class CR2A_GUI(QMainWindow):
     def _analyze_folder_batch(self):
         """Analyze all files in a folder sequentially."""
         # Disable UI during processing
-        self.analyze_btn.setEnabled(False)
+        self.load_all_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -1375,7 +1521,7 @@ class CR2A_GUI(QMainWindow):
         failures = [r for r in results if r['status'] == 'error']
 
         # Re-enable UI
-        self.analyze_btn.setEnabled(True)
+        self.load_all_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
 
         # Show summary
@@ -1397,7 +1543,6 @@ class CR2A_GUI(QMainWindow):
         if self.history_tab:
             self.history_tab.refresh()
 
-        # Clear batch state
         self.upload_status.setText("Batch analysis complete. Select a new file or folder to continue.")
         self.statusBar().showMessage("Ready")
 
@@ -1420,7 +1565,7 @@ class CR2A_GUI(QMainWindow):
         
         # Hide progress
         self.progress_bar.setVisible(False)
-        self.analyze_btn.setEnabled(True)
+        self.load_btn.setEnabled(True)
         self.upload_status.setText("Analysis complete!")
         self.statusBar().showMessage("Analysis complete")
         
@@ -1695,7 +1840,7 @@ class CR2A_GUI(QMainWindow):
     def on_analysis_error(self, error):
         """Handle analysis error."""
         self.progress_bar.setVisible(False)
-        self.analyze_btn.setEnabled(True)
+        self.load_btn.setEnabled(True)
         self.upload_status.setText(f"Analysis failed: {error}")
         self.statusBar().showMessage("Analysis failed")
 
@@ -1767,8 +1912,10 @@ class CR2A_GUI(QMainWindow):
     def on_prepare_complete(self, prepared):
         """Handle contract preparation completion."""
         self.prepared_contract = prepared
+        self.contract_text = prepared.contract_text  # Store for bid review and chat
         self.progress_bar.setVisible(False)
         self.load_btn.setEnabled(True)
+        self.load_all_btn.setEnabled(True)
         self.analyze_all_btn.setEnabled(True)
 
         # Count regex hits
@@ -1834,6 +1981,7 @@ class CR2A_GUI(QMainWindow):
         """Handle contract preparation error."""
         self.progress_bar.setVisible(False)
         self.load_btn.setEnabled(True)
+        self.load_all_btn.setEnabled(True)
         self.upload_status.setText(f"Load failed: {error}")
         self.statusBar().showMessage("Load failed")
         QMessageBox.critical(self, "Load Error", f"Failed to load contract:\n\n{error}")
