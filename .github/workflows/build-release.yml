@@ -39,19 +39,31 @@ jobs:
           $url = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.08.0-0/Release-24.08.0-0.zip"
           Invoke-WebRequest -Uri $url -OutFile poppler.zip
           Expand-Archive -Path poppler.zip -DestinationPath poppler_extract
-          # Move the inner directory to build_tools/poppler
-          $inner = Get-ChildItem poppler_extract -Directory | Select-Object -First 1
-          if (Test-Path "build_tools/poppler") { Remove-Item -Recurse -Force "build_tools/poppler" }
-          Move-Item "$($inner.FullName)/Library" "build_tools/poppler"
+          # Find the bin directory containing poppler executables
+          $binDir = Get-ChildItem -Path poppler_extract -Recurse -Filter "pdftoppm.exe" | Select-Object -First 1
+          if ($binDir) {
+            $popplerRoot = $binDir.Directory.Parent.FullName
+            if (Test-Path "build_tools/poppler") { Remove-Item -Recurse -Force "build_tools/poppler" }
+            Copy-Item -Path $popplerRoot -Destination "build_tools/poppler" -Recurse
+            Write-Host "Poppler installed from: $popplerRoot"
+            Get-ChildItem "build_tools/poppler" -Recurse -Name | Select-Object -First 10
+          } else {
+            Write-Host "WARNING: Poppler binaries not found, creating empty directory"
+            New-Item -ItemType Directory -Force -Path "build_tools/poppler/bin" | Out-Null
+          }
 
       - name: Install NSIS
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
 
-      - name: Build application (PyInstaller + NSIS)
+      - name: Build application (PyInstaller)
         run: |
-          python build_tools/build.py --target all
+          python build_tools/build.py --target gui
+
+      - name: Build installer (NSIS)
+        run: |
+          python build_tools/build.py --target installer
 
       - name: Verify outputs
         shell: pwsh
