@@ -753,6 +753,7 @@ class CR2A_GUI(QMainWindow):
         # Specs tab (technical specification extraction)
         self.specs_tab = SpecsTab()
         self.specs_tab.analysis_requested.connect(self.on_specs_analysis_requested)
+        self.specs_tab.analysis_finished.connect(self._on_specs_finished)
         self.tabs.addTab(self.specs_tab, "Specs")
 
         # History tab (will be initialized after history_store is ready)
@@ -2289,6 +2290,15 @@ class CR2A_GUI(QMainWindow):
             self.contract_text
         )
 
+    def _on_specs_finished(self, text):
+        """Handle specs analysis completion — log to chat."""
+        # Count lines/sections for a summary
+        lines = [l for l in text.split('\n') if l.strip()]
+        preview = '\n'.join(lines[:10])
+        if len(lines) > 10:
+            preview += f'\n... ({len(lines) - 10} more lines)'
+        self._log_to_chat('summary', preview, f'Specs Analysis ({len(lines)} lines)')
+
     def on_bid_review_analysis_requested(self):
         """Handle bid review analysis request from Bid Review tab."""
         if not self.contract_text:
@@ -2331,16 +2341,34 @@ class CR2A_GUI(QMainWindow):
         self.bid_review_tab.start_analysis(bid_engine, prepared)
 
     def _on_bid_item_session_save(self, item_key, display_name, item):
-        """Auto-save a single bid review item to session."""
+        """Auto-save a single bid review item and log to chat."""
         if self.session_manager and hasattr(item, 'to_dict'):
             self.session_manager.update_bid_review_item(item_key, item.to_dict())
             self.session_manager.save()
 
+        # Log to chat
+        value = item.value if hasattr(item, 'value') else str(item)
+        conf = item.confidence if hasattr(item, 'confidence') else ''
+        location = item.location if hasattr(item, 'location') else ''
+        notes = item.notes if hasattr(item, 'notes') else ''
+        detail = f"{display_name}: {value}"
+        if location:
+            detail += f"\nLocation: {location}"
+        if notes:
+            detail += f"\nNotes: {notes}"
+        self._log_to_chat('summary', detail, f'Bid Review ({conf})')
+
     def _on_bid_review_session_save(self, result):
-        """Auto-save complete bid review result to session."""
+        """Auto-save complete bid review result and log summary to chat."""
         if self.session_manager and result and hasattr(result, 'to_dict'):
             self.session_manager.update_bid_review_result(result.to_dict())
             self.session_manager.save()
+
+        # Log summary to chat
+        items = self.bid_review_tab.item_results if self.bid_review_tab else {}
+        found = sum(1 for item in items.values() if hasattr(item, 'found') and item.found)
+        total = len(items)
+        self._log_to_chat('system', f'Bid Review complete: {found}/{total} items found ({round(found/total*100) if total else 0}%)')
 
     def _try_restore_session(self):
         """Attempt to restore a previous session for the loaded contract.

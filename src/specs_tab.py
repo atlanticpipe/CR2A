@@ -93,6 +93,7 @@ class SpecsTab(QWidget):
     """
 
     analysis_requested = pyqtSignal()
+    analysis_finished = pyqtSignal(str)   # specs text result (for chat logging)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -236,6 +237,7 @@ class SpecsTab(QWidget):
         self.instructions_label.setText("Specifications extracted from contract:")
         self.results_text.setPlainText(text)
         self.results_text.setVisible(True)
+        self.analysis_finished.emit(text)
 
     def _on_analysis_error(self, error_msg: str):
         """Handle analysis error."""
