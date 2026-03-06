@@ -156,19 +156,28 @@ class BidReviewEngine:
                 notes="No relevant text found in document",
             )
 
-        # Build context string (deduplicate overlapping snippets)
+        # If regex captured a clean value, use it directly (deterministic, no AI needed)
+        if regex_matches and regex_matches[0].get("captured_value"):
+            captured = regex_matches[0]["captured_value"].strip()
+            if captured and len(captured) > 1:
+                logger.info("Using regex-captured value for %s: %s", item_key, captured[:80])
+                return section_key, display_name, ChecklistItem(
+                    value=captured,
+                    location="",
+                    confidence="high",
+                    notes=f"Pattern match ({len(regex_matches)} match{'es' if len(regex_matches) > 1 else ''})",
+                )
+
+        # No clean captured value — use AI to extract from context
         context_text = self._merge_contexts(context_parts, MAX_CONTEXT_PER_ITEM)
 
-        # Build AI prompt
         user_msg = self._build_single_item_prompt(
-            display_name, description, context_text,
-            regex_matches[0]["captured_value"] if regex_matches and regex_matches[0].get("captured_value") else None
+            display_name, description, context_text, None
         )
 
         if progress_callback:
             progress_callback(f"AI extracting: {display_name}...", 50)
 
-        # Call AI
         try:
             response = self.ai_client.generate(
                 self.SYSTEM_MSG, user_msg, max_tokens=500
@@ -176,19 +185,11 @@ class BidReviewEngine:
             item = self._parse_single_response(response, regex_matches)
         except Exception as e:
             logger.error("AI error for %s: %s", item_key, e)
-            # Fall back to regex-only result
-            if regex_matches and regex_matches[0].get("captured_value"):
-                item = ChecklistItem(
-                    value=regex_matches[0]["captured_value"],
-                    confidence="low",
-                    notes=f"Regex-only (AI error: {e})",
-                )
-            else:
-                item = ChecklistItem(
-                    value="ERROR",
-                    confidence="not_found",
-                    notes=str(e),
-                )
+            item = ChecklistItem(
+                value="ERROR",
+                confidence="not_found",
+                notes=str(e),
+            )
 
         return section_key, display_name, item
 

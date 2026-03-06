@@ -909,10 +909,19 @@ class CR2A_GUI(QMainWindow):
             "© 2024 CR2A Project"
         )
     
+    def _has_any_results(self):
+        """Check if any analysis results exist across all tabs."""
+        if self.get_or_build_current_analysis():
+            return True
+        if self.bid_review_tab and self.bid_review_tab.item_results:
+            return True
+        if self.specs_tab and self.specs_tab.results_text.toPlainText().strip():
+            return True
+        return False
+
     def export_analysis_report(self):
         """Export analysis report to a text file."""
-        analysis = self.get_or_build_current_analysis()
-        if not analysis:
+        if not self._has_any_results():
             QMessageBox.warning(self, "No Analysis", "No analysis to export. Please analyze a contract first.")
             return
         
@@ -962,8 +971,7 @@ class CR2A_GUI(QMainWindow):
     
     def export_all(self):
         """Export both analysis report and chat log."""
-        analysis = self.get_or_build_current_analysis()
-        if not analysis:
+        if not self._has_any_results():
             QMessageBox.warning(self, "No Analysis", "No analysis to export. Please analyze a contract first.")
             return
         
@@ -994,19 +1002,31 @@ class CR2A_GUI(QMainWindow):
             QMessageBox.critical(self, "Export Error", f"Failed to export:\n{str(e)}")
     
     def _generate_analysis_report(self):
-        """Generate a text report from the current analysis."""
+        """Generate a text report from the current analysis, including all tabs."""
         lines = []
         lines.append("CR2A CONTRACT ANALYSIS REPORT")
         lines.append("=" * 60)
         lines.append("")
 
-        # Check if this is a ComprehensiveAnalysisResult (new format)
-        is_comprehensive = hasattr(self.current_analysis, 'administrative_and_commercial_terms')
+        # Contract analysis (Sections I-VII)
+        if self.current_analysis:
+            is_comprehensive = hasattr(self.current_analysis, 'administrative_and_commercial_terms')
+            if is_comprehensive:
+                lines.extend(self._generate_comprehensive_report(self.current_analysis))
+            else:
+                lines.extend(self._generate_standard_report(self.current_analysis))
 
-        if is_comprehensive:
-            lines.extend(self._generate_comprehensive_report(self.current_analysis))
-        else:
-            lines.extend(self._generate_standard_report(self.current_analysis))
+        # Bid Review results
+        bid_lines = self._generate_bid_review_report()
+        if bid_lines:
+            lines.append("")
+            lines.extend(bid_lines)
+
+        # Specs tab results
+        specs_lines = self._generate_specs_report()
+        if specs_lines:
+            lines.append("")
+            lines.extend(specs_lines)
 
         return "\n".join(lines)
     
@@ -1147,6 +1167,65 @@ class CR2A_GUI(QMainWindow):
                     lines.append(f"  Summary: {risk_block.clause_summary}")
                 lines.append("")
 
+        return lines
+
+    def _generate_bid_review_report(self):
+        """Generate bid review section for the export report."""
+        if not self.bid_review_tab:
+            return []
+        items = self.bid_review_tab.item_results
+        if not items:
+            return []
+
+        from analyzer.bid_spec_patterns import BID_ITEM_MAP
+        from src.bid_review_tab import SECTION_DEFS
+
+        lines = []
+        lines.append("BID SPECIFICATION REVIEW CHECKLIST")
+        lines.append("=" * 60)
+        lines.append("")
+
+        for section_title, section_key, item_keys in SECTION_DEFS:
+            section_items = [(k, items[k]) for k in item_keys if k in items]
+            if not section_items:
+                continue
+            lines.append(f"  {section_title}")
+            lines.append(f"  {'-' * 40}")
+            for item_key, item in section_items:
+                _, display_name = BID_ITEM_MAP.get(item_key, ("", item_key))
+                value = item.value if hasattr(item, 'value') else str(item)
+                conf = item.confidence if hasattr(item, 'confidence') else ''
+                location = item.location if hasattr(item, 'location') else ''
+                notes = item.notes if hasattr(item, 'notes') else ''
+                line = f"    {display_name}: {value}"
+                if location:
+                    line += f"  [{location}]"
+                if conf and conf != 'not_found':
+                    line += f"  ({conf})"
+                lines.append(line)
+                if notes:
+                    lines.append(f"      Notes: {notes}")
+            lines.append("")
+
+        found = sum(1 for item in items.values() if hasattr(item, 'found') and item.found)
+        lines.append(f"  Total: {found}/{len(items)} items found")
+        lines.append("")
+        return lines
+
+    def _generate_specs_report(self):
+        """Generate specs section for the export report."""
+        if not self.specs_tab:
+            return []
+        specs_text = self.specs_tab.results_text.toPlainText()
+        if not specs_text or not specs_text.strip():
+            return []
+
+        lines = []
+        lines.append("TECHNICAL SPECIFICATIONS")
+        lines.append("=" * 60)
+        lines.append("")
+        lines.append(specs_text)
+        lines.append("")
         return lines
 
     def init_engines(self):
@@ -2058,10 +2137,56 @@ class CR2A_GUI(QMainWindow):
         # Build current analysis for chat/export
         self._rebuild_current_analysis()
 
+        # On first category completion, extract contract overview in background
+        if len(self.category_results) == 1 and not getattr(self, '_overview_extracted', False):
+            self._extract_overview_async()
+
         self.statusBar().showMessage(f"Analyzed: {display_name}")
         self.upload_status.setText(
             f"Analyzed: {display_name} ({len(self.category_results)} categories done)"
         )
+
+    def _extract_overview_async(self):
+        """Extract contract overview in background thread (AI call)."""
+        if not self.analysis_engine or not self.contract_text:
+            return
+        # Prevent concurrent AI access
+        if self.active_category_thread and self.active_category_thread.isRunning():
+            return
+        bid_thread = getattr(self.bid_review_tab, '_current_thread', None) if self.bid_review_tab else None
+        if bid_thread and bid_thread.isRunning():
+            return
+
+        from PyQt5.QtCore import QThread, pyqtSignal
+
+        class OverviewThread(QThread):
+            finished = pyqtSignal(object)
+            def __init__(self, engine, text):
+                super().__init__()
+                self.engine = engine
+                self.text = text
+            def run(self):
+                try:
+                    overview = self.engine._extract_contract_overview(self.text)
+                    self.finished.emit(overview)
+                except Exception as e:
+                    logger.warning("Overview extraction failed: %s", e)
+                    self.finished.emit(None)
+
+        def on_overview_done(overview):
+            self._overview_extracted = True
+            if overview:
+                self.structured_view._fill_contract_overview(overview)
+                # Rebuild analysis with overview
+                self._rebuild_current_analysis(include_overview=False)
+                if self.current_analysis and hasattr(self.current_analysis, 'contract_overview'):
+                    from src.analysis_models import ContractOverview
+                    self.current_analysis.contract_overview = ContractOverview.from_dict(overview) if isinstance(overview, dict) else overview
+                logger.info("Contract overview displayed")
+
+        self._overview_thread = OverviewThread(self.analysis_engine, self.contract_text)
+        self._overview_thread.finished.connect(on_overview_done)
+        self._overview_thread.start()
 
     def on_category_not_found(self, cat_key, prompt='', response=''):
         """Handle category not found by AI."""
