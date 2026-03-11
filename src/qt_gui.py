@@ -211,6 +211,7 @@ class PrepareFolderThread(QThread):
             }
 
             total = len(self.files)
+            skipped_files = []
             for idx, file_path in enumerate(self.files):
                 filename = file_path.name
                 pct = int(((idx) / total) * 60)  # 0-60% for extraction
@@ -232,11 +233,24 @@ class PrepareFolderThread(QThread):
                             'path': str(file_path),
                             'size': file_info.get('file_size', 0),
                         })
+                    else:
+                        skipped_files.append(filename)
+                        logger.warning(f"No text extracted from {filename} (empty)")
                 except Exception as e:
+                    skipped_files.append(filename)
                     logger.warning(f"Failed to extract text from {filename}: {e}")
 
+            if skipped_files:
+                logger.info(f"Skipped {len(skipped_files)} files (scanned/image PDFs): {skipped_files}")
+                skip_msg = f"Skipped {len(skipped_files)} image-based file(s): {', '.join(skipped_files[:3])}"
+                if len(skipped_files) > 3:
+                    skip_msg += f" (+{len(skipped_files)-3} more)"
+                self.progress.emit(skip_msg, 60)
+
             if not combined_text_parts:
-                self.error.emit("No text could be extracted from any file in the folder")
+                self.error.emit("No text could be extracted from any file in the folder.\n"
+                               "The files may be scanned/image PDFs (plans, drawings).\n"
+                               "Try loading text-based documents (ITB, specs, addenda).")
                 return
 
             contract_text = "\n".join(combined_text_parts)
@@ -1009,7 +1023,7 @@ class CR2A_GUI(QMainWindow):
         lines.append("=" * 60)
         lines.append("")
 
-        # Contract analysis (Sections I-VII)
+        # Contract analysis (Sections II-V)
         if self.current_analysis:
             is_comprehensive = hasattr(self.current_analysis, 'administrative_and_commercial_terms')
             if is_comprehensive:
@@ -1078,22 +1092,6 @@ class CR2A_GUI(QMainWindow):
         """Generate report for ComprehensiveAnalysisResult."""
         lines = []
 
-        # Contract Overview
-        if result.contract_overview:
-            overview = result.contract_overview
-            lines.append("CONTRACT OVERVIEW")
-            lines.append("-" * 40)
-            lines.append(f"Project Title: {overview.project_title}")
-            lines.append(f"Solicitation No: {overview.solicitation_no}")
-            lines.append(f"Owner: {overview.owner}")
-            lines.append(f"Contractor: {overview.contractor}")
-            lines.append(f"Scope: {overview.scope}")
-            lines.append(f"Risk Level: {overview.general_risk_level}")
-            lines.append(f"Bid Model: {overview.bid_model}")
-            if overview.notes:
-                lines.append(f"Notes: {overview.notes}")
-            lines.append("")
-
         # Metadata
         if result.metadata:
             lines.append("DOCUMENT INFORMATION")
@@ -1110,7 +1108,6 @@ class CR2A_GUI(QMainWindow):
             'technical_and_performance_terms': 'SECTION III: TECHNICAL & PERFORMANCE TERMS',
             'legal_risk_and_enforcement': 'SECTION IV: LEGAL RISK & ENFORCEMENT',
             'regulatory_and_compliance_terms': 'SECTION V: REGULATORY & COMPLIANCE TERMS',
-            'data_technology_and_deliverables': 'SECTION VI: DATA, TECHNOLOGY & DELIVERABLES',
         }
 
         sections = [
@@ -1118,7 +1115,6 @@ class CR2A_GUI(QMainWindow):
             ('technical_and_performance_terms', result.technical_and_performance_terms),
             ('legal_risk_and_enforcement', result.legal_risk_and_enforcement),
             ('regulatory_and_compliance_terms', result.regulatory_and_compliance_terms),
-            ('data_technology_and_deliverables', result.data_technology_and_deliverables),
         ]
 
         for section_name, section in sections:
@@ -1152,20 +1148,6 @@ class CR2A_GUI(QMainWindow):
                 if clause_block.clause_summary:
                     lines.append(f"  Summary: {clause_block.clause_summary}")
 
-                lines.append("")
-
-        # Supplemental Operational Risks
-        if result.supplemental_operational_risks:
-            lines.append(f"SECTION VII: SUPPLEMENTAL OPERATIONAL RISKS ({len(result.supplemental_operational_risks)} items)")
-            lines.append("=" * 60)
-            lines.append("")
-            for i, risk_block in enumerate(result.supplemental_operational_risks, 1):
-                lines.append(f"  Risk #{i}")
-                lines.append(f"  {'-' * 40}")
-                if risk_block.clause_location:
-                    lines.append(f"  Location: {risk_block.clause_location}")
-                if risk_block.clause_summary:
-                    lines.append(f"  Summary: {risk_block.clause_summary}")
                 lines.append("")
 
         return lines
@@ -1255,8 +1237,10 @@ class CR2A_GUI(QMainWindow):
 
             self.statusBar().showMessage(f"Initializing local AI ({model_name})...")
 
+            gpu_mode = self.config_manager.get_gpu_mode() if self.config_manager else "auto"
             self.analysis_engine = AnalysisEngine(
-                local_model_name=model_name
+                local_model_name=model_name,
+                gpu_mode=gpu_mode
             )
 
             from src.document_retriever import DocumentRetriever
@@ -1289,7 +1273,7 @@ class CR2A_GUI(QMainWindow):
             self,
             "Select Contract File",
             "",
-            "All Supported (*.pdf *.docx *.txt);;PDF Files (*.pdf);;Word Files (*.docx);;Text Files (*.txt)"
+            "All Supported (*.pdf *.docx *.txt *.xlsx);;PDF Files (*.pdf);;Word Files (*.docx);;Text Files (*.txt);;Excel Files (*.xlsx)"
         )
 
         if filename:
@@ -1323,7 +1307,7 @@ class CR2A_GUI(QMainWindow):
         folder = Path(folder_path)
 
         # Find all supported files in folder
-        supported_exts = ['.pdf', '.docx', '.txt']
+        supported_exts = ['.pdf', '.docx', '.txt', '.xlsx']
         files = []
         for ext in supported_exts:
             files.extend(folder.glob(f"*{ext}"))
@@ -1333,7 +1317,7 @@ class CR2A_GUI(QMainWindow):
                 self,
                 "No Files Found",
                 f"No supported contract files found in:\n{folder_path}\n\n"
-                f"Supported formats: PDF, DOCX, TXT"
+                f"Supported formats: PDF, DOCX, TXT, XLSX"
             )
             return
 
@@ -1867,30 +1851,13 @@ class CR2A_GUI(QMainWindow):
         from src.differential_storage import Clause
         
         clauses = []
-        
-        # Extract contract overview as a special clause
-        if hasattr(analysis, 'contract_overview') and analysis.contract_overview:
-            overview_dict = analysis.contract_overview.to_dict() if hasattr(analysis.contract_overview, 'to_dict') else analysis.contract_overview
-            clause = Clause(
-                clause_id=str(uuid.uuid4()),
-                contract_id=contract_id,
-                clause_version=version,
-                clause_identifier="contract_overview",
-                content=str(overview_dict),
-                metadata=overview_dict,
-                created_at=timestamp,
-                is_deleted=False,
-                deleted_at=None
-            )
-            clauses.append(clause)
-        
+
         # Extract clauses from each section
         sections = [
             'administrative_and_commercial_terms',
             'technical_and_performance_terms',
             'legal_risk_and_enforcement',
             'regulatory_and_compliance_terms',
-            'data_technology_and_deliverables'
         ]
         
         for section_name in sections:
@@ -2032,16 +1999,17 @@ class CR2A_GUI(QMainWindow):
         # Enable Bid Review tab now that contract is loaded
         if self.bid_review_tab:
             # Prepare bid engine so per-item Analyze buttons work immediately
-            if self.analysis_engine and self.analysis_engine.ai_client:
-                from src.bid_review_engine import BidReviewEngine
-                bid_engine = BidReviewEngine(self.analysis_engine.ai_client)
-                bid_prepared = bid_engine.prepare_bid_review(
-                    contract_text=self.contract_text,
-                    file_path=self.file_label.text() if hasattr(self, 'file_label') else "",
-                    page_count=getattr(self, '_page_count', 0),
-                    file_size_bytes=getattr(self, '_file_size_bytes', 0),
-                )
-                self.bid_review_tab.set_engine_and_prepared(bid_engine, bid_prepared)
+            # Works with or without AI client (regex-only mode if AI unavailable)
+            from src.bid_review_engine import BidReviewEngine
+            ai_client = self.analysis_engine.ai_client if self.analysis_engine else None
+            bid_engine = BidReviewEngine(ai_client)
+            bid_prepared = bid_engine.prepare_bid_review(
+                contract_text=self.contract_text,
+                file_path=self.file_label.text() if hasattr(self, 'file_label') else "",
+                page_count=getattr(self, '_page_count', 0),
+                file_size_bytes=getattr(self, '_file_size_bytes', 0),
+            )
+            self.bid_review_tab.set_engine_and_prepared(bid_engine, bid_prepared)
             self.bid_review_tab.set_contract_loaded(True)
 
         # Set up the structured view for per-item analysis
@@ -2148,46 +2116,8 @@ class CR2A_GUI(QMainWindow):
         )
 
     def _extract_overview_async(self):
-        """Extract contract overview in background thread (AI call)."""
-        if not self.analysis_engine or not self.contract_text:
-            return
-        # Prevent concurrent AI access
-        if self.active_category_thread and self.active_category_thread.isRunning():
-            return
-        bid_thread = getattr(self.bid_review_tab, '_current_thread', None) if self.bid_review_tab else None
-        if bid_thread and bid_thread.isRunning():
-            return
-
-        from PyQt5.QtCore import QThread, pyqtSignal
-
-        class OverviewThread(QThread):
-            finished = pyqtSignal(object)
-            def __init__(self, engine, text):
-                super().__init__()
-                self.engine = engine
-                self.text = text
-            def run(self):
-                try:
-                    overview = self.engine._extract_contract_overview(self.text)
-                    self.finished.emit(overview)
-                except Exception as e:
-                    logger.warning("Overview extraction failed: %s", e)
-                    self.finished.emit(None)
-
-        def on_overview_done(overview):
-            self._overview_extracted = True
-            if overview:
-                self.structured_view._fill_contract_overview(overview)
-                # Rebuild analysis with overview
-                self._rebuild_current_analysis(include_overview=False)
-                if self.current_analysis and hasattr(self.current_analysis, 'contract_overview'):
-                    from src.analysis_models import ContractOverview
-                    self.current_analysis.contract_overview = ContractOverview.from_dict(overview) if isinstance(overview, dict) else overview
-                logger.info("Contract overview displayed")
-
-        self._overview_thread = OverviewThread(self.analysis_engine, self.contract_text)
-        self._overview_thread.finished.connect(on_overview_done)
-        self._overview_thread.start()
+        """Contract overview extraction removed — section no longer displayed."""
+        pass
 
     def on_category_not_found(self, cat_key, prompt='', response=''):
         """Handle category not found by AI."""
@@ -2229,6 +2159,16 @@ class CR2A_GUI(QMainWindow):
             QMessageBox.warning(self, "Error", "Analysis engine not initialized.")
             return
 
+        # Prevent concurrent model access (llama_cpp not thread-safe)
+        bid_thread = getattr(self.bid_review_tab, '_current_thread', None) if self.bid_review_tab else None
+        if bid_thread and bid_thread.isRunning():
+            QMessageBox.warning(
+                self, "Please Wait",
+                "A bid review analysis is in progress.\n"
+                "Please wait for it to finish before analyzing contract categories."
+            )
+            return
+
         # Disable buttons during analysis
         self.analyze_all_btn.setEnabled(False)
         self.load_btn.setEnabled(False)
@@ -2263,6 +2203,10 @@ class CR2A_GUI(QMainWindow):
 
         # Build and save the full result (safe to extract overview now — no AI thread running)
         self._rebuild_current_analysis(include_overview=True)
+
+        # Extract overview now that all category threads are done (safe for llama_cpp)
+        if not getattr(self, '_overview_extracted', False):
+            self._extract_overview_async()
 
         # Auto-save
         if self.current_analysis:
@@ -2301,6 +2245,7 @@ class CR2A_GUI(QMainWindow):
 
     def on_bid_review_analysis_requested(self):
         """Handle bid review analysis request from Bid Review tab."""
+        logger.info("Bid review analysis requested")
         if not self.contract_text:
             QMessageBox.warning(
                 self, "No Contract",
@@ -2308,15 +2253,15 @@ class CR2A_GUI(QMainWindow):
             )
             return
 
-        if not self.analysis_engine or not self.analysis_engine.ai_client:
-            QMessageBox.warning(
-                self, "Error",
-                "Analysis engine or AI client not initialized."
-            )
-            return
+        # Allow bid review even without AI — regex-only mode
+        ai_client = None
+        if self.analysis_engine and self.analysis_engine.ai_client:
+            ai_client = self.analysis_engine.ai_client
+        else:
+            logger.warning("AI client not available — bid review will use regex-only mode")
 
         # Prevent concurrent model access (llama_cpp not thread-safe)
-        if self.active_category_thread and self.active_category_thread.isRunning():
+        if ai_client and self.active_category_thread and self.active_category_thread.isRunning():
             QMessageBox.warning(
                 self, "Please Wait",
                 "A contract analysis is in progress on the Contract tab.\n"
@@ -2329,7 +2274,7 @@ class CR2A_GUI(QMainWindow):
         prepared = self.bid_review_tab.prepared
         if not bid_engine or not prepared:
             from src.bid_review_engine import BidReviewEngine
-            bid_engine = BidReviewEngine(self.analysis_engine.ai_client)
+            bid_engine = BidReviewEngine(ai_client)
             prepared = bid_engine.prepare_bid_review(
                 contract_text=self.contract_text,
                 file_path=self.file_label.text() if hasattr(self, 'file_label') else "",
@@ -2338,6 +2283,7 @@ class CR2A_GUI(QMainWindow):
             )
 
         # Start analysis on the tab
+        logger.info("Starting bid review analysis (AI available: %s)", ai_client is not None)
         self.bid_review_tab.start_analysis(bid_engine, prepared)
 
     def _on_bid_item_session_save(self, item_key, display_name, item):
@@ -2478,17 +2424,10 @@ class CR2A_GUI(QMainWindow):
             return
 
         try:
-            overview = None
-            if include_overview and self.contract_text and self.analysis_engine:
-                try:
-                    overview = self.analysis_engine._extract_contract_overview(self.contract_text)
-                except Exception as e:
-                    logger.warning(f"Failed to extract contract overview: {e}")
-
             self.current_analysis = self.analysis_engine.build_comprehensive_result(
                 self.prepared_contract,
                 self.category_results,
-                overview=overview
+                overview=None
             )
         except Exception as e:
             logger.error(f"Failed to build comprehensive result: {e}")
@@ -2780,6 +2719,18 @@ class SettingsDialog(QDialog):
         )
         model_form.addRow("Model:", self.model_combo)
 
+        # GPU mode toggle
+        self.gpu_mode_combo = QComboBox()
+        self.gpu_mode_combo.addItem("Auto-detect", "auto")
+        self.gpu_mode_combo.addItem("CPU Only", "cpu")
+        self.gpu_mode_combo.addItem("Force GPU", "gpu")
+        self.gpu_mode_combo.setToolTip(
+            "Auto-detect: Use GPU if available, fall back to CPU\n"
+            "CPU Only: Force CPU-only inference (no GPU)\n"
+            "Force GPU: Always use GPU (fails if no GPU available)"
+        )
+        model_form.addRow("Inference Device:", self.gpu_mode_combo)
+
         # CPU threads
         self.threads_spinner = QSpinBox()
         self.threads_spinner.setRange(1, 32)
@@ -2819,6 +2770,11 @@ class SettingsDialog(QDialog):
         if index >= 0:
             self.model_combo.setCurrentIndex(index)
 
+        gpu_mode = self.config_manager.get_gpu_mode()
+        gpu_index = self.gpu_mode_combo.findData(gpu_mode)
+        if gpu_index >= 0:
+            self.gpu_mode_combo.setCurrentIndex(gpu_index)
+
         threads = self.config_manager.get_local_model_threads()
         if threads is not None:
             self.threads_spinner.setValue(threads)
@@ -2839,6 +2795,9 @@ class SettingsDialog(QDialog):
         try:
             model_name = self.model_combo.currentData()
             self.config_manager.set_local_model_name(model_name)
+
+            gpu_mode = self.gpu_mode_combo.currentData()
+            self.config_manager.set_gpu_mode(gpu_mode)
 
             threads = self.threads_spinner.value()
             if threads == 0:

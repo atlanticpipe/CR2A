@@ -160,6 +160,7 @@ GUI_CONFIG = BuildConfig(
         ("assets", "assets"),
         ("config", "config"),
         ("build_tools/poppler", "poppler"),  # Poppler binaries for OCR (pdf2image)
+        ("build_tools/tesseract", "tesseract"),  # Tesseract OCR engine
     ],
     hidden_imports=[
         # Core dependencies
@@ -167,6 +168,7 @@ GUI_CONFIG = BuildConfig(
         "tkinter",
         "PyPDF2",
         "docx",
+        "openpyxl",
         "cryptography",
         # PyQt5 and Qt submodules (critical for GUI)
         "PyQt5",
@@ -264,6 +266,7 @@ GUI_FULL_CONFIG = BuildConfig(
         ("config", "config"),
         ("models", "models"),  # Bundle Llama model files
         ("build_tools/poppler", "poppler"),  # Poppler binaries for OCR (pdf2image)
+        ("build_tools/tesseract", "tesseract"),  # Tesseract OCR engine
     ],
     hidden_imports=[
         # Core dependencies
@@ -271,6 +274,7 @@ GUI_FULL_CONFIG = BuildConfig(
         "tkinter",
         "PyPDF2",
         "docx",
+        "openpyxl",
         "cryptography",
         # PyQt5 and Qt submodules (critical for GUI)
         "PyQt5",

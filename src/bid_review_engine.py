@@ -17,6 +17,7 @@ from analyzer.bid_spec_patterns import (
     BID_ITEM_DESCRIPTIONS,
     BID_ITEM_MAP,
     BID_SPEC_PATTERNS,
+    SEARCH_KEYWORDS,
     extract_bid_spec_items,
 )
 from src.bid_review_models import (
@@ -36,7 +37,7 @@ from src.analysis_models import ContractMetadata
 logger = logging.getLogger(__name__)
 
 # Maximum characters of context to send per item to AI
-MAX_CONTEXT_PER_ITEM = 3000
+MAX_CONTEXT_PER_ITEM = 8000
 # Number of items to batch per AI call
 ITEMS_PER_BATCH = 6
 
@@ -135,7 +136,7 @@ class BidReviewEngine:
         section_key, display_name = BID_ITEM_MAP[item_key]
         description = BID_ITEM_DESCRIPTIONS.get(item_key, display_name)
 
-        # Gather context: regex matches + keyword search fallback
+        # Gather context: regex matches + keyword search fallback + section fallback
         context_parts = []
         regex_matches = prepared.regex_results.get(item_key, [])
 
@@ -149,6 +150,12 @@ class BidReviewEngine:
             )
 
         if not context_parts:
+            # Last resort: send a relevant section of the document based on item type
+            context_parts = self._section_fallback(
+                prepared.contract_text, section_key
+            )
+
+        if not context_parts:
             # No context found at all
             return section_key, display_name, ChecklistItem(
                 value="NOT FOUND",
@@ -156,40 +163,61 @@ class BidReviewEngine:
                 notes="No relevant text found in document",
             )
 
-        # If regex captured a clean value, use it directly (deterministic, no AI needed)
+        # Pass any regex-captured value as a hint to AI (never use directly —
+        # raw captures often grab section numbers or unrelated values)
+        regex_hint = None
         if regex_matches and regex_matches[0].get("captured_value"):
             captured = regex_matches[0]["captured_value"].strip()
             if captured and len(captured) > 1:
-                logger.info("Using regex-captured value for %s: %s", item_key, captured[:80])
-                return section_key, display_name, ChecklistItem(
-                    value=captured,
-                    location="",
-                    confidence="high",
-                    notes=f"Pattern match ({len(regex_matches)} match{'es' if len(regex_matches) > 1 else ''})",
+                regex_hint = captured
+
+        # If AI client available, use AI to extract and verify; otherwise regex-only
+        if self.ai_client:
+            context_text = self._merge_contexts(context_parts, MAX_CONTEXT_PER_ITEM)
+
+            user_msg = self._build_single_item_prompt(
+                display_name, description, context_text, regex_hint
+            )
+
+            if progress_callback:
+                progress_callback(f"AI extracting: {display_name}...", 50)
+
+            try:
+                response = self.ai_client.generate(
+                    self.SYSTEM_MSG, user_msg, max_tokens=500
                 )
-
-        # No clean captured value — use AI to extract from context
-        context_text = self._merge_contexts(context_parts, MAX_CONTEXT_PER_ITEM)
-
-        user_msg = self._build_single_item_prompt(
-            display_name, description, context_text, None
-        )
-
-        if progress_callback:
-            progress_callback(f"AI extracting: {display_name}...", 50)
-
-        try:
-            response = self.ai_client.generate(
-                self.SYSTEM_MSG, user_msg, max_tokens=500
-            )
-            item = self._parse_single_response(response, regex_matches)
-        except Exception as e:
-            logger.error("AI error for %s: %s", item_key, e)
-            item = ChecklistItem(
-                value="ERROR",
-                confidence="not_found",
-                notes=str(e),
-            )
+                item = self._parse_single_response(response, regex_matches)
+            except Exception as e:
+                logger.error("AI error for %s: %s", item_key, e)
+                item = ChecklistItem(
+                    value="ERROR",
+                    confidence="not_found",
+                    notes=str(e),
+                )
+        else:
+            # Regex-only mode: use captured value or context snippet
+            if regex_hint:
+                item = ChecklistItem(
+                    value=regex_hint,
+                    confidence="medium",
+                    location=regex_matches[0].get("location", "") if regex_matches else "",
+                    notes="Extracted by regex (no AI verification)",
+                )
+            elif context_parts:
+                # Use first context snippet as value
+                snippet = context_parts[0][:200].strip()
+                item = ChecklistItem(
+                    value=snippet,
+                    confidence="low",
+                    location=regex_matches[0].get("location", "") if regex_matches else "",
+                    notes="Context found by regex (no AI verification)",
+                )
+            else:
+                item = ChecklistItem(
+                    value="NOT FOUND",
+                    confidence="not_found",
+                    notes="No AI available and no regex match",
+                )
 
         return section_key, display_name, item
 
@@ -275,28 +303,89 @@ class BidReviewEngine:
     def _keyword_search(
         self, text: str, item_key: str, display_name: str, max_snippets: int = 3
     ) -> List[str]:
-        """Simple keyword search fallback when regex finds nothing."""
-        keywords = display_name.lower().split()
-        # Add some domain-specific keywords from item_key
-        keywords.extend(item_key.replace("_", " ").split())
-        keywords = list(set(keywords))
+        """Phrase-based keyword search fallback when regex finds nothing.
+
+        Uses SEARCH_KEYWORDS for domain-specific phrases first, then falls
+        back to splitting the display name into individual words.
+        """
+        # Use domain-specific phrases first (higher quality matches)
+        phrase_keywords = SEARCH_KEYWORDS.get(item_key, [])
+        # Fallback: words from display name and item_key
+        word_keywords = list(set(
+            display_name.lower().split() + item_key.replace("_", " ").split()
+        ))
 
         snippets = []
+        seen_positions = set()  # Avoid overlapping snippets
         text_lower = text.lower()
-        for kw in keywords:
-            if len(kw) < 3:
-                continue
+        context_radius = 800  # chars around each match
+
+        # Search phrases first (more relevant matches)
+        for kw in phrase_keywords:
+            kw_lower = kw.lower()
             idx = 0
-            while idx < len(text_lower) and len(snippets) < max_snippets * 2:
-                pos = text_lower.find(kw, idx)
+            while idx < len(text_lower) and len(snippets) < max_snippets * 3:
+                pos = text_lower.find(kw_lower, idx)
                 if pos == -1:
                     break
-                start = max(0, pos - 300)
-                end = min(len(text), pos + 300)
-                snippets.append(text[start:end])
-                idx = pos + len(kw)
+                # Skip if too close to an already-captured position
+                bucket = pos // 400
+                if bucket not in seen_positions:
+                    seen_positions.add(bucket)
+                    start = max(0, pos - context_radius)
+                    end = min(len(text), pos + context_radius)
+                    snippets.append(text[start:end])
+                idx = pos + len(kw_lower)
+
+        # If phrases didn't find enough, try individual words
+        if len(snippets) < max_snippets:
+            for kw in word_keywords:
+                if len(kw) < 4:
+                    continue
+                idx = 0
+                while idx < len(text_lower) and len(snippets) < max_snippets * 3:
+                    pos = text_lower.find(kw, idx)
+                    if pos == -1:
+                        break
+                    bucket = pos // 400
+                    if bucket not in seen_positions:
+                        seen_positions.add(bucket)
+                        start = max(0, pos - context_radius)
+                        end = min(len(text), pos + context_radius)
+                        snippets.append(text[start:end])
+                    idx = pos + len(kw)
 
         return snippets[:max_snippets]
+
+    def _section_fallback(
+        self, text: str, section_key: str, max_chars: int = 6000
+    ) -> List[str]:
+        """Provide a broad document section as fallback context.
+
+        For standard contract items, the front of the document is most
+        relevant (ITB terms, general conditions).  For technical items
+        (CIPP, manhole, cleaning), the latter portion typically has specs.
+        """
+        text_len = len(text)
+        if text_len < 500:
+            return []
+
+        # Determine which portion of the document to sample
+        if section_key in ("standard_contract_items",):
+            # Front matter — first 30% of document
+            end = min(text_len, int(text_len * 0.30))
+            chunk = text[:min(end, max_chars)]
+        elif section_key in ("site_conditions",):
+            # Middle of document
+            mid = text_len // 2
+            start = max(0, mid - max_chars // 2)
+            chunk = text[start:start + max_chars]
+        else:
+            # Technical specs — latter 60% of document
+            start = max(0, int(text_len * 0.40))
+            chunk = text[start:start + max_chars]
+
+        return [chunk] if chunk.strip() else []
 
     def _merge_contexts(self, parts: List[str], max_chars: int) -> str:
         """Merge context snippets, removing duplicates, respecting max length."""

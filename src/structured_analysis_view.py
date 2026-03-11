@@ -133,13 +133,10 @@ class StructuredAnalysisView(QWidget):
 
     # Section display names and icons
     SECTION_INFO = {
-        "contract_overview": ("📄 Contract Overview", "#e3f2fd"),
         "administrative_and_commercial_terms": ("💼 Administrative & Commercial Terms", "#fff3e0"),
         "technical_and_performance_terms": ("⚙️ Technical & Performance Terms", "#f3e5f5"),
         "legal_risk_and_enforcement": ("⚖️ Legal, Risk & Enforcement", "#ffebee"),
         "regulatory_and_compliance_terms": ("📋 Regulatory & Compliance Terms", "#e8f5e9"),
-        "data_technology_and_deliverables": ("💾 Data, Technology & Deliverables", "#e0f2f1"),
-        "supplemental_operational_risks": ("⚠️ Supplemental Operational Risks", "#fff9c4"),
     }
     
     def __init__(self, parent=None):
@@ -202,35 +199,14 @@ class StructuredAnalysisView(QWidget):
         
         logger.info("Building template with all sections and categories")
         
-        # Create sections in order (excluding contract_overview, supplemental_operational_risks, and final_analysis for now)
+        # Create sections in order
         clause_sections = [
             "administrative_and_commercial_terms",
             "technical_and_performance_terms",
             "legal_risk_and_enforcement",
             "regulatory_and_compliance_terms",
-            "data_technology_and_deliverables"
         ]
-        
-        # Create contract overview section (special handling - no categories)
-        section_key = "contract_overview"
-        if section_key in self.SECTION_INFO:
-            title, bg_color = self.SECTION_INFO[section_key]
-            section = CollapsibleSection(title)
-            
-            # Create empty content widget for overview
-            content = QWidget()
-            content_layout = QVBoxLayout(content)
-            content_layout.setSpacing(8)
-            content_layout.setContentsMargins(0, 0, 0, 0)
-            
-            # Store reference for later filling
-            section.content_widget_layout = content_layout
-            section.set_content(content)
-            
-            self.sections[section_key] = section
-            self.content_layout.addWidget(section)
-            logger.debug(f"Created section: {section_key}")
-        
+
         # Create clause sections with all categories
         for section_key in clause_sections:
             if section_key not in self.SECTION_INFO:
@@ -261,28 +237,6 @@ class StructuredAnalysisView(QWidget):
             self.content_layout.addWidget(section)
             logger.debug(f"Created section: {section_key} with {len(categories)} category boxes")
         
-        # Create supplemental operational risks section (special handling - list of risks)
-        section_key = "supplemental_operational_risks"
-        if section_key in self.SECTION_INFO:
-            title, bg_color = self.SECTION_INFO[section_key]
-            section = CollapsibleSection(title)
-            
-            # Create empty content widget for risks
-            content = QWidget()
-            content_layout = QVBoxLayout(content)
-            content_layout.setSpacing(5)
-            content_layout.setContentsMargins(0, 0, 0, 0)
-            
-            # Store reference for later filling
-            section.content_widget_layout = content_layout
-            section.set_content(content)
-            
-            self.sections[section_key] = section
-            self.content_layout.addWidget(section)
-            logger.debug(f"Created section: {section_key}")
-        
-        # Final analysis section removed per user request
-        
         # Add stretch at the end
         self.content_layout.addStretch()
         
@@ -308,8 +262,6 @@ class StructuredAnalysisView(QWidget):
             return SchemaCompleter.LEGAL_CATEGORIES
         elif section_key == "regulatory_and_compliance_terms":
             return SchemaCompleter.REGULATORY_CATEGORIES
-        elif section_key == "data_technology_and_deliverables":
-            return SchemaCompleter.DATA_TECH_CATEGORIES
         else:
             return []
     
@@ -400,8 +352,7 @@ class StructuredAnalysisView(QWidget):
         
         # Fill category boxes with data
         for section_key in ["administrative_and_commercial_terms", "technical_and_performance_terms",
-                           "legal_risk_and_enforcement", "regulatory_and_compliance_terms",
-                           "data_technology_and_deliverables"]:
+                           "legal_risk_and_enforcement", "regulatory_and_compliance_terms"]:
             if section_key in result_dict:
                 section_data = result_dict[section_key]
                 if isinstance(section_data, dict):
@@ -410,11 +361,6 @@ class StructuredAnalysisView(QWidget):
                         if box_key in self.category_boxes:
                             self._fill_category_box(self.category_boxes[box_key], clause_data)
                             logger.debug(f"Filled box: {box_key}")
-        
-        # Handle special sections (contract_overview, supplemental_operational_risks, final_analysis)
-        self._fill_contract_overview(result_dict.get('contract_overview'))
-        self._fill_supplemental_risks(result_dict.get('supplemental_operational_risks'))
-        self._fill_final_analysis(result_dict.get('final_analysis'))
         
         # Auto-minimize empty boxes
         self._auto_minimize_empty_boxes()
@@ -662,29 +608,17 @@ class StructuredAnalysisView(QWidget):
         result_dict = {}
         
         # Add each section if it exists and is not None
-        if hasattr(result, 'contract_overview') and result.contract_overview:
-            result_dict['contract_overview'] = result.contract_overview.to_dict() if hasattr(result.contract_overview, 'to_dict') else result.contract_overview
-        
         if hasattr(result, 'administrative_and_commercial_terms') and result.administrative_and_commercial_terms:
             result_dict['administrative_and_commercial_terms'] = result.administrative_and_commercial_terms.to_dict() if hasattr(result.administrative_and_commercial_terms, 'to_dict') else result.administrative_and_commercial_terms
-        
+
         if hasattr(result, 'technical_and_performance_terms') and result.technical_and_performance_terms:
             result_dict['technical_and_performance_terms'] = result.technical_and_performance_terms.to_dict() if hasattr(result.technical_and_performance_terms, 'to_dict') else result.technical_and_performance_terms
-        
+
         if hasattr(result, 'legal_risk_and_enforcement') and result.legal_risk_and_enforcement:
             result_dict['legal_risk_and_enforcement'] = result.legal_risk_and_enforcement.to_dict() if hasattr(result.legal_risk_and_enforcement, 'to_dict') else result.legal_risk_and_enforcement
-        
+
         if hasattr(result, 'regulatory_and_compliance_terms') and result.regulatory_and_compliance_terms:
             result_dict['regulatory_and_compliance_terms'] = result.regulatory_and_compliance_terms.to_dict() if hasattr(result.regulatory_and_compliance_terms, 'to_dict') else result.regulatory_and_compliance_terms
-        
-        if hasattr(result, 'data_technology_and_deliverables') and result.data_technology_and_deliverables:
-            result_dict['data_technology_and_deliverables'] = result.data_technology_and_deliverables.to_dict() if hasattr(result.data_technology_and_deliverables, 'to_dict') else result.data_technology_and_deliverables
-        
-        if hasattr(result, 'supplemental_operational_risks') and result.supplemental_operational_risks:
-            result_dict['supplemental_operational_risks'] = [r.to_dict() if hasattr(r, 'to_dict') else r for r in result.supplemental_operational_risks]
-        
-        if hasattr(result, 'final_analysis') and result.final_analysis:
-            result_dict['final_analysis'] = result.final_analysis
         
         return result_dict
     
@@ -804,11 +738,7 @@ class StructuredAnalysisView(QWidget):
         section = CollapsibleSection(title)
         
         # Create content based on section type
-        if section_key == "contract_overview":
-            content = self._create_overview_content(data)
-        elif section_key == "final_analysis":
-            content = self._create_final_analysis_content(data)
-        elif isinstance(data, dict):
+        if isinstance(data, dict):
             content = self._create_clause_section_content(data)
         else:
             content = self._create_simple_content(data)
@@ -1055,28 +985,17 @@ class StructuredAnalysisView(QWidget):
     
     def collapse_empty_sections(self):
         """Collapse sections that have no meaningful content."""
-        # For special sections (contract_overview, supplemental_operational_risks, final_analysis)
-        # check if they have any widgets in their content layout
-        special_sections = ['contract_overview', 'supplemental_operational_risks', 'final_analysis']
-        
         for section_key, section in self.sections.items():
-            if section_key in special_sections:
-                # Check if the section has any content widgets
-                if hasattr(section, 'content_widget_layout'):
-                    if section.content_widget_layout.count() == 0:
-                        section.collapse()
-                    # If it has content, leave it as is (don't force expand or collapse)
-            else:
-                # For clause sections, check if all category boxes are empty
-                section_empty = True
-                for box_key, box in self.category_boxes.items():
-                    if box_key.startswith(f"{section_key}."):
-                        if not box.is_empty:
-                            section_empty = False
-                            break
-                
-                if section_empty:
-                    section.collapse()
+            # For clause sections, check if all category boxes are empty
+            section_empty = True
+            for box_key, box in self.category_boxes.items():
+                if box_key.startswith(f"{section_key}."):
+                    if not box.is_empty:
+                        section_empty = False
+                        break
+
+            if section_empty:
+                section.collapse()
     
     def _expand_subsections(self, parent_widget: QWidget):
         """Recursively expand all subsections within a widget."""
@@ -1084,22 +1003,7 @@ class StructuredAnalysisView(QWidget):
             child.expand()
     
     def _is_section_empty(self, section_key: str) -> bool:
-        """
-        Check if a section has meaningful content.
-        
-        This method is deprecated in favor of the template-based approach
-        but kept for backward compatibility.
-        """
-        # For special sections, check if they have content widgets
-        special_sections = ['contract_overview', 'supplemental_operational_risks', 'final_analysis']
-        
-        if section_key in special_sections:
-            section = self.sections.get(section_key)
-            if section and hasattr(section, 'content_widget_layout'):
-                return section.content_widget_layout.count() == 0
-            return True
-        
-        # For clause sections, check if all category boxes are empty
+        """Check if a section has meaningful content."""
         for box_key, box in self.category_boxes.items():
             if box_key.startswith(f"{section_key}."):
                 if not box.is_empty:

@@ -17,6 +17,13 @@ except ImportError:
     from PyPDF2 import PdfReader
 from docx import Document
 
+# Excel support
+try:
+    import openpyxl
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+
 # Optional OCR support
 try:
     import pytesseract
@@ -41,7 +48,7 @@ class ContractUploader:
     """
     
     # Supported file extensions
-    SUPPORTED_FORMATS = {'.pdf', '.docx', '.txt'}
+    SUPPORTED_FORMATS = {'.pdf', '.docx', '.txt', '.xlsx'}
     
     def __init__(self, max_file_size: Optional[int] = None, enable_ocr: bool = True, tesseract_path: Optional[str] = None):
         """
@@ -55,12 +62,18 @@ class ContractUploader:
         self.MAX_FILE_SIZE = max_file_size if max_file_size is not None else 250 * 1024 * 1024
         self.enable_ocr = enable_ocr and TESSERACT_AVAILABLE
         
-        # Configure Tesseract if available and path provided
+        # Configure Tesseract if available
         if self.enable_ocr and tesseract_path:
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
             logger.info("Tesseract OCR enabled with custom path: %s", tesseract_path)
         elif self.enable_ocr:
-            logger.info("Tesseract OCR enabled (using system PATH)")
+            # Auto-detect bundled Tesseract for frozen (PyInstaller) builds
+            bundled_tesseract = self._find_bundled_tesseract()
+            if bundled_tesseract:
+                pytesseract.pytesseract.tesseract_cmd = bundled_tesseract
+                logger.info("Tesseract OCR enabled with bundled path: %s", bundled_tesseract)
+            else:
+                logger.info("Tesseract OCR enabled (using system PATH)")
         else:
             if not TESSERACT_AVAILABLE:
                 logger.info("Tesseract OCR not available (missing dependencies: pytesseract, pillow, pdf2image)")
@@ -70,6 +83,25 @@ class ContractUploader:
         logger.debug("ContractUploader initialized with max file size: %d bytes (%.2f MB)", 
                      self.MAX_FILE_SIZE, self.MAX_FILE_SIZE / (1024 * 1024))
     
+    @staticmethod
+    def _find_bundled_tesseract() -> Optional[str]:
+        """Find bundled Tesseract executable in frozen (PyInstaller) builds."""
+        import sys
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
+            candidates = [
+                os.path.join(base_path, 'tesseract', 'tesseract.exe'),
+                os.path.join(os.path.dirname(sys.executable), '_internal', 'tesseract', 'tesseract.exe'),
+            ]
+            for path in candidates:
+                if os.path.exists(path):
+                    # Also set TESSDATA_PREFIX so tesseract finds language files
+                    tessdata_dir = os.path.join(os.path.dirname(path), 'tessdata')
+                    if os.path.exists(tessdata_dir):
+                        os.environ['TESSDATA_PREFIX'] = os.path.dirname(path)
+                    return path
+        return None
+
     def validate_format(self, file_path: str) -> Tuple[bool, str]:
         """
         Validate file format (PDF/DOCX).
@@ -245,6 +277,8 @@ class ContractUploader:
                 return self._extract_text_from_docx(file_path)
             elif file_extension == '.txt':
                 return self._extract_text_from_txt(file_path)
+            elif file_extension == '.xlsx':
+                return self._extract_text_from_xlsx(file_path)
             else:
                 raise ValueError(f"Unsupported file format: {file_extension}")
                 
@@ -307,6 +341,7 @@ class ContractUploader:
                 
                 if not extracted_text.strip():
                     # No text extracted - try OCR if available
+                    fname = file_path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
                     if self.enable_ocr:
                         logger.info("No text extracted from PDF, attempting OCR...")
                         try:
@@ -316,17 +351,22 @@ class ContractUploader:
                         except Exception as ocr_error:
                             logger.error("OCR extraction failed: %s", ocr_error)
                             error_msg = (
-                                "No text could be extracted from the PDF. "
-                                "The document appears to be image-based and OCR failed. "
-                                f"OCR error: {str(ocr_error)}"
+                                f"'{fname}' appears to be a scanned/image PDF.\n"
+                                "Text extraction failed and OCR could not process it.\n\n"
+                                "This is common for stamped plans and drawings.\n"
+                                "Try loading the text-based bid documents instead\n"
+                                "(ITB, specifications, addenda).\n\n"
+                                f"OCR detail: {str(ocr_error)[:200]}"
                             )
                             logger.error(error_msg)
                             raise ValueError(error_msg) from ocr_error
                     else:
                         error_msg = (
-                            "No text could be extracted from the PDF. "
-                            "The document may be image-based. "
-                            "Enable OCR support to extract text from scanned documents."
+                            f"'{fname}' appears to be a scanned/image PDF.\n"
+                            "No text could be extracted.\n\n"
+                            "This is common for stamped plans and drawings.\n"
+                            "Try loading the text-based bid documents instead\n"
+                            "(ITB, specifications, addenda)."
                         )
                         logger.error(error_msg)
                         raise ValueError(error_msg)
@@ -440,6 +480,44 @@ class ContractUploader:
             logger.error(error_msg, exc_info=True)
             raise Exception(error_msg) from e
 
+    def _extract_text_from_xlsx(self, file_path: str) -> str:
+        """Extract text from Excel (.xlsx) file."""
+        logger.debug("Extracting text from XLSX: %s", file_path)
+
+        if not OPENPYXL_AVAILABLE:
+            raise ImportError("openpyxl is required to read Excel files. Install with: pip install openpyxl")
+
+        try:
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            all_text = []
+
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                all_text.append(f"=== Sheet: {sheet_name} ===")
+
+                for row in ws.iter_rows(values_only=True):
+                    # Filter out None values and convert to strings
+                    cells = [str(cell).strip() for cell in row if cell is not None]
+                    if cells:
+                        all_text.append(" | ".join(cells))
+
+            wb.close()
+            extracted_text = "\n".join(all_text)
+
+            if not extracted_text.strip():
+                raise ValueError("The Excel file contains no data.")
+
+            logger.info("Successfully extracted %d characters from XLSX (%d sheets)",
+                       len(extracted_text), len(wb.sheetnames))
+            return extracted_text
+
+        except ValueError:
+            raise
+        except Exception as e:
+            error_msg = f"Failed to read Excel file: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            raise Exception(error_msg) from e
+
     def _extract_text_with_ocr(self, file_path: str) -> str:
         """
         Extract text from image-based PDF using Tesseract OCR.
@@ -463,12 +541,16 @@ class ContractUploader:
             # Detect bundled poppler path for frozen applications
             poppler_path = None
             if getattr(sys, 'frozen', False):
-                # Running in PyInstaller bundle - use _MEIPASS to get resource path
                 base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-                bundled_poppler = os.path.join(base_path, 'poppler', 'bin')
-                if os.path.exists(bundled_poppler):
-                    poppler_path = bundled_poppler
-                    logger.debug("Using bundled poppler at: %s", poppler_path)
+                candidates = [
+                    os.path.join(base_path, 'poppler', 'bin'),
+                    os.path.join(os.path.dirname(sys.executable), '_internal', 'poppler', 'bin'),
+                ]
+                for candidate in candidates:
+                    if os.path.exists(candidate):
+                        poppler_path = candidate
+                        logger.debug("Using bundled poppler at: %s", poppler_path)
+                        break
 
             # Convert PDF pages to images
             logger.debug("Converting PDF to images...")

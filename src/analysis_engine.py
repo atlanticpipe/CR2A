@@ -47,18 +47,20 @@ class AnalysisEngine:
 
     def __init__(
         self,
-        local_model_name: str = "llama-3.2-3b-q4"
+        local_model_name: str = "llama-3.2-3b-q4",
+        gpu_mode: str = "auto"
     ):
         """
         Initialize Analysis Engine with local Llama model.
 
         Args:
             local_model_name: Name of local model to use (default: llama-3.2-3b-q4)
+            gpu_mode: "auto" (auto-detect), "cpu" (force CPU), or "gpu" (force GPU)
 
         Raises:
             ValueError: If model cannot be loaded
         """
-        logger.info(f"Initializing AnalysisEngine (model={local_model_name})")
+        logger.info(f"Initializing AnalysisEngine (model={local_model_name}, gpu_mode={gpu_mode})")
 
         # Initialize components
         # Auto-detect Tesseract path for OCR support
@@ -80,9 +82,18 @@ class AnalysisEngine:
         try:
             model_path = model_mgr.get_model_path(local_model_name)
 
+            # Determine n_gpu_layers from gpu_mode
+            if gpu_mode == "cpu":
+                n_gpu_layers = 0
+            elif gpu_mode == "gpu":
+                n_gpu_layers = -1
+            else:
+                n_gpu_layers = None  # auto-detect
+
             self.ai_client = LocalModelClient(
                 model_path=str(model_path),
-                model_name=local_model_name
+                model_name=local_model_name,
+                n_gpu_layers=n_gpu_layers
             )
             logger.info("Local model client initialized successfully")
         except Exception as e:

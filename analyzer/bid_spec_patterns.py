@@ -22,8 +22,10 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
     "pre_bid": [
         r"(?:mandatory|required|optional)\s+pre[\-\s]?bid\s+(?:meeting|conference|site\s+visit)",
         r"pre[\-\s]?bid\s+(?:meeting|conference)\s+(?:is|shall\s+be)\s+(?:mandatory|required|optional)",
-        r"pre[\-\s]?bid\s+(?:meeting|conference)",
+        r"pre[\-\s]?bid\s+(?:meeting|conference|site\s+visit)",
+        r"PRE[\-\s]?BID\s+Meeting",
         r"(?:virtual|in[\-\s]?person|online)\s+(?:pre[\-\s]?bid|meeting)",
+        r"(?:Teams|Zoom|Webex|WebEx|GoToMeeting)\s+(?:webinar|meeting|call)",
     ],
     "submission_format": [
         r"(?:sealed|original)\s+(?:bid|proposal)\s+(?:shall|must|should)\s+be\s+(?:submitted|delivered)",
@@ -32,6 +34,9 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
         r"(?:email|online\s+portal|electronic)\s+(?:submission|submittal|bid)",
         r"USB\s+(?:drive|flash|digital|copy)",
         r"(?:FedEx|UPS|mail|courier|hand[\-\s]?deliver)",
+        r"(?:Bonfire|BidExpress|Quest CDN|PlanetBids|OpenGov|Jaggaer|DemandStar)\s+(?:Portal|portal|platform)",
+        r"[Bb]ids\s+shall\s+(?:only\s+)?be\s+(?:accepted|submitted)\s+(?:online|through|via)",
+        r"(?:accepted|submitted)\s+(?:online|through|via)\s+(?:the\s+)?(?:\w+\s+)?[Pp]ortal",
     ],
     "bid_bond": [
         r"bid\s+bond\s+(?:in\s+the\s+amount\s+of\s+)?(\d+)\s*(?:%|percent)",
@@ -121,6 +126,8 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
         r"(?:OSHA|MSHA)\s+(?:compliance|requirement|standard)",
         r"site[\-\s]?specific\s+safety",
         r"safety\s+(?:officer|manager|director|coordinator)",
+        r"[Ss]afety\s+[Pp]rovisions",
+        r"(?:electrical|construction|job\s+site|work\s+zone)\s+safety",
     ],
     "qualifications": [
         r"(?:minimum|at\s+least)\s+(\d+)\s*(?:linear\s+feet|LF)\s+(?:of\s+)?CIPP",
@@ -128,6 +135,8 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
         r"(?:minimum|at\s+least)\s+(\d+)\s+years?\s+(?:of\s+)?(?:experience|in\s+business)",
         r"(?:contractor|bidder)\s+(?:shall|must)\s+(?:have|demonstrate)\s+(?:experience|qualification)",
         r"(?:similar|comparable)\s+(?:project|work|experience)",
+        r"(?:qualified|experienced)\s+(?:to\s+)?(?:provide|perform|furnish)",
+        r"(?:contractor|bidder)\s+qualif",
     ],
 
     # ===== Section 2: Site Conditions =====
@@ -136,11 +145,14 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
         r"(?:contractor|city|owner)\s+(?:shall\s+)?(?:provide|responsible\s+for)\s+(?:site\s+)?access",
         r"(?:access|entry)\s+(?:to|for)\s+(?:the\s+)?(?:site|work\s+area|project\s+area)",
         r"right[\-\s]?of[\-\s]?way\s+access",
+        r"[Aa]ccess\s+to\s+[Ww]ork",
     ],
     "site_restoration": [
         r"(?:site|surface|pavement|road)\s+restoration",
         r"(?:restore|restoration)\s+(?:to\s+)?(?:original|existing|pre[\-\s]?construction)\s+condition",
         r"(?:contractor|city|owner)\s+(?:shall\s+)?(?:restore|responsible\s+for\s+restor)",
+        r"[Cc]leaning\s+the\s+[Pp]roject\s+[Ss]ite",
+        r"(?:cleanup|clean[\-\s]?up|clean\s+up)\s+(?:the\s+)?(?:site|project|work\s+area)",
     ],
     "bypass": [
         r"bypass\s+pump",
@@ -155,11 +167,15 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
         r"maintenance\s+of\s+traffic",
         r"(?:lane|road)\s+closure",
         r"(?:flagging|flagger|flag\s+person)",
+        r"TRAFFIC\s+CONTROL\s+(?:LS|EA|DAY)",
+        r"traffic\s+control",
     ],
     "disposal": [
         r"(?:disposal|dispose)\s+(?:of\s+)?(?:debris|waste|spoil|material)",
         r"(?:contractor|owner)\s+(?:shall\s+)?(?:provide|responsible\s+for)\s+disposal",
         r"(?:landfill|dump\s+site|disposal\s+site)",
+        r"(?:debris|waste|spoil|excavated)\s+(?:removal|hauling|disposal|material)",
+        r"(?:remove|haul)\s+(?:all\s+)?(?:debris|waste|spoil|excess\s+material)",
     ],
     "water_hydrant_meter": [
         r"(?:water|hydrant)\s+(?:meter|supply|source)",
@@ -170,10 +186,11 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
 
     # ===== Section 3: Cleaning =====
     "cleaning_method": [
-        r"(?:sewer|pipe|line)\s+cleaning",
+        r"(?:sewer|pipe|line|storm|drain)\s+cleaning",
         r"(?:mechanical|hydraulic|high[\-\s]?pressure)\s+cleaning",
         r"(?:heavy|light|root)\s+(?:cleaning|cutting)",
         r"(?:jetting|jet\s+cleaning|hydro[\-\s]?clean)",
+        r"(?:cleaning|flushing)\s+(?:of\s+)?(?:pipe|line|sewer|storm|drain)",
     ],
     "cleaning_passes": [
         r"(\d+)\s+(?:cleaning\s+)?pass(?:es)?",
@@ -205,10 +222,15 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
 
     # ===== Section 5: CIPP =====
     "cipp_curing_method": [
-        r"(?:curing|cure|installation)\s+method\s*(?:.*?)(?:steam|hot\s+water|UV|ambient|air)",
-        r"(?:steam|hot\s+water|UV|ambient|air)\s*(?:.*?)(?:cur(?:e|ing|ed))",
-        r"(?:PVC|fold\s+(?:and|&)\s+form)",
+        r"(?:curing|cure|installation)\s+method\s*(?:.*?)(?:steam|hot\s+water|\bUV\b|ambient\s+cur)",
+        r"\b(?:steam|hot\s+water|UV)\s*cur(?:e|ing|ed)",
+        r"(?:PVC|fold\s+(?:and|&)\s+form)\s+(?:lining|liner|pipe)",
         r"(?:inversion|pull[\-\s]?in)\s+(?:method|installation)",
+        r"cured[\-\s]?in[\-\s]?place",
+        r"(?:CMP|corrugated\s+metal)\s+(?:pipe\s+)?(?:CIPP|lining|liner)",
+        r"CIPP\s+(?:LINING|lining|installation)",
+        r"(?:trenchless|no[\-\s]?dig)\s+(?:pipe\s*)?lin(?:ing|er)",
+        r"pipelining\s+technique",
     ],
     "cipp_cure_water": [
         r"(?:cure|curing)\s+water\s+(?:discharge|disposal|management)",
@@ -315,8 +337,10 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
         r"ASTM\s+D\s*638\s*(?:.*?)([\d,]+)\s*(?:psi|PSI)",
     ],
     "cipp_design_safety_factor": [
-        r"(?:design\s+)?safety\s+factor\s*(?:.*?)(\d+(?:\.\d+)?)",
-        r"(?:factor\s+of\s+safety|FS|N)\s*(?:.*?)(\d+(?:\.\d+)?)",
+        r"(?:design\s+)?safety\s+factor\s*[:=]?\s*(\d+(?:\.\d+)?)",
+        r"factor\s+of\s+safety\s*[:=]?\s*(\d+(?:\.\d+)?)",
+        r"\bFS\s*[:=]\s*(\d+(?:\.\d+)?)",
+        r"safety\s+factor",
     ],
     "cipp_short_term_flexural_modulus": [
         r"short[\-\s]?term\s+(?:flexural\s+)?modulus\s*(?:.*?)([\d,]+)\s*(?:psi|PSI)",
@@ -547,6 +571,48 @@ BID_ITEM_DESCRIPTIONS: Dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# Fallback keyword phrases for items where regex may miss
+# Used by BidReviewEngine._keyword_search when regex finds nothing
+# ---------------------------------------------------------------------------
+
+SEARCH_KEYWORDS: Dict[str, List[str]] = {
+    "pre_bid": ["pre-bid", "pre bid", "pre-bid meeting", "pre-bid conference", "site visit", "Teams webinar", "Zoom meeting"],
+    "submission_format": ["submit", "submission", "portal", "bonfire", "bidexpress", "hard copy", "electronic", "online", "email bid", "sealed bid"],
+    "bid_bond": ["bid bond", "bid security", "bid guarantee", "bid deposit"],
+    "payment_performance_bonds": ["performance bond", "payment bond", "surety bond", "faithful performance"],
+    "contract_time": ["calendar days", "working days", "substantial completion", "final completion", "contract time", "notice to proceed", "NTP"],
+    "liquidated_damages": ["liquidated damage", "per day", "per calendar day"],
+    "warranty": ["warranty", "guarantee period", "correction period", "defect"],
+    "contractor_license": ["license", "licensed", "registration", "registered contractor"],
+    "insurance": ["insurance", "liability", "workers compensation", "additional insured", "certificate of insurance", "COI", "waiver of subrogation"],
+    "minority_dbe_goals": ["minority", "DBE", "MBE", "WBE", "MWBE", "disadvantaged business", "good faith effort", "equal opportunity"],
+    "working_hours": ["working hours", "work hours", "Monday through Friday", "night work", "weekend", "work schedule"],
+    "subcontracting": ["subcontract", "sub-contract", "subcontractor listing", "self-perform"],
+    "funding": ["federal fund", "state fund", "grant", "USDA", "EPA", "SRF", "ARPA", "Infrastructure Investment"],
+    "certified_payroll": ["certified payroll", "prevailing wage", "Davis-Bacon", "wage rate", "wage determination"],
+    "retainage": ["retainage", "retention", "retain", "withhold"],
+    "safety": ["safety", "OSHA", "safety plan", "safety program", "safety provision"],
+    "qualifications": ["qualif", "experience", "years in business", "similar project", "references"],
+    "site_access": ["site access", "access to work", "right-of-way", "ROW access", "project access"],
+    "site_restoration": ["restoration", "restore", "cleanup", "clean up", "repair damage", "final cleanup"],
+    "bypass": ["bypass pump", "flow bypass", "dewatering", "pump around", "temporary diversion"],
+    "traffic_control": ["traffic control", "MOT", "maintenance of traffic", "lane closure", "road closure", "flagging", "flagger"],
+    "disposal": ["disposal", "debris removal", "waste removal", "haul off", "spoil disposal", "excess material"],
+    "water_hydrant_meter": ["water meter", "hydrant meter", "construction water", "water supply", "fire hydrant"],
+    "cleaning_method": ["cleaning", "flushing", "jetting", "hydro clean", "pipe cleaning"],
+    "cleaning_passes": ["cleaning pass", "number of passes"],
+    "cleaning_notifications": ["door hanger", "notification", "advance notice", "notify resident"],
+    "nassco": ["NASSCO", "PACP", "Pipeline Assessment"],
+    "cctv_submittal_format": ["CCTV", "television", "video inspection", "camera inspection"],
+    "cctv_notifications": ["CCTV", "inspection notification"],
+    "cipp_curing_method": ["CIPP", "cured-in-place", "cured in place", "pipelining", "CMP lining", "pipe lining", "trenchless lining"],
+    "cipp_pipe_information": ["pipe schedule", "line segment", "pipe diameter", "pipe length", "pipe inventory", "bid item", "line item"],
+    "cipp_warranty": ["CIPP warranty", "liner warranty", "lining warranty"],
+    "cipp_contractor_qualifications": ["CIPP experience", "lining experience", "installer qualification"],
+}
+
+
+# ---------------------------------------------------------------------------
 # Maps item_key -> (section_key, display_name) for engine/UI translation
 # ---------------------------------------------------------------------------
 
@@ -666,8 +732,8 @@ def extract_bid_spec_items(text: str) -> Dict[str, List[Dict]]:
         for pattern in patterns:
             try:
                 for m in re.finditer(pattern, text, re.IGNORECASE | re.DOTALL):
-                    start = max(0, m.start() - 200)
-                    end = min(len(text), m.end() + 200)
+                    start = max(0, m.start() - 500)
+                    end = min(len(text), m.end() + 500)
                     matches.append({
                         "matched_text": m.group(0),
                         "captured_value": m.group(1) if m.lastindex and m.lastindex >= 1 else "",

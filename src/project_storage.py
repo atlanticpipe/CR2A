@@ -199,7 +199,7 @@ class ProjectStorage:
             List of Path objects for contract files, sorted by name
         """
         if extensions is None:
-            extensions = ['.pdf', '.docx', '.txt']
+            extensions = ['.pdf', '.docx', '.txt', '.xlsx']
 
         files = []
         for ext in extensions:

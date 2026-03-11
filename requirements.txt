@@ -5,6 +5,7 @@ PyQt5>=5.15.0              # Qt GUI (alternative to tkinter)
 # Document processing
 PyPDF2>=3.0.0
 python-docx>=0.8.11
+openpyxl>=3.1.0               # Excel (.xlsx) file reading
 cryptography>=41.0.0
 
 # Schema validation

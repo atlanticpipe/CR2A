@@ -33,6 +33,7 @@ class ConfigManager:
         "local_model_name": "llama-3.1-8b-q4",  # Default model (8B for better accuracy)
         "local_model_threads": None,  # None = auto-detect CPU cores
         "local_model_path": None,  # Custom model path (overrides model_name)
+        "gpu_mode": "auto",  # "auto" = auto-detect, "cpu" = force CPU-only, "gpu" = force GPU
         # Storage settings for multi-user network drive support
         "storage_mode": "local",  # "local" = %APPDATA%, "shared" = network drive
         "shared_storage_path": None,  # Path to network drive (e.g., "F:\\ContractAnalysis")
@@ -319,6 +320,28 @@ class ConfigManager:
         self.config["local_model_path"] = model_path
         logger.info(f"Local model path set to: {model_path}")
 
+    def get_gpu_mode(self) -> str:
+        """
+        Get GPU mode setting.
+
+        Returns:
+            "auto" (auto-detect), "cpu" (force CPU-only), or "gpu" (force GPU)
+        """
+        return self.config.get("gpu_mode", self.DEFAULT_CONFIG["gpu_mode"])
+
+    def set_gpu_mode(self, mode: str) -> None:
+        """
+        Set GPU mode.
+
+        Args:
+            mode: "auto", "cpu", or "gpu"
+        """
+        if mode not in ("auto", "cpu", "gpu"):
+            logger.warning("Invalid GPU mode: %s. Using auto.", mode)
+            mode = "auto"
+        self.config["gpu_mode"] = mode
+        logger.info(f"GPU mode set to: {mode}")
+
     def get_local_model_settings(self) -> Dict[str, Any]:
         """
         Get all local model settings as a dictionary.
@@ -329,7 +352,8 @@ class ConfigManager:
         return {
             "local_model_name": self.get_local_model_name(),
             "local_model_threads": self.get_local_model_threads(),
-            "local_model_path": self.get_local_model_path()
+            "local_model_path": self.get_local_model_path(),
+            "gpu_mode": self.get_gpu_mode()
         }
 
     # ===== Storage Settings (Multi-User Network Drive Support) =====
