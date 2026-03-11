@@ -30,7 +30,6 @@ venv.bak/
 build/
 dist/
 *.spec
-!CR2A.spec
 
 # Executables - DO NOT COMMIT (distribute via GitHub Releases)
 *.exe
@@ -152,10 +151,6 @@ desktop.ini
 # ============================================================================
 # Project Specific
 # ============================================================================
-# Keep the CLI spec file if you want to version it
-# Uncomment the line below to ignore it:
-# ContractAnalysisCLI.spec
-
 # Ignore all analysis outputs except the sample
 *_analysis.json
 *_analysis.pdf
@@ -184,8 +179,10 @@ venv311/
 # Project data directory (generated at runtime)
 .cr2a/
 
-# Generated reports
+# Generated reports and exports
 analysis_report.txt
+cr2a_export.txt
+NUL
 
 # ============================================================================
 # External Binaries - OCR Dependencies
