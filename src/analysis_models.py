@@ -85,11 +85,13 @@ class ClauseBlock:
         clause_summary: Brief, non-verbose summary of what the clause covers
         redline_recommendations: List of structured recommendations for contract modifications
         harmful_language_policy_conflicts: List of language that conflicts with policies or is harmful
+        clause_page: 1-based page number where this clause appears (None if unknown)
     """
     clause_location: str
     clause_summary: str
     redline_recommendations: List[RedlineRecommendation]
     harmful_language_policy_conflicts: List[str]
+    clause_page: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -103,12 +105,15 @@ class ClauseBlock:
         Returns:
             Dictionary representation matching the output_schemas_v1.json ClauseBlock structure
         """
-        return {
+        result: Dict[str, Any] = {
             'Clause Location': self.clause_location,
             'Clause Summary': self.clause_summary,
             'Redline Recommendations': [rec.to_dict() for rec in self.redline_recommendations],
             'Harmful Language / Policy Conflicts': self.harmful_language_policy_conflicts
         }
+        if self.clause_page is not None:
+            result['Clause Page'] = self.clause_page
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ClauseBlock':
@@ -138,6 +143,10 @@ class ClauseBlock:
         harmful_language = data.get('Harmful Language / Policy Conflicts',
                                     data.get('harmful_language_policy_conflicts', []))
 
+        # Parse optional page number (integer or None)
+        raw_page = data.get('Clause Page', data.get('clause_page'))
+        clause_page: Optional[int] = int(raw_page) if isinstance(raw_page, (int, float)) and raw_page > 0 else None
+
         # Parse nested RedlineRecommendation objects
         redline_recommendations = []
         for rec_data in redline_recs_data:
@@ -150,7 +159,8 @@ class ClauseBlock:
             clause_location=clause_location,
             clause_summary=clause_summary,
             redline_recommendations=redline_recommendations,
-            harmful_language_policy_conflicts=harmful_language
+            harmful_language_policy_conflicts=harmful_language,
+            clause_page=clause_page
         )
 
 

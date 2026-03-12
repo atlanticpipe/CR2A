@@ -146,6 +146,7 @@ class StructuredAnalysisView(QWidget):
         self.category_boxes = {}  # Maps "section_key.category_name" to CollapsibleSection widget
         self.box_key_to_cat_key = {}  # Maps box_key to analysis engine cat_key
         self._analyze_buttons_enabled = False
+        self.contract_file_path: Optional[str] = None  # Full path to the loaded contract file
         
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -326,6 +327,10 @@ class StructuredAnalysisView(QWidget):
         if box.cat_key:
             self.analyze_requested.emit(box.cat_key)
     
+    def set_contract_file_path(self, path: Optional[str]):
+        """Set the full path to the loaded contract file for hyperlink generation."""
+        self.contract_file_path = path
+
     def display_analysis(self, analysis_result):
         """
         Display analysis results using the pre-built template.
@@ -817,6 +822,30 @@ class StructuredAnalysisView(QWidget):
         
         return widget if layout.count() > 0 else None
     
+    def _build_clause_location_url(self, clause_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Build a file:// URL for jumping to the clause location in the source PDF.
+
+        Returns a URL string if a valid PDF path and page number are available,
+        otherwise returns None (location will be rendered as plain text).
+        """
+        import os
+        page = clause_data.get('Clause Page') or clause_data.get('clause_page')
+        if not isinstance(page, int) or page < 1:
+            return None
+        path = self.contract_file_path
+        if not path:
+            return None
+        if not path.lower().endswith('.pdf'):
+            return None
+        if not os.path.isabs(path) or not os.path.exists(path):
+            return None
+        # Convert Windows backslashes to forward slashes for the URL
+        url_path = path.replace('\\', '/')
+        if not url_path.startswith('/'):
+            url_path = '/' + url_path
+        return f"file://{url_path}#page={page}"
+
     def _create_clause_block_content(self, data: Dict[str, Any]) -> Optional[QWidget]:
         """Create content for a single clause block with all 6 required fields."""
         widget = QWidget()
@@ -919,17 +948,35 @@ class StructuredAnalysisView(QWidget):
                     empty_label.setStyleSheet("color: #999; font-style: italic;")
                     field_layout.addWidget(empty_label)
                 else:
-                    value_label = QLabel(str(value))
-                    value_label.setWordWrap(True)
-                    value_label.setStyleSheet("color: #333;")
-                    field_layout.addWidget(value_label)
+                    # For Clause Location, try to render as a hyperlink into the PDF
+                    if title_case_key == 'Clause Location':
+                        link_url = self._build_clause_location_url(data)
+                        if link_url:
+                            value_label = QLabel(
+                                f'<a href="{link_url}" style="color: #1565C0;">{value}</a>'
+                            )
+                            value_label.setTextFormat(Qt.RichText)
+                            value_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+                            value_label.setOpenExternalLinks(True)
+                            value_label.setWordWrap(True)
+                            field_layout.addWidget(value_label)
+                        else:
+                            value_label = QLabel(str(value))
+                            value_label.setWordWrap(True)
+                            value_label.setStyleSheet("color: #333;")
+                            field_layout.addWidget(value_label)
+                    else:
+                        value_label = QLabel(str(value))
+                        value_label.setWordWrap(True)
+                        value_label.setStyleSheet("color: #333;")
+                        field_layout.addWidget(value_label)
             else:
                 # Other types
                 value_label = QLabel(str(value))
                 value_label.setWordWrap(True)
                 value_label.setStyleSheet("color: #333;")
                 field_layout.addWidget(value_label)
-            
+
             layout.addWidget(field_frame)
         
         return widget

@@ -28,6 +28,7 @@ from src.bid_review_models import (
     Cleaning,
     CCTV,
     ManholeRehab,
+    ProjectInformation,
     SiteConditions,
     SpincastItems,
     StandardContractItems,
@@ -169,7 +170,7 @@ class BidReviewEngine:
         if regex_matches and regex_matches[0].get("captured_value"):
             captured = regex_matches[0]["captured_value"].strip()
             if captured and len(captured) > 1:
-                regex_hint = captured
+                regex_hint = captured[:300]  # Cap at 300 chars — some patterns capture entire doc
 
         # If AI client available, use AI to extract and verify; otherwise regex-only
         if self.ai_client:
@@ -371,8 +372,8 @@ class BidReviewEngine:
             return []
 
         # Determine which portion of the document to sample
-        if section_key in ("standard_contract_items",):
-            # Front matter — first 30% of document
+        if section_key in ("project_information", "standard_contract_items"):
+            # Front matter — first 30% of document (project info is always near the top)
             end = min(text_len, int(text_len * 0.30))
             chunk = text[:min(end, max_chars)]
         elif section_key in ("site_conditions",):
@@ -431,9 +432,10 @@ class BidReviewEngine:
         )
         parts.append(f"\n{context_text}")
         parts.append(
-            "\nRespond in this EXACT format (3 lines only):\n"
+            "\nRespond in this EXACT format (4 lines only):\n"
             "VALUE: [the extracted value, or NOT FOUND]\n"
             "LOCATION: [where found in document, e.g. Section 00700, Article 4.2, or UNKNOWN]\n"
+            "PAGE: [integer page number where found, using the --- Page N --- markers, or UNKNOWN]\n"
             "NOTES: [any conditions, exceptions, or additional details, or NONE]"
         )
         return "\n".join(parts)
@@ -446,6 +448,7 @@ class BidReviewEngine:
         value = ""
         location = ""
         notes = ""
+        page: Optional[int] = None
 
         for line in lines:
             line_stripped = line.strip()
@@ -454,6 +457,14 @@ class BidReviewEngine:
                 value = line_stripped[6:].strip()
             elif upper.startswith("LOCATION:"):
                 location = line_stripped[9:].strip()
+            elif upper.startswith("PAGE:"):
+                raw = line_stripped[5:].strip()
+                try:
+                    parsed = int(raw)
+                    if parsed > 0:
+                        page = parsed
+                except (ValueError, TypeError):
+                    pass
             elif upper.startswith("NOTES:"):
                 notes = line_stripped[6:].strip()
 
@@ -483,6 +494,7 @@ class BidReviewEngine:
             location=location,
             confidence=confidence,
             notes=notes,
+            page=page,
         )
 
     def _set_item_on_result(
@@ -510,6 +522,7 @@ class BidReviewEngine:
 
         # Top-level sections
         section_map = {
+            "project_information": result.project_information,
             "standard_contract_items": result.standard_contract_items,
             "site_conditions": result.site_conditions,
             "cleaning": result.cleaning,

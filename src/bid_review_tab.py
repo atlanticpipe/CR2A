@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SECTION_DEFS = [
+    ("Project Information", "project_information", [
+        "project_title", "solicitation_number", "owner", "contractor", "scope", "bid_model",
+    ]),
     ("Standard Contract Items", "standard_contract_items", [
         "pre_bid", "submission_format", "bid_bond", "payment_performance_bonds",
         "contract_time", "liquidated_damages", "warranty", "contractor_license",
@@ -95,6 +98,10 @@ class BidReviewAllThread(QThread):
 
     def run(self):
         try:
+            text_len = len(self.prepared.contract_text) if self.prepared.contract_text else 0
+            ai_avail = self.engine.ai_client is not None
+            logger.info("BidReviewAllThread starting: contract_text=%d chars, ai_client=%s", text_len, ai_avail)
+
             def on_item(item_key, display_name, item):
                 self._item_results[item_key] = item
                 if item.found:
@@ -183,9 +190,10 @@ class BidReviewTab(QWidget):
         self.bid_engine = None
         self.prepared = None
         self.item_results: Dict[str, ChecklistItem] = {}
-        self._item_rows: Dict[str, dict] = {}  # item_key -> {value_edit, conf_label, btn, ...}
+        self._item_rows: Dict[str, dict] = {}  # item_key -> {value_edit, conf_label, btn, name_lbl, display_name}
         self._current_thread = None
         self._current_result: Optional[BidChecklistResult] = None
+        self.contract_file_path: Optional[str] = None
         self._build_ui()
 
     def _build_ui(self):
@@ -359,6 +367,7 @@ class BidReviewTab(QWidget):
                 "conf_label": conf_label,
                 "btn": btn,
                 "name_lbl": name_lbl,
+                "display_name": display_name,
             }
 
         group.setLayout(grid)
@@ -394,6 +403,23 @@ class BidReviewTab(QWidget):
         """Set the bid review engine and prepared data (called by main GUI)."""
         self.bid_engine = engine
         self.prepared = prepared
+
+    def set_contract_file_path(self, path: Optional[str]):
+        """Store the contract file path for building PDF hyperlinks."""
+        self.contract_file_path = path
+
+    def _build_pdf_url(self, page: int) -> Optional[str]:
+        """Build a file:// URL pointing to the contract PDF at the given page, or None."""
+        import os
+        path = self.contract_file_path
+        if not path or not path.lower().endswith('.pdf'):
+            return None
+        if not os.path.isabs(path) or not os.path.exists(path):
+            return None
+        url_path = path.replace('\\', '/')
+        if not url_path.startswith('/'):
+            url_path = '/' + url_path
+        return f"file://{url_path}#page={page}"
 
     def get_result(self) -> Optional[BidChecklistResult]:
         """Return the current result, or None."""
@@ -519,6 +545,7 @@ class BidReviewTab(QWidget):
         conf = item.confidence if hasattr(item, "confidence") else "not_found"
         value = item.value if hasattr(item, "value") else str(item)
         notes = item.notes if hasattr(item, "notes") else ""
+        page = item.page if hasattr(item, "page") else None
 
         row["value_edit"].setText(value)
         color = CONFIDENCE_COLORS.get(conf, "#9E9E9E")
@@ -533,6 +560,20 @@ class BidReviewTab(QWidget):
 
         if notes:
             row["value_edit"].setToolTip(notes)
+
+        # Update name label: make it a hyperlink if we have a page number
+        name_lbl = row["name_lbl"]
+        item_display_name = row.get("display_name", display_name)
+        if isinstance(page, int) and page > 0:
+            url = self._build_pdf_url(page)
+            if url:
+                name_lbl.setText(
+                    f'<a href="{url}" style="color: #1565C0; text-decoration: underline;">'
+                    f'{item_display_name}</a>'
+                )
+                name_lbl.setTextFormat(Qt.RichText)
+                name_lbl.setTextInteractionFlags(Qt.TextBrowserInteraction)
+                name_lbl.setOpenExternalLinks(True)
 
         self._update_stats()
 

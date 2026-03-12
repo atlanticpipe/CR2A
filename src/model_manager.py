@@ -52,7 +52,12 @@ class ModelManager:
             "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
             "size_mb": 2020,
             "sha256": None,
-            "recommended": True
+            "recommended": True,
+            "num_layers": 28,
+            "mb_per_layer": 65,
+            "embedding_overhead_mb": 190,
+            "kv_bytes_per_token": 114688,
+            "max_context": 131072,
         },
         # === Llama 3.1 8B Instruct (Higher quality, slower on CPU) ===
         "llama-3.1-8b-q4": {
@@ -62,7 +67,12 @@ class ModelManager:
             "filename": "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
             "size_mb": 4920,
             "sha256": None,
-            "recommended": False
+            "recommended": False,
+            "num_layers": 32,
+            "mb_per_layer": 146,
+            "embedding_overhead_mb": 250,
+            "kv_bytes_per_token": 131072,
+            "max_context": 131072,
         },
         "llama-3.1-8b-q3": {
             "name": "Llama 3.1 8B Instruct (Q3_K_M)",
@@ -71,7 +81,12 @@ class ModelManager:
             "filename": "Meta-Llama-3.1-8B-Instruct-Q3_K_M.gguf",
             "size_mb": 3900,
             "sha256": None,
-            "recommended": False
+            "recommended": False,
+            "num_layers": 32,
+            "mb_per_layer": 116,
+            "embedding_overhead_mb": 200,
+            "kv_bytes_per_token": 131072,
+            "max_context": 131072,
         },
     }
 

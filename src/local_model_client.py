@@ -33,110 +33,41 @@ except (ImportError, OSError) as e:
 
 def _check_vulkan_devices() -> bool:
     """
-    Check if any Vulkan-capable GPU devices are actually present.
+    Check whether a discrete (non-Intel) GPU is available using the Windows registry.
 
-    The llama.cpp Vulkan build will crash with an access violation if no
-    Vulkan ICD (GPU driver) is installed. This probes for devices first
-    using ctypes to avoid the crash.
+    Uses the display adapter registry key — completely Vulkan-free. Calling any
+    Vulkan API (vkCreateInstance, etc.) before llama.cpp touches it poisons the
+    Intel Vulkan ICD state, causing subsequent CPU-only Llama() calls to crash
+    with access violations. The registry approach avoids that entirely.
 
     Returns:
-        True if at least one Vulkan device is found, False otherwise.
+        True if at least one non-Intel GPU is found, False otherwise.
     """
-    import ctypes
-    import ctypes.util
-
     try:
-        # Try to load vulkan-1.dll
-        try:
-            vk = ctypes.WinDLL("vulkan-1.dll")
-        except (OSError, AttributeError):
-            logger.info("vulkan-1.dll not loadable — no Vulkan support")
-            return False
-
-        # vkEnumerateInstanceVersion — check Vulkan runtime is functional
-        vkEnumerateInstanceVersion = getattr(vk, 'vkEnumerateInstanceVersion', None)
-        if vkEnumerateInstanceVersion:
-            version = ctypes.c_uint32(0)
-            result = vkEnumerateInstanceVersion(ctypes.byref(version))
-            if result != 0:  # VK_SUCCESS = 0
-                logger.info("vkEnumerateInstanceVersion failed (result=%d) — Vulkan not functional", result)
-                return False
-            logger.info("Vulkan runtime version: %d.%d.%d",
-                        (version.value >> 22) & 0x7F,
-                        (version.value >> 12) & 0x3FF,
-                        version.value & 0xFFF)
-
-        # Create a minimal VkInstance to enumerate physical devices
-        # VkApplicationInfo structure
-        class VkApplicationInfo(ctypes.Structure):
-            _fields_ = [
-                ("sType", ctypes.c_uint32),        # VK_STRUCTURE_TYPE_APPLICATION_INFO = 0
-                ("pNext", ctypes.c_void_p),
-                ("pApplicationName", ctypes.c_char_p),
-                ("applicationVersion", ctypes.c_uint32),
-                ("pEngineName", ctypes.c_char_p),
-                ("engineVersion", ctypes.c_uint32),
-                ("apiVersion", ctypes.c_uint32),
-            ]
-
-        class VkInstanceCreateInfo(ctypes.Structure):
-            _fields_ = [
-                ("sType", ctypes.c_uint32),        # VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO = 1
-                ("pNext", ctypes.c_void_p),
-                ("flags", ctypes.c_uint32),
-                ("pApplicationInfo", ctypes.POINTER(VkApplicationInfo)),
-                ("enabledLayerCount", ctypes.c_uint32),
-                ("ppEnabledLayerNames", ctypes.c_void_p),
-                ("enabledExtensionCount", ctypes.c_uint32),
-                ("ppEnabledExtensionNames", ctypes.c_void_p),
-            ]
-
-        app_info = VkApplicationInfo(
-            sType=0,
-            pNext=None,
-            pApplicationName=b"CR2A_GPU_Probe",
-            applicationVersion=1,
-            pEngineName=b"probe",
-            engineVersion=1,
-            apiVersion=(1 << 22) | (0 << 12) | 0,  # Vulkan 1.0
-        )
-
-        create_info = VkInstanceCreateInfo(
-            sType=1,
-            pNext=None,
-            flags=0,
-            pApplicationInfo=ctypes.pointer(app_info),
-            enabledLayerCount=0,
-            ppEnabledLayerNames=None,
-            enabledExtensionCount=0,
-            ppEnabledExtensionNames=None,
-        )
-
-        instance = ctypes.c_void_p(0)
-        vkCreateInstance = vk.vkCreateInstance
-        result = vkCreateInstance(ctypes.byref(create_info), None, ctypes.byref(instance))
-        if result != 0:
-            logger.info("vkCreateInstance failed (result=%d) — no Vulkan ICD/driver", result)
-            return False
-
-        # Enumerate physical devices
-        device_count = ctypes.c_uint32(0)
-        vkEnumeratePhysicalDevices = vk.vkEnumeratePhysicalDevices
-        result = vkEnumeratePhysicalDevices(instance, ctypes.byref(device_count), None)
-
-        # Clean up instance
-        vkDestroyInstance = vk.vkDestroyInstance
-        vkDestroyInstance(instance, None)
-
-        if result != 0 or device_count.value == 0:
-            logger.info("No Vulkan physical devices found (count=%d, result=%d)", device_count.value, result)
-            return False
-
-        logger.info("Vulkan probe: found %d physical device(s)", device_count.value)
-        return True
-
+        import winreg
+        # Display adapter class: HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-...}
+        CLASS_KEY = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, CLASS_KEY) as class_key:
+            i = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(class_key, i)
+                    try:
+                        with winreg.OpenKey(class_key, subkey_name) as gpu_key:
+                            desc = winreg.QueryValueEx(gpu_key, "DriverDesc")[0]
+                            logger.info("GPU adapter found: %s", desc)
+                            if "Intel" not in desc:
+                                logger.info("Non-Intel GPU detected (%s) — GPU offload available", desc)
+                                return True
+                    except (FileNotFoundError, OSError):
+                        pass
+                    i += 1
+                except OSError:
+                    break
+        logger.info("Only Intel GPU(s) found in registry — using CPU-only inference")
+        return False
     except Exception as e:
-        logger.info("Vulkan device probe failed: %s", e)
+        logger.info("Registry GPU check failed: %s — defaulting to CPU-only", e)
         return False
 
 
@@ -154,6 +85,23 @@ def detect_gpu_support() -> Tuple[bool, int, str]:
     if not LLAMA_CPP_AVAILABLE:
         return False, 0, "cpu"
 
+    import sys
+    if sys.platform == 'win32':
+        # On Windows, NEVER call llama_supports_gpu_offload() or any other llama_cpp
+        # function here. On machines with Intel iGPU + Vulkan driver, calling those
+        # functions triggers ggml_vulkan_init() inside the DLL which crashes with an
+        # access violation, permanently corrupting the DLL state so that even
+        # subsequent CPU-only Llama() calls fail.
+        #
+        # Instead rely entirely on the ctypes Vulkan probe, which is safe because it
+        # uses its own VkInstance and never touches the llama_cpp DLL.
+        if not _check_vulkan_devices():
+            logger.info("No usable Vulkan GPU — using CPU-only inference")
+            return False, 0, "cpu"
+        logger.info("Vulkan GPU available — enabling GPU offload")
+        return True, -1, "vulkan"
+
+    # Non-Windows: safe to call llama_supports_gpu_offload()
     try:
         from llama_cpp import llama_supports_gpu_offload
         if not llama_supports_gpu_offload():
@@ -163,19 +111,9 @@ def detect_gpu_support() -> Tuple[bool, int, str]:
         logger.info("Cannot check GPU support: %s", e)
         return False, 0, "cpu"
 
-    # GPU offload is compiled in — but does the machine actually have a usable GPU?
-    # Probe Vulkan devices BEFORE letting llama.cpp try (to avoid access violations)
-    import sys
-    if sys.platform == 'win32':
-        if not _check_vulkan_devices():
-            logger.info("No Vulkan devices found — using CPU-only to avoid access violations")
-            return False, 0, "cpu"
-
-    # Detect which backend
-    # Use a timeout thread to avoid hanging on systems with broken Vulkan drivers
+    # Detect which backend via system info (non-Windows only)
     import threading
-
-    result = {"backend": "gpu", "success": False}
+    result = {"backend": "gpu"}
 
     def _detect_backend():
         try:
@@ -190,21 +128,17 @@ def detect_gpu_support() -> Tuple[bool, int, str]:
                 result["backend"] = "cuda"
             elif "metal" in sys_info_lower:
                 result["backend"] = "metal"
-            logger.info("GPU backend detected: %s (system info: %s)", result["backend"], sys_info[:200])
-            result["success"] = True
+            logger.info("GPU backend detected: %s", result["backend"])
         except Exception as e:
             logger.debug("Could not read system info: %s", e)
-            result["success"] = True  # Still use GPU even if sys_info fails
 
     detect_thread = threading.Thread(target=_detect_backend, daemon=True)
     detect_thread.start()
-    detect_thread.join(timeout=10)  # 10 second timeout
-
+    detect_thread.join(timeout=10)
     if detect_thread.is_alive():
-        logger.warning("GPU backend detection timed out (10s) — falling back to CPU")
+        logger.warning("GPU backend detection timed out — falling back to CPU")
         return False, 0, "cpu"
 
-    # -1 means offload all layers to GPU
     backend = result["backend"]
     logger.info("GPU offloading available (%s) — will offload all layers", backend)
     return True, -1, backend
@@ -234,7 +168,7 @@ class LocalModelClient:
     # Model-specific context sizes
     MODEL_CONTEXT_SIZES = {
         "llama-3.2-3b": 8192,    # 8K context, fast on CPU
-        "llama-3.1-8b": 16384,   # 16K context, slower but more capable
+        "llama-3.1-8b": 8192,    # 8K context — 16K requires ~6GB+ RAM; 8K is safer on most machines
         "pythia": 4096,           # Legacy model
     }
 
@@ -245,7 +179,9 @@ class LocalModelClient:
         n_ctx: int = DEFAULT_CONTEXT_SIZE,
         n_threads: Optional[int] = None,
         n_gpu_layers: Optional[int] = None,
-        temperature: float = DEFAULT_TEMPERATURE
+        temperature: float = DEFAULT_TEMPERATURE,
+        ram_reserved_os_mb: Optional[int] = None,
+        gpu_offload_layers: Optional[int] = None,
     ):
         """
         Initialize local model client.
@@ -257,6 +193,8 @@ class LocalModelClient:
             n_threads: CPU threads to use (auto-detects if None)
             n_gpu_layers: GPU layers to offload (None = auto-detect, 0 = CPU-only, -1 = all layers on GPU)
             temperature: Sampling temperature (0.0 = deterministic)
+            ram_reserved_os_mb: MB reserved for OS (if set, n_ctx is computed from remaining RAM)
+            gpu_offload_layers: Explicit layer count for GPU offload (overrides n_gpu_layers)
 
         Raises:
             ImportError: If llama-cpp-python is not installed
@@ -272,8 +210,15 @@ class LocalModelClient:
         self.n_threads = n_threads or multiprocessing.cpu_count()
         self.temperature = temperature
 
-        # Auto-detect GPU if not explicitly set
-        if n_gpu_layers is None:
+        # GPU layer selection: explicit offload_layers > n_gpu_layers > auto-detect
+        if gpu_offload_layers is not None:
+            self.n_gpu_layers = gpu_offload_layers
+            self.gpu_backend = "manual"
+            logger.info("Using explicit GPU offload: %d layers", gpu_offload_layers)
+        elif n_gpu_layers is not None:
+            self.n_gpu_layers = n_gpu_layers
+            self.gpu_backend = "manual"
+        else:
             gpu_available, recommended_layers, backend = detect_gpu_support()
             self.n_gpu_layers = recommended_layers
             self.gpu_backend = backend
@@ -281,12 +226,32 @@ class LocalModelClient:
                 logger.info("Auto-detected %s GPU — offloading all layers", backend)
             else:
                 logger.info("No GPU detected — using CPU-only inference")
-        else:
-            self.n_gpu_layers = n_gpu_layers
-            self.gpu_backend = "manual"
 
-        # Auto-configure context size based on model if not explicitly set
-        if n_ctx == self.DEFAULT_CONTEXT_SIZE:
+        # Context size: compute from RAM budget if provided, else use defaults
+        if ram_reserved_os_mb is not None:
+            from src.hardware_info import compute_context_tokens, _detect_gpu
+            try:
+                import psutil
+                total_ram_mb = int(psutil.virtual_memory().total / (1024 * 1024))
+            except Exception:
+                total_ram_mb = 8192
+            gpu_type = "none"
+            try:
+                _, gpu_type, _ = _detect_gpu()
+            except Exception:
+                pass
+            available = total_ram_mb - ram_reserved_os_mb
+            computed_ctx = compute_context_tokens(
+                available_ram_mb=available,
+                model_key=model_name,
+                gpu_offload_layers=self.n_gpu_layers if self.n_gpu_layers > 0 else 0,
+                gpu_type=gpu_type,
+            )
+            self.n_ctx = computed_ctx
+            self.DEFAULT_CONTEXT_SIZE = computed_ctx
+            logger.info("Context size computed from RAM budget: %d tokens (reserved %d MB for OS)",
+                        computed_ctx, ram_reserved_os_mb)
+        elif n_ctx == self.DEFAULT_CONTEXT_SIZE:
             self.n_ctx = self._get_model_context_size()
             self.DEFAULT_CONTEXT_SIZE = self.n_ctx
         else:
@@ -322,6 +287,17 @@ class LocalModelClient:
     # =========================================================================
     # Public Interface (matches OpenAIClient)
     # =========================================================================
+
+    def ensure_loaded(self, progress_callback=None) -> None:
+        """
+        Ensure the model is loaded. Must be called from the main thread before
+        spawning background threads that call generate(), because llama_cpp's
+        Llama() constructor is not safe to call from secondary threads on Windows.
+        """
+        if not self._model_loaded:
+            if progress_callback:
+                progress_callback("Loading AI model into memory...", 5)
+            self._load_model(progress_callback)
 
     def generate(
         self,
@@ -609,9 +585,11 @@ class LocalModelClient:
             Formatted prompt string
         """
         if self._is_llama_model():
-            # Llama 3.1 Instruct chat template
+            # Llama 3.1/3.2 Instruct chat template.
+            # Do NOT include <|begin_of_text|> here — llama-cpp adds it automatically
+            # during tokenization. Including it manually causes a duplicate that
+            # degrades response quality.
             return (
-                f"<|begin_of_text|>"
                 f"<|start_header_id|>system<|end_header_id|>\n\n"
                 f"{system_message}<|eot_id|>"
                 f"<|start_header_id|>user<|end_header_id|>\n\n"

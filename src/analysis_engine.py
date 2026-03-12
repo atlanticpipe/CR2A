@@ -48,7 +48,9 @@ class AnalysisEngine:
     def __init__(
         self,
         local_model_name: str = "llama-3.2-3b-q4",
-        gpu_mode: str = "auto"
+        gpu_mode: str = "auto",
+        ram_reserved_os_mb: int = None,
+        gpu_offload_layers: int = None,
     ):
         """
         Initialize Analysis Engine with local Llama model.
@@ -56,6 +58,8 @@ class AnalysisEngine:
         Args:
             local_model_name: Name of local model to use (default: llama-3.2-3b-q4)
             gpu_mode: "auto" (auto-detect), "cpu" (force CPU), or "gpu" (force GPU)
+            ram_reserved_os_mb: MB reserved for OS (None = auto-detect)
+            gpu_offload_layers: Explicit GPU layer count (None = use gpu_mode)
 
         Raises:
             ValueError: If model cannot be loaded
@@ -82,8 +86,10 @@ class AnalysisEngine:
         try:
             model_path = model_mgr.get_model_path(local_model_name)
 
-            # Determine n_gpu_layers from gpu_mode
-            if gpu_mode == "cpu":
+            # Determine n_gpu_layers: explicit offload_layers takes priority
+            if gpu_offload_layers is not None:
+                n_gpu_layers = None  # let LocalModelClient use gpu_offload_layers
+            elif gpu_mode == "cpu":
                 n_gpu_layers = 0
             elif gpu_mode == "gpu":
                 n_gpu_layers = -1
@@ -93,7 +99,9 @@ class AnalysisEngine:
             self.ai_client = LocalModelClient(
                 model_path=str(model_path),
                 model_name=local_model_name,
-                n_gpu_layers=n_gpu_layers
+                n_gpu_layers=n_gpu_layers,
+                ram_reserved_os_mb=ram_reserved_os_mb,
+                gpu_offload_layers=gpu_offload_layers,
             )
             logger.info("Local model client initialized successfully")
         except Exception as e:
@@ -979,11 +987,14 @@ class AnalysisEngine:
         "and respond with ONLY valid JSON, nothing else.\n\n"
         "For each clause category, provide:\n"
         "- \"Clause Location\": string describing where in the contract (section, article, page)\n"
+        "- \"Clause Page\": integer page number where the clause appears (use the --- Page N --- markers "
+        "in the text; set to null if not determinable)\n"
         "- \"Clause Summary\": brief, concise summary (1-2 sentences) of what the clause covers\n"
         "- \"Flow-Down\": array of obligations that must flow down to subcontractors\n"
         "- \"Redlines\": array of objects with \"action\" (insert/replace/delete) and \"text\" fields\n"
         "- \"Harmful Language\": array of problematic language or policy conflicts\n\n"
-        "JSON format: {\"Category Name\": {\"Clause Location\": \"...\", \"Clause Summary\": \"...\", "
+        "JSON format: {\"Category Name\": {\"Clause Location\": \"...\", \"Clause Page\": 5, "
+        "\"Clause Summary\": \"...\", "
         "\"Flow-Down\": [...], \"Redlines\": [{\"action\": \"...\", \"text\": \"...\"}], "
         "\"Harmful Language\": [...]}, ...}"
     )
@@ -1086,6 +1097,11 @@ class AnalysisEngine:
                         location = ai_clause.get("Clause Location", "")
                         if isinstance(location, str) and location:
                             existing["Clause Location"] = location
+
+                        # Update Clause Page
+                        page_num = ai_clause.get("Clause Page")
+                        if isinstance(page_num, (int, float)) and page_num > 0:
+                            existing["Clause Page"] = int(page_num)
 
                         # Update Clause Summary
                         summary = ai_clause.get("Clause Summary", "")
@@ -1447,7 +1463,14 @@ class AnalysisEngine:
                     "CANDIDATE TEXT (found by pattern matching - may be incorrect):",
                     regex_hint,
                 ])
-            user_parts.extend(["", "Return JSON only."])
+            user_parts.extend([
+                "",
+                "Return JSON only in this format:",
+                '{"found": true, "clause_location": "Section X, Article Y", "clause_page": 5, '
+                '"clause_summary": "...", "flow_down": [], "redlines": [], "harmful_language": []}',
+                'Use the --- Page N --- markers in the text to determine clause_page (integer). '
+                'Set clause_page to null if not determinable. Set found to false if not present.'
+            ])
             user_msg = "\n".join(user_parts)
 
             # 4. Call AI
@@ -1471,6 +1494,10 @@ class AnalysisEngine:
 
                     clause_summary = ai_result.get("clause_summary", "")
 
+                    # Extract page number
+                    raw_page = ai_result.get("clause_page")
+                    clause_page = int(raw_page) if isinstance(raw_page, (int, float)) and raw_page > 0 else None
+
                     # Parse redlines with validation
                     raw_redlines = ai_result.get("redlines", [])
                     parsed_redlines = []
@@ -1484,7 +1511,7 @@ class AnalysisEngine:
                                         "text": str(r["text"])
                                     })
 
-                    clause_block = {
+                    clause_block: Dict[str, Any] = {
                         "Clause Location": clause_location,
                         "Clause Summary": clause_summary,
                         "Flow-Down Obligations": [
@@ -1497,10 +1524,12 @@ class AnalysisEngine:
                             if h
                         ]
                     }
+                    if clause_page is not None:
+                        clause_block["Clause Page"] = clause_page
 
                     result[section_key][display_name] = clause_block
                     found_count += 1
-                    logger.info(f"  FOUND: {display_name} (location: {clause_location})")
+                    logger.info(f"  FOUND: {display_name} (location: {clause_location}, page: {clause_page})")
                 else:
                     # AI didn't find it — fallback to regex if high-confidence
                     if cat_key in extracted_clauses:

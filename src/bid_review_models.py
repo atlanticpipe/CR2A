@@ -23,14 +23,18 @@ class ChecklistItem:
     location: str = ""
     confidence: str = "not_found"  # high, medium, low, not_found
     notes: str = ""
+    page: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "value": self.value,
             "location": self.location,
             "confidence": self.confidence,
             "notes": self.notes,
         }
+        if self.page is not None:
+            d["page"] = self.page
+        return d
 
     @classmethod
     def from_dict(cls, data) -> "ChecklistItem":
@@ -38,11 +42,14 @@ class ChecklistItem:
             return cls()
         if isinstance(data, str):
             return cls(value=data, confidence="high" if data else "not_found")
+        raw_page = data.get("page")
+        page: Optional[int] = int(raw_page) if isinstance(raw_page, (int, float)) and raw_page > 0 else None
         return cls(
             value=data.get("value", ""),
             location=data.get("location", ""),
             confidence=data.get("confidence", "not_found"),
             notes=data.get("notes", ""),
+            page=page,
         )
 
     @property
@@ -56,6 +63,33 @@ class ChecklistItem:
 
 # Display-name -> field-name mapping for each section is stored as a class
 # attribute FIELD_MAP so the engine/UI can translate between the two.
+
+
+@dataclass
+class ProjectInformation:
+    """Section 0: Project Information (6 items)."""
+    project_title: Optional[ChecklistItem] = None
+    solicitation_number: Optional[ChecklistItem] = None
+    owner: Optional[ChecklistItem] = None
+    contractor: Optional[ChecklistItem] = None
+    scope: Optional[ChecklistItem] = None
+    bid_model: Optional[ChecklistItem] = None
+
+    FIELD_MAP = {
+        "Project Title": "project_title",
+        "Solicitation Number": "solicitation_number",
+        "Owner": "owner",
+        "Contractor": "contractor",
+        "Scope": "scope",
+        "Bid Model": "bid_model",
+    }
+
+    def to_dict(self) -> Dict[str, Any]:
+        return _section_to_dict(self)
+
+    @classmethod
+    def from_dict(cls, data) -> "ProjectInformation":
+        return _section_from_dict(cls, data)
 
 
 @dataclass
@@ -375,6 +409,7 @@ class BidChecklistResult:
     """Top-level result for a bid specification review checklist analysis."""
     schema_version: str = "v1.0.0"
     project_info: Dict[str, str] = field(default_factory=dict)
+    project_information: ProjectInformation = field(default_factory=ProjectInformation)
     standard_contract_items: StandardContractItems = field(default_factory=StandardContractItems)
     site_conditions: SiteConditions = field(default_factory=SiteConditions)
     cleaning: Cleaning = field(default_factory=Cleaning)
@@ -388,6 +423,7 @@ class BidChecklistResult:
             "_analysis_type": "bid_checklist",
             "schema_version": self.schema_version,
             "project_info": self.project_info,
+            "project_information": self.project_information.to_dict(),
             "standard_contract_items": self.standard_contract_items.to_dict(),
             "site_conditions": self.site_conditions.to_dict(),
             "cleaning": self.cleaning.to_dict(),
@@ -406,6 +442,9 @@ class BidChecklistResult:
         result = cls(
             schema_version=data.get("schema_version", "v1.0.0"),
             project_info=data.get("project_info", {}),
+            project_information=ProjectInformation.from_dict(
+                data.get("project_information", {})
+            ),
             standard_contract_items=StandardContractItems.from_dict(
                 data.get("standard_contract_items", {})
             ),
@@ -425,6 +464,7 @@ class BidChecklistResult:
     def get_completion_stats(self) -> Dict[str, Any]:
         """Return completion statistics across all sections."""
         sections = {
+            "Project Information": self.project_information,
             "Standard Contract Items": self.standard_contract_items,
             "Site Conditions": self.site_conditions,
             "Cleaning": self.cleaning,

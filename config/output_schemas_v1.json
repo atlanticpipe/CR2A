@@ -232,6 +232,10 @@
           "minLength": 1,
           "$comment": "Where in the contract this clause is found (section, page, article references)."
         },
+        "Clause Page": {
+          "type": ["integer", "null"],
+          "$comment": "1-based page number where this clause appears. Null if not determinable."
+        },
         "Clause Summary": {
           "type": "string",
           "$comment": "Brief, concise summary of what the clause covers and its key obligations."

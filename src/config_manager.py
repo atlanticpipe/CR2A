@@ -34,6 +34,8 @@ class ConfigManager:
         "local_model_threads": None,  # None = auto-detect CPU cores
         "local_model_path": None,  # Custom model path (overrides model_name)
         "gpu_mode": "auto",  # "auto" = auto-detect, "cpu" = force CPU-only, "gpu" = force GPU
+        "ram_reserved_os_mb": None,  # None = auto-detect; MB of RAM reserved for OS
+        "gpu_offload_layers": None,  # None = auto-detect; explicit layer count for GPU offload
         # Storage settings for multi-user network drive support
         "storage_mode": "local",  # "local" = %APPDATA%, "shared" = network drive
         "shared_storage_path": None,  # Path to network drive (e.g., "F:\\ContractAnalysis")
@@ -342,6 +344,30 @@ class ConfigManager:
         self.config["gpu_mode"] = mode
         logger.info(f"GPU mode set to: {mode}")
 
+    def get_ram_reserved_os_mb(self) -> Optional[int]:
+        """Get MB of RAM reserved for OS, or None for auto-detect."""
+        return self.config.get("ram_reserved_os_mb", self.DEFAULT_CONFIG["ram_reserved_os_mb"])
+
+    def set_ram_reserved_os_mb(self, mb: Optional[int]) -> None:
+        """Set MB of RAM reserved for OS. Minimum 2048 if not None."""
+        if mb is not None and mb < 2048:
+            logger.warning("RAM reserved for OS too low (%d MB). Setting to 2048.", mb)
+            mb = 2048
+        self.config["ram_reserved_os_mb"] = mb
+        logger.info(f"RAM reserved for OS set to: {mb or 'auto-detect'} MB")
+
+    def get_gpu_offload_layers(self) -> Optional[int]:
+        """Get explicit GPU offload layer count, or None for auto-detect."""
+        return self.config.get("gpu_offload_layers", self.DEFAULT_CONFIG["gpu_offload_layers"])
+
+    def set_gpu_offload_layers(self, layers: Optional[int]) -> None:
+        """Set GPU offload layer count. Must be >= 0 if not None."""
+        if layers is not None and layers < 0:
+            logger.warning("Invalid GPU offload layers: %d. Setting to 0.", layers)
+            layers = 0
+        self.config["gpu_offload_layers"] = layers
+        logger.info(f"GPU offload layers set to: {layers if layers is not None else 'auto-detect'}")
+
     def get_local_model_settings(self) -> Dict[str, Any]:
         """
         Get all local model settings as a dictionary.
@@ -353,7 +379,9 @@ class ConfigManager:
             "local_model_name": self.get_local_model_name(),
             "local_model_threads": self.get_local_model_threads(),
             "local_model_path": self.get_local_model_path(),
-            "gpu_mode": self.get_gpu_mode()
+            "gpu_mode": self.get_gpu_mode(),
+            "ram_reserved_os_mb": self.get_ram_reserved_os_mb(),
+            "gpu_offload_layers": self.get_gpu_offload_layers(),
         }
 
     # ===== Storage Settings (Multi-User Network Drive Support) =====

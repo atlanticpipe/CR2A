@@ -18,6 +18,59 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 BID_SPEC_PATTERNS: Dict[str, List[str]] = {
+    # ===== Section 0: Project Information =====
+    "project_title": [
+        r"[Pp]roject\s+[Tt]itle\s*[:\-]\s*(.{1,300})",
+        r"[Pp]roject\s+[Nn]ame\s*[:\-]\s*(.{1,300})",
+        r"[Pp]roject\s+[Dd]escription\s*[:\-]\s*(.{1,300})",
+        r"(?:INVITATION|REQUEST)\s+(?:FOR|TO)\s+(?:BID|PROPOSAL)[S]?\s+(?:FOR|ON)?\s*(.{1,300})",
+        r"IFB\s+(?:FOR|ON)?\s*(.{1,300})",
+        r"BID\s+(?:FOR|ON)\s+(.{1,300})",
+        r"necessary\s+for\s+(?:the\s+)?(.{5,200}?)\s*(?:will\s+be\s+received|$)",
+        r"(?:furnishing|providing)\s+.{0,100}for\s+(?:the\s+)?(.{5,200}?)\s*(?:will\s+be\s+received|$)",
+    ],
+    "solicitation_number": [
+        r"(?:Solicitation|IFB|Bid|Proposal|Project|Contract|Job)\s+(?:No\.?|Number|#)\s*[:\-]?\s*([A-Z0-9][\w\-\.\/]+)",
+        r"(?:No\.|Number|#)\s*[:\-]?\s*([A-Z0-9][\w\-\.\/]+)\s*(?:IFB|BID|PROPOSAL|SOLICITATION|PROJECT|CONTRACT)",
+        r"\bIFB[\s\-]([A-Z0-9][\w\-\.]+)",
+        r"\bProject\s+No\.?\s*[:\-]?\s*([A-Z0-9][\w\-\.]+)",
+        r"\bBid\s+No\.?\s*[:\-]?\s*([A-Z0-9][\w\-\.]+)",
+        r"\bContract\s+No\.?\s*[:\-]?\s*([A-Z0-9][\w\-\.]+)",
+    ],
+    "owner": [
+        r"(?:Owner|Client|Agency|Municipality|Issuing\s+(?:Agency|Authority))\s*[:\-]\s*(.{1,200})",
+        r"(?:City|County|Village|Town|Township|Authority|District|Board|Department)\s+of\s+\w[\w\s]{2,50}",
+        r"(?:prepared|issued|submitted)\s+(?:by|for|to)\s*[:\-]?\s*(.{1,200})",
+        r"[Oo]wner\s*[:\-]\s*(.{1,200})",
+        r"([\w][\w\s]{2,60}?(?:Authority|Board|District|Commission|Department|Utilities|Utility))\s*\(the\s+['\"]?[Oo]wner['\"]?\)",
+        r"received\s+by\s+(?:the\s+)?([\w][\w\s]{2,80}?(?:Authority|Board|District|Commission|Department|Utilities|City|County))",
+        r"by\s+(?:the\s+)?([\w][\w\s]{2,80}?(?:Authority|Board|District|Commission|Department|Utilities|City|County))\s*(?:at|,|\()",
+    ],
+    "contractor": [
+        r"(?:Contractor|Bidder|Prime\s+Contractor|General\s+Contractor)\s*[:\-]\s*(.+)",
+        r"[Cc]ontractor\s+(?:shall|must|is\s+responsible)",
+        r"(?:prime|general|specialty)\s+contractor",
+        r"[Bb]idder\s+(?:shall|must|is\s+responsible)",
+    ],
+    "scope": [
+        r"[Ss]cope\s+of\s+[Ww]ork\s*\n\s*(.{5,300})",
+        r"[Ss]cope\s+of\s+[Ww]ork\s*[:\-]\s*(.{5,300})",
+        r"[Ss]cope\s+of\s+[Ss]ervices?\s*[:\-]\s*(.{5,300})",
+        r"[Pp]roject\s+[Ss]cope\s*[:\-]\s*(.{5,300})",
+        r"[Ww]ork\s+(?:includes?|consists?\s+of|involves?)\s*[:\-]?\s*(.{5,300})",
+        r"[Pp]roject\s+[Cc]onsists?\s+of\s+(.{5,300})",
+    ],
+    "bid_model": [
+        r"[Uu]nit\s+[Pp]rice\s+(?:bid|contract|schedule|basis)",
+        r"[Ll]ump\s+[Ss]um\s+(?:bid|contract|basis|price|[Bb]ase)",
+        r"[Bb]id\s+(?:on\s+a\s+)?(?:unit\s+price|lump\s+sum|GMP|guaranteed\s+maximum\s+price)",
+        r"(?:unit[\-\s]?price|lump[\-\s]?sum|GMP)\s+(?:contract|agreement|basis)",
+        r"[Bb]id\s+[Ss]chedule\s*(?:unit\s+price|lump\s+sum|item)",
+        r"(?:based\s+on\s+|submitted\s+(?:on\s+a\s+)?)?(?:unit[\-\s]?price|lump[\-\s]?sum)\s+basis",
+        r"will\s+be\s+a\s+(lump\s+sum|unit\s+price)\b",
+        r"(?:Contract|Award)\s+will\s+be\s+(?:a\s+)?(lump\s+sum|unit\s+price)\b",
+    ],
+
     # ===== Section 1: Standard Contract Items =====
     "pre_bid": [
         r"(?:mandatory|required|optional)\s+pre[\-\s]?bid\s+(?:meeting|conference|site\s+visit)",
@@ -485,6 +538,12 @@ BID_SPEC_PATTERNS: Dict[str, List[str]] = {
 # ---------------------------------------------------------------------------
 
 BID_ITEM_DESCRIPTIONS: Dict[str, str] = {
+    "project_title": "The official name or title of the project. Look for text after 'REQUEST FOR BID PROPOSAL', 'INVITATION FOR BID', or phrases like 'necessary for the [Project Name]'. Extract the full project name, not surrounding sentence text.",
+    "solicitation_number": "The IFB number, Bid Number, Project Number, or Solicitation Number used to identify this bid. This is a specific alphanumeric identifier (e.g., IFB-2024-001, Project No. 123). If no such number exists in the document, respond NOT FOUND.",
+    "owner": "The entity (organization, authority, city, county, utility) that is issuing the bid and will own the work. Often labeled 'Owner', or identified as the organization receiving bids (e.g., 'received by the Macon Water Authority'). Look for patterns like '[Organization] (the \"Owner\")' or 'received by [Organization]'.",
+    "contractor": "The prime contractor / bidder who will perform the work. This is typically 'The Contractor' as a role, not a specific company name (since no contractor is selected yet at bid stage).",
+    "scope": "The overall project scope description — look for a 'Scope of Work' heading or 'Project Overview' section. Extract the descriptive summary sentence (e.g., 'Cleaning, CCTV Inspection, and Condition Assessment of storm sewer pipelines'). Do NOT extract bid item quantities like '278 LF' or unit prices from a bid schedule — those are bid items, not scope descriptions.",
+    "bid_model": "How is the bid structured? Look for 'Unit Price', 'Lump Sum', or 'GMP'. A document may say 'the Contract will be a lump sum Base Bid' or have a 'Unit Price Schedule'. Extract the primary bid type.",
     "pre_bid": "Is there a pre-bid meeting? Is it mandatory or optional? Is it in person or is there a virtual option?",
     "submission_format": "Do we need to submit hard copies via FedEx/UPS or is it an online portal/email submission? If hardcopy, is it 1 original only? Any copies? Any USB digital copies?",
     "bid_bond": "Is there a bid bond required? Typically 5% or 10%",
@@ -576,6 +635,12 @@ BID_ITEM_DESCRIPTIONS: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 SEARCH_KEYWORDS: Dict[str, List[str]] = {
+    "project_title": ["project title", "project name", "invitation for bid", "request for bid", "request for proposal", "IFB for", "bid for", "necessary for the", "furnishing all materials"],
+    "solicitation_number": ["solicitation number", "bid number", "IFB number", "project number", "contract number", "job number", "bid no", "project no", "IFB no"],
+    "owner": ["the owner", "(the owner)", "macon water", "received by", "issued by", "authority", "district", "utilities", "city of", "county of"],
+    "contractor": ["contractor", "bidder", "prime contractor", "general contractor", "contractor shall"],
+    "scope": ["scope of work", "scope of services", "project scope", "project overview", "project description", "project purpose", "purpose of this project", "project consists of"],
+    "bid_model": ["unit price", "lump sum", "base bid", "bid schedule", "unit bid", "bid basis", "GMP", "guaranteed maximum", "will be a lump", "awarded"],
     "pre_bid": ["pre-bid", "pre bid", "pre-bid meeting", "pre-bid conference", "site visit", "Teams webinar", "Zoom meeting"],
     "submission_format": ["submit", "submission", "portal", "bonfire", "bidexpress", "hard copy", "electronic", "online", "email bid", "sealed bid"],
     "bid_bond": ["bid bond", "bid security", "bid guarantee", "bid deposit"],
@@ -617,6 +682,13 @@ SEARCH_KEYWORDS: Dict[str, List[str]] = {
 # ---------------------------------------------------------------------------
 
 BID_ITEM_MAP: Dict[str, Tuple[str, str]] = {
+    # Section 0: Project Information
+    "project_title": ("project_information", "Project Title"),
+    "solicitation_number": ("project_information", "Solicitation Number"),
+    "owner": ("project_information", "Owner"),
+    "contractor": ("project_information", "Contractor"),
+    "scope": ("project_information", "Scope"),
+    "bid_model": ("project_information", "Bid Model"),
     # Section 1: Standard Contract Items
     "pre_bid": ("standard_contract_items", "Pre-Bid"),
     "submission_format": ("standard_contract_items", "Submission Format"),

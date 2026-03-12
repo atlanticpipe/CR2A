@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QProgressBar, QTabWidget, QScrollArea, QGroupBox, QLineEdit,
     QMenuBar, QMenu, QAction, QDialog, QFormLayout, QDialogButtonBox,
     QCheckBox, QSpinBox, QRadioButton, QComboBox, QButtonGroup,
-    QSplitter
+    QSplitter, QSlider, QFrame
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
@@ -1238,29 +1238,44 @@ class CR2A_GUI(QMainWindow):
             self.statusBar().showMessage(f"Initializing local AI ({model_name})...")
 
             gpu_mode = self.config_manager.get_gpu_mode() if self.config_manager else "auto"
+            ram_reserved_os_mb = self.config_manager.get_ram_reserved_os_mb() if self.config_manager else None
+            gpu_offload_layers = self.config_manager.get_gpu_offload_layers() if self.config_manager else None
             self.analysis_engine = AnalysisEngine(
                 local_model_name=model_name,
-                gpu_mode=gpu_mode
+                gpu_mode=gpu_mode,
+                ram_reserved_os_mb=ram_reserved_os_mb,
+                gpu_offload_layers=gpu_offload_layers,
             )
 
             from src.document_retriever import DocumentRetriever
             self.retriever = DocumentRetriever()
+
+        except Exception as e:
+            logger.error(f"Failed to create analysis engine: {e}", exc_info=True)
+            QMessageBox.critical(self, "Engine Error", f"Failed to initialize analysis engine:\n\n{e}")
+            return
+
+        # Load the AI model separately so a model failure doesn't block contract loading.
+        # llama_cpp's Llama() constructor is not thread-safe on Windows, so load on main thread.
+        try:
+            self.statusBar().showMessage(f"Loading AI model into memory ({model_name})...")
+            self.analysis_engine.ai_client.ensure_loaded()
             self.query_engine = QueryEngine(
                 self.analysis_engine.ai_client,
                 retriever=self.retriever
             )
-
             self.statusBar().showMessage(f"Ready (Local AI: {model_name})")
             logger.info("Local AI engine initialized successfully")
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Failed to initialize AI engine: {error_msg}", exc_info=True)
-
+            logger.error(f"Failed to load AI model: {error_msg}", exc_info=True)
+            self.statusBar().showMessage("AI model unavailable — load contract and document features still work")
             QMessageBox.critical(
                 self,
                 "AI Initialization Error",
                 f"Failed to initialize local AI model:\n\n{error_msg}\n\n"
+                "Contract loading and document features still work.\n\n"
                 "Options:\n"
                 "1. Try a different model in Settings\n"
                 "2. Check available memory (need 8GB+ RAM)\n"
@@ -1898,8 +1913,11 @@ class CR2A_GUI(QMainWindow):
     def load_contract(self):
         """Load contract: extract text + run regex (no AI). Triggered by 'Load Contract' button."""
         if not self.analysis_engine:
-            QMessageBox.warning(self, "Error", "Analysis engine not initialized.")
-            return
+            # Engine wasn't created at all (rare — e.g. config failure). Try to init now.
+            self.init_engines()
+            if not self.analysis_engine:
+                QMessageBox.warning(self, "Error", "Analysis engine not available.")
+                return
 
         if not self.current_file:
             QMessageBox.warning(self, "Error", "No file selected.")
@@ -2010,6 +2028,7 @@ class CR2A_GUI(QMainWindow):
                 file_size_bytes=getattr(self, '_file_size_bytes', 0),
             )
             self.bid_review_tab.set_engine_and_prepared(bid_engine, bid_prepared)
+            self.bid_review_tab.set_contract_file_path(self.current_file)
             self.bid_review_tab.set_contract_loaded(True)
 
         # Set up the structured view for per-item analysis
@@ -2018,6 +2037,7 @@ class CR2A_GUI(QMainWindow):
             prepared.extracted_clauses, self.analysis_engine.CATEGORY_MAP
         )
         self.structured_view.enable_analyze_buttons(True)
+        self.structured_view.set_contract_file_path(self.current_file)
 
         # Clear all boxes first
         self.structured_view._clear_all_boxes()
@@ -2459,6 +2479,9 @@ class CR2A_GUI(QMainWindow):
         except Exception as e:
             logger.error(f"Error getting result keys: {e}")
         
+        # Pass the contract file path so location fields can be rendered as hyperlinks
+        self.structured_view.set_contract_file_path(self.current_file)
+
         # Display in structured view
         self.structured_view.display_analysis(result)
         
@@ -2681,17 +2704,33 @@ class CR2A_GUI(QMainWindow):
 
 
 class SettingsDialog(QDialog):
-    """Settings dialog for local AI model configuration."""
+    """Settings dialog with hardware detection, RAM partition slider, and GPU offload slider."""
 
     def __init__(self, parent, config_manager):
         super().__init__(parent)
         self.config_manager = config_manager
         self.setWindowTitle("Settings")
         self.setModal(True)
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(580)
 
+        # Detect hardware once on open
+        from src.hardware_info import detect_hardware, estimate_os_ram_mb, RUNTIME_OVERHEAD_MB
+        self._RUNTIME_OVERHEAD_MB = RUNTIME_OVERHEAD_MB
+        self.hw_info = detect_hardware()
+        self._os_ram_snapshot = estimate_os_ram_mb()
+
+        # Import model registry for slider calculations
+        from src.model_manager import ModelManager
+        self._model_registry = ModelManager.MODEL_REGISTRY
+
+        # Block signals during init to prevent premature updates
+        self._initializing = True
         self.init_ui()
         self.load_settings()
+        self._initializing = False
+
+        # Initial update of derived displays
+        self._on_model_changed()
 
     def init_ui(self):
         """Initialize the dialog UI."""
@@ -2699,13 +2738,66 @@ class SettingsDialog(QDialog):
         self.setLayout(layout)
 
         # =====================================================================
-        # AI Model Configuration
+        # A. System Hardware Info (read-only)
+        # =====================================================================
+        hw_group = QGroupBox("System Hardware")
+        hw_form = QFormLayout()
+        hw_group.setLayout(hw_form)
+
+        cpu_text = f"{self.hw_info.cpu_name} ({self.hw_info.cpu_cores}C/{self.hw_info.cpu_threads}T)"
+        hw_form.addRow("CPU:", QLabel(cpu_text))
+
+        ram_total_gb = self.hw_info.total_ram_mb / 1024
+        ram_avail_gb = self.hw_info.available_ram_mb / 1024
+        hw_form.addRow("RAM:", QLabel(f"{ram_total_gb:.1f} GB total, {ram_avail_gb:.1f} GB available"))
+
+        if self.hw_info.gpu_name:
+            gpu_text = f"{self.hw_info.gpu_name} ({self.hw_info.gpu_type})"
+            if self.hw_info.gpu_vram_mb:
+                gpu_text += f" — {self.hw_info.gpu_vram_mb / 1024:.1f} GB VRAM"
+        else:
+            gpu_text = "No dedicated GPU detected"
+        hw_form.addRow("GPU:", QLabel(gpu_text))
+
+        layout.addWidget(hw_group)
+
+        # =====================================================================
+        # B. Quick Setup (preset buttons)
+        # =====================================================================
+        preset_group = QGroupBox("Quick Setup")
+        preset_layout = QHBoxLayout()
+        preset_group.setLayout(preset_layout)
+
+        self.fast_btn = QPushButton("Fast")
+        self.fast_btn.setToolTip("3B model, minimal GPU offload, modest RAM usage")
+        self.fast_btn.clicked.connect(lambda: self._apply_preset("fast"))
+        preset_layout.addWidget(self.fast_btn)
+
+        self.balanced_btn = QPushButton("Balanced")
+        self.balanced_btn.setToolTip("Best model that fits comfortably in your RAM")
+        self.balanced_btn.clicked.connect(lambda: self._apply_preset("balanced"))
+        preset_layout.addWidget(self.balanced_btn)
+
+        self.quality_btn = QPushButton("High Quality")
+        self.quality_btn.setToolTip("8B Q4 model for highest quality analysis")
+        self.quality_btn.clicked.connect(lambda: self._apply_preset("quality"))
+        preset_layout.addWidget(self.quality_btn)
+
+        # Disable presets that won't fit
+        total = self.hw_info.total_ram_mb
+        self.fast_btn.setEnabled(total >= 4096)       # 3B needs ~3GB + OS
+        self.balanced_btn.setEnabled(total >= 4096)
+        self.quality_btn.setEnabled(total >= 8192)     # 8B Q4 needs ~6GB + OS
+
+        layout.addWidget(preset_group)
+
+        # =====================================================================
+        # C. Model Selection & Threads
         # =====================================================================
         model_group = QGroupBox("AI Model (Local)")
         model_layout = QVBoxLayout()
         model_group.setLayout(model_layout)
 
-        # Model selection
         model_form = QFormLayout()
 
         self.model_combo = QComboBox()
@@ -2717,24 +2809,12 @@ class SettingsDialog(QDialog):
             "8B Q4_K_M: ~6GB RAM, higher quality but slower on CPU\n"
             "8B Q3_K_M: ~5GB RAM, lighter 8B option"
         )
+        self.model_combo.currentIndexChanged.connect(self._on_model_changed)
         model_form.addRow("Model:", self.model_combo)
 
-        # GPU mode toggle
-        self.gpu_mode_combo = QComboBox()
-        self.gpu_mode_combo.addItem("Auto-detect", "auto")
-        self.gpu_mode_combo.addItem("CPU Only", "cpu")
-        self.gpu_mode_combo.addItem("Force GPU", "gpu")
-        self.gpu_mode_combo.setToolTip(
-            "Auto-detect: Use GPU if available, fall back to CPU\n"
-            "CPU Only: Force CPU-only inference (no GPU)\n"
-            "Force GPU: Always use GPU (fails if no GPU available)"
-        )
-        model_form.addRow("Inference Device:", self.gpu_mode_combo)
-
-        # CPU threads
         self.threads_spinner = QSpinBox()
         self.threads_spinner.setRange(1, 32)
-        self.threads_spinner.setValue(0)  # 0 = auto-detect
+        self.threads_spinner.setValue(0)
         self.threads_spinner.setSpecialValueText("Auto-detect")
         self.threads_spinner.setToolTip("Number of CPU threads to use for inference (0 = auto-detect)")
         model_form.addRow("CPU Threads:", self.threads_spinner)
@@ -2753,12 +2833,234 @@ class SettingsDialog(QDialog):
         layout.addWidget(model_group)
 
         # =====================================================================
-        # Dialog Buttons
+        # D. RAM Partition Slider
+        # =====================================================================
+        ram_group = QGroupBox("RAM Allocation")
+        ram_layout = QVBoxLayout()
+        ram_group.setLayout(ram_layout)
+
+        ram_layout.addWidget(QLabel("Drag to allocate RAM between OS and model:"))
+
+        self.ram_slider = QSlider(Qt.Horizontal)
+        self.ram_slider.setTickPosition(QSlider.TicksBelow)
+        self.ram_slider.setTickInterval(512)
+        # Range set in _on_model_changed(); value = ram_reserved_os_mb
+        self.ram_slider.valueChanged.connect(self._update_ram_display)
+        ram_layout.addWidget(self.ram_slider)
+
+        # Labels below slider: OS side (left) and Model side (right)
+        ram_labels = QHBoxLayout()
+        self.ram_os_label = QLabel("OS & Apps: -- GB")
+        self.ram_model_label = QLabel("Model: -- GB")
+        self.ram_model_label.setAlignment(Qt.AlignRight)
+        ram_labels.addWidget(self.ram_os_label)
+        ram_labels.addStretch()
+        ram_labels.addWidget(self.ram_model_label)
+        ram_layout.addLayout(ram_labels)
+
+        # Breakdown label
+        self.ram_breakdown_label = QLabel("")
+        self.ram_breakdown_label.setStyleSheet("color: #666;")
+        ram_layout.addWidget(self.ram_breakdown_label)
+
+        # Warning label (hidden by default)
+        self.ram_warning_label = QLabel("")
+        self.ram_warning_label.setStyleSheet("color: red; font-weight: bold;")
+        self.ram_warning_label.hide()
+        ram_layout.addWidget(self.ram_warning_label)
+
+        layout.addWidget(ram_group)
+
+        # =====================================================================
+        # E. GPU Offload Slider
+        # =====================================================================
+        self.gpu_group = QGroupBox("GPU Offload")
+        gpu_layout = QVBoxLayout()
+        self.gpu_group.setLayout(gpu_layout)
+
+        self.gpu_slider = QSlider(Qt.Horizontal)
+        self.gpu_slider.setTickPosition(QSlider.TicksBelow)
+        self.gpu_slider.setTickInterval(1)
+        self.gpu_slider.setMinimum(0)
+        self.gpu_slider.setMaximum(32)  # updated in _on_model_changed
+        self.gpu_slider.valueChanged.connect(self._update_gpu_label)
+        gpu_layout.addWidget(self.gpu_slider)
+
+        self.gpu_offload_label = QLabel("0 of 0 layers  --  0 GB")
+        gpu_layout.addWidget(self.gpu_offload_label)
+
+        if self.hw_info.gpu_type == "integrated":
+            gpu_layout.addWidget(QLabel("(Shared RAM — GPU offload uses system memory)"))
+
+        # GPU warning label
+        self.gpu_warning_label = QLabel("")
+        self.gpu_warning_label.setStyleSheet("color: red; font-weight: bold;")
+        self.gpu_warning_label.hide()
+        gpu_layout.addWidget(self.gpu_warning_label)
+
+        # Only show GPU group if a GPU is detected
+        self.gpu_group.setVisible(self.hw_info.gpu_type != "none")
+        layout.addWidget(self.gpu_group)
+
+        # =====================================================================
+        # F. Dialog Buttons
         # =====================================================================
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.save_settings)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
+
+    def _get_selected_model_info(self):
+        """Return MODEL_REGISTRY entry for currently selected model."""
+        model_key = self.model_combo.currentData()
+        return model_key, self._model_registry.get(model_key, {})
+
+    def _on_model_changed(self):
+        """Update slider ranges when the model selection changes."""
+        model_key, info = self._get_selected_model_info()
+        if not info:
+            return
+
+        total = self.hw_info.total_ram_mb
+        size_mb = info.get("size_mb", 2020)
+        num_layers = info.get("num_layers", 28)
+
+        # RAM slider: min = OS floor, max = total - model weights minimum
+        os_floor = max(2048, self._os_ram_snapshot)
+        model_floor = size_mb + self._RUNTIME_OVERHEAD_MB
+        ram_max = max(os_floor, total - model_floor)
+
+        self.ram_slider.setMinimum(os_floor)
+        self.ram_slider.setMaximum(ram_max)
+
+        # If current value is out of range, clamp it
+        if self.ram_slider.value() < os_floor:
+            self.ram_slider.setValue(os_floor)
+        elif self.ram_slider.value() > ram_max:
+            self.ram_slider.setValue(ram_max)
+
+        # GPU slider: 0 to num_layers
+        self.gpu_slider.setMaximum(num_layers)
+        if self.gpu_slider.value() > num_layers:
+            self.gpu_slider.setValue(num_layers)
+
+        self._update_ram_display()
+        self._update_gpu_label()
+
+    def _update_ram_display(self):
+        """Update RAM partition labels and breakdown."""
+        if self._initializing:
+            return
+
+        total = self.hw_info.total_ram_mb
+        os_reserved = self.ram_slider.value()
+        model_ram = total - os_reserved
+
+        self.ram_os_label.setText(f"OS & Apps: {os_reserved / 1024:.1f} GB")
+        self.ram_model_label.setText(f"Model: {model_ram / 1024:.1f} GB")
+
+        # Compute breakdown
+        model_key, info = self._get_selected_model_info()
+        if info:
+            from src.hardware_info import get_ram_breakdown
+            gpu_layers = self.gpu_slider.value() if self.gpu_group.isVisible() else 0
+            breakdown = get_ram_breakdown(
+                total_model_ram_mb=model_ram,
+                model_key=model_key,
+                gpu_offload_layers=gpu_layers,
+                gpu_type=self.hw_info.gpu_type,
+            )
+            tokens = breakdown["estimated_tokens"]
+            token_str = f"{tokens:,}" if tokens > 0 else "0"
+            parts = [f"Weights: {breakdown['weights_mb'] / 1024:.1f} GB"]
+            if breakdown["gpu_offload_mb"] > 0:
+                parts.append(f"GPU offload: {breakdown['gpu_offload_mb'] / 1024:.1f} GB")
+            parts.append(f"Context cache: {breakdown['context_cache_mb'] / 1024:.1f} GB")
+            parts.append(f"~{token_str} tokens")
+            self.ram_breakdown_label.setText("  |  ".join(parts))
+
+            # Warning check
+            self._check_allocation_warnings(model_ram, breakdown)
+
+    def _update_gpu_label(self):
+        """Update GPU slider label showing layers and GB."""
+        if self._initializing:
+            return
+
+        model_key, info = self._get_selected_model_info()
+        layers = self.gpu_slider.value()
+        num_layers = info.get("num_layers", 28) if info else 28
+        mb_per_layer = info.get("mb_per_layer", 100) if info else 100
+
+        gb = (layers * mb_per_layer) / 1024
+        self.gpu_offload_label.setText(
+            f"{layers} of {num_layers} layers  --  ~{gb:.2f} GB"
+        )
+
+        # For integrated GPUs, GPU changes affect RAM breakdown
+        if self.hw_info.gpu_type == "integrated":
+            self._update_ram_display()
+
+    def _check_allocation_warnings(self, model_ram_mb, breakdown):
+        """Show/hide warnings if allocations exceed available memory."""
+        total_needed = (
+            breakdown["weights_mb"]
+            + breakdown["gpu_offload_mb"]
+            + self._RUNTIME_OVERHEAD_MB
+        )
+
+        if total_needed > model_ram_mb:
+            self.ram_warning_label.setText(
+                "Warning: Model weights + GPU offload exceed available model RAM"
+            )
+            self.ram_warning_label.show()
+        elif breakdown["estimated_tokens"] < 512:
+            self.ram_warning_label.setText(
+                "Warning: Very low context window — increase model RAM or reduce GPU offload"
+            )
+            self.ram_warning_label.show()
+        else:
+            self.ram_warning_label.hide()
+
+    def _apply_preset(self, preset: str):
+        """Apply a Quick Setup preset."""
+        total = self.hw_info.total_ram_mb
+        has_gpu = self.hw_info.gpu_type != "none"
+
+        if preset == "fast":
+            self.model_combo.setCurrentIndex(
+                self.model_combo.findData("llama-3.2-3b-q4"))
+            os_reserved = max(2048, self._os_ram_snapshot)
+            self.ram_slider.setValue(min(os_reserved + 1024, self.ram_slider.maximum()))
+            if has_gpu:
+                self.gpu_slider.setValue(0)
+
+        elif preset == "balanced":
+            if total >= 12288:
+                # 12+ GB: use 8B Q3 (lighter 8B)
+                self.model_combo.setCurrentIndex(
+                    self.model_combo.findData("llama-3.1-8b-q3"))
+            else:
+                # Under 12 GB: use 3B
+                self.model_combo.setCurrentIndex(
+                    self.model_combo.findData("llama-3.2-3b-q4"))
+            os_reserved = max(2048, self._os_ram_snapshot)
+            self.ram_slider.setValue(min(os_reserved + 512, self.ram_slider.maximum()))
+            if has_gpu:
+                num_layers = self._model_registry.get(
+                    self.model_combo.currentData(), {}).get("num_layers", 28)
+                self.gpu_slider.setValue(num_layers // 2)
+
+        elif preset == "quality":
+            self.model_combo.setCurrentIndex(
+                self.model_combo.findData("llama-3.1-8b-q4"))
+            # Give model as much RAM as reasonable
+            os_floor = max(2048, self._os_ram_snapshot)
+            self.ram_slider.setValue(os_floor)
+            if has_gpu:
+                num_layers = self._model_registry.get(
+                    "llama-3.1-8b-q4", {}).get("num_layers", 32)
+                self.gpu_slider.setValue(num_layers)
 
     def load_settings(self):
         """Load current settings from config manager."""
@@ -2770,16 +3072,37 @@ class SettingsDialog(QDialog):
         if index >= 0:
             self.model_combo.setCurrentIndex(index)
 
-        gpu_mode = self.config_manager.get_gpu_mode()
-        gpu_index = self.gpu_mode_combo.findData(gpu_mode)
-        if gpu_index >= 0:
-            self.gpu_mode_combo.setCurrentIndex(gpu_index)
-
         threads = self.config_manager.get_local_model_threads()
         if threads is not None:
             self.threads_spinner.setValue(threads)
         else:
             self.threads_spinner.setValue(0)
+
+        # RAM slider
+        ram_reserved = self.config_manager.get_ram_reserved_os_mb()
+        if ram_reserved is not None:
+            self.ram_slider.setValue(ram_reserved)
+        else:
+            # Default: reserve current OS usage + 1 GB headroom
+            default_reserved = min(
+                self._os_ram_snapshot + 1024,
+                self.hw_info.total_ram_mb - 2048
+            )
+            self.ram_slider.setValue(max(2048, default_reserved))
+
+        # GPU slider
+        gpu_layers = self.config_manager.get_gpu_offload_layers()
+        if gpu_layers is not None:
+            self.gpu_slider.setValue(gpu_layers)
+        else:
+            # Default: 0 for CPU-only, all layers if GPU available
+            gpu_mode = self.config_manager.get_gpu_mode()
+            if gpu_mode == "cpu" or self.hw_info.gpu_type == "none":
+                self.gpu_slider.setValue(0)
+            else:
+                model_key = self.model_combo.currentData()
+                num_layers = self._model_registry.get(model_key, {}).get("num_layers", 0)
+                self.gpu_slider.setValue(num_layers)
 
     def open_model_manager(self):
         """Open Model Management Dialog."""
@@ -2796,13 +3119,21 @@ class SettingsDialog(QDialog):
             model_name = self.model_combo.currentData()
             self.config_manager.set_local_model_name(model_name)
 
-            gpu_mode = self.gpu_mode_combo.currentData()
-            self.config_manager.set_gpu_mode(gpu_mode)
-
             threads = self.threads_spinner.value()
             if threads == 0:
                 threads = None
             self.config_manager.set_local_model_threads(threads)
+
+            # Save RAM and GPU settings
+            self.config_manager.set_ram_reserved_os_mb(self.ram_slider.value())
+            gpu_layers = self.gpu_slider.value() if self.gpu_group.isVisible() else None
+            self.config_manager.set_gpu_offload_layers(gpu_layers)
+
+            # Derive gpu_mode for backward compat
+            if gpu_layers is None or gpu_layers == 0:
+                self.config_manager.set_gpu_mode("cpu")
+            else:
+                self.config_manager.set_gpu_mode("gpu")
 
             self.config_manager.save_config()
             self.accept()
