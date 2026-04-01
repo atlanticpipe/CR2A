@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv*/
+.venv/
+
+# Build artifacts
+build/
+dist/
+*.spec
+
+# Binary tools (downloaded at build time)
+build_tools/poppler/
+build_tools/tesseract/
+
+# Generated data
+extracted_texts/
+analyses/
+
+# Test data (large files)
+docs/test_bids/
+
+# Certificates and secrets
+cert/
+*.pfx
+*.cer
+*.pem
+*.key
+.env
+
+# Generated output files
+_am_*.txt
+bid_review_checklist.xlsx
+
+# IDE / editor
+.vscode/
+
+# Claude Code local settings
+.claude/settings.local.json

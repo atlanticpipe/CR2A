@@ -534,7 +534,7 @@ ADMINISTRATIVE_FIELD_MAPPING = {
     'retainage_progress_payments': 'Retainage, Progress Payments & Final Payment Terms',
     'pay_when_paid': 'Pay-When-Paid, Pay-If-Paid, or Owner Payment Contingencies',
     'price_escalation': 'Price Escalation Clauses (Labor, Materials, Fuel, Inflation Adjustments)',
-    'fuel_price_adjustment': 'Fuel Price Adjustment / Fuel Cost Caps',
+
     'change_orders': 'Change Orders, Scope Adjustments & Modifications',
     'termination_for_convenience': 'Termination for Convenience (Owner/Agency Right to Terminate Without Cause)',
     'termination_for_cause': 'Termination for Cause / Default by Contractor',
@@ -622,7 +622,6 @@ class AdministrativeAndCommercialTerms:
     retainage_progress_payments: Optional[ClauseBlock] = None
     pay_when_paid: Optional[ClauseBlock] = None
     price_escalation: Optional[ClauseBlock] = None
-    fuel_price_adjustment: Optional[ClauseBlock] = None
     change_orders: Optional[ClauseBlock] = None
     termination_for_convenience: Optional[ClauseBlock] = None
     termination_for_cause: Optional[ClauseBlock] = None

@@ -159,6 +159,7 @@ GUI_CONFIG = BuildConfig(
     data_files=[
         ("assets", "assets"),
         ("config", "config"),
+        ("templates", "templates"),  # Excel templates for bid review output
         ("build_tools/poppler", "poppler"),  # Poppler binaries for OCR (pdf2image)
         ("build_tools/tesseract", "tesseract"),  # Tesseract OCR engine
     ],
@@ -221,6 +222,12 @@ GUI_CONFIG = BuildConfig(
         "src.version_comparison_view",
         "src.version_database",
         "src.version_manager",
+        # New modules (Claude API backend, tools, knowledge)
+        "src.anthropic_client",
+        "src.api_key_manager",
+        "src.tool_registry",
+        "src.knowledge_store",
+        "src.excel_template_builder",
         # Analyzer modules
         "analyzer",
         "analyzer.bid_spec_patterns",
@@ -238,9 +245,21 @@ GUI_CONFIG = BuildConfig(
         "pdf2image",
         "PIL",
         "PIL.Image",
+        # Anthropic / Claude API
+        "anthropic",
+        "anthropic._client",
+        "anthropic.resources",
+        "anthropic.types",
+        "httpx",
     ],
-    collect_packages=["PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract"],
-    excludes=["pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook"],
+    collect_packages=["PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract", "anthropic"],
+    excludes=[
+        "pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook",
+        # Heavy packages pulled in transitively but not needed at runtime
+        "torch", "torchvision", "torchaudio", "sympy", "numpy.distutils",
+        "scipy", "matplotlib", "pandas", "sklearn", "tensorflow",
+        "transformers", "datasets", "accelerate", "triton",
+    ],
 )
 
 # Full build configuration (with bundled Llama model)
@@ -254,6 +273,7 @@ GUI_FULL_CONFIG = BuildConfig(
     data_files=[
         ("assets", "assets"),
         ("config", "config"),
+        ("templates", "templates"),  # Excel templates for bid review output
         ("models", "models"),  # Bundle Llama model files
         ("build_tools/poppler", "poppler"),  # Poppler binaries for OCR (pdf2image)
         ("build_tools/tesseract", "tesseract"),  # Tesseract OCR engine
@@ -318,6 +338,12 @@ GUI_FULL_CONFIG = BuildConfig(
         "src.version_comparison_view",
         "src.version_database",
         "src.version_manager",
+        # New modules (Claude API backend, tools, knowledge)
+        "src.anthropic_client",
+        "src.api_key_manager",
+        "src.tool_registry",
+        "src.knowledge_store",
+        "src.excel_template_builder",
         # Analyzer modules
         "analyzer",
         "analyzer.bid_spec_patterns",
@@ -335,9 +361,20 @@ GUI_FULL_CONFIG = BuildConfig(
         "pdf2image",
         "PIL",
         "PIL.Image",
+        # Anthropic / Claude API
+        "anthropic",
+        "anthropic._client",
+        "anthropic.resources",
+        "anthropic.types",
+        "httpx",
     ],
-    collect_packages=["PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract"],
-    excludes=["pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook"],
+    collect_packages=["PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract", "anthropic"],
+    excludes=[
+        "pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook",
+        "torch", "torchvision", "torchaudio", "sympy", "numpy.distutils",
+        "scipy", "matplotlib", "pandas", "sklearn", "tensorflow",
+        "transformers", "datasets", "accelerate", "triton",
+    ],
 )
 
 INSTALLER_CONFIG = InstallerConfig(
@@ -1131,6 +1168,23 @@ class BuildManager:
         # Step 4: Execute PyInstaller via subprocess
         print(f"[3/4] Running PyInstaller...")
         try:
+            # Set QT_PLUGIN_PATH so PyInstaller's Qt hooks can find plugins
+            # (QLibraryInfo may return wrong paths on some installs)
+            build_env = os.environ.copy()
+            try:
+                import PyQt5
+                pyqt5_dir = os.path.dirname(PyQt5.__file__)
+                pyqt5_plugins = os.path.join(pyqt5_dir, 'Qt5', 'plugins')
+                if os.path.isdir(pyqt5_plugins):
+                    build_env['QT_PLUGIN_PATH'] = pyqt5_plugins
+                    # Set platform plugin path so QCoreApplication doesn't hang
+                    # in PyInstaller's @isolated.decorate subprocess
+                    platforms_dir = os.path.join(pyqt5_plugins, 'platforms')
+                    if os.path.isdir(platforms_dir):
+                        build_env['QT_QPA_PLATFORM_PLUGIN_PATH'] = platforms_dir
+            except ImportError:
+                pass
+
             result = subprocess.run(
                 [
                     sys.executable, '-m', 'PyInstaller',
@@ -1139,7 +1193,8 @@ class BuildManager:
                 ],
                 cwd=str(self.project_root),
                 capture_output=True,
-                text=True
+                text=True,
+                env=build_env,
             )
             
             if result.returncode != 0:
@@ -1202,6 +1257,16 @@ class BuildManager:
         # Step 6: Post-build cleanup
         print(f"      Cleaning up build artifacts...")
         self.artifact_cleaner.clean_post_build(config.name)
+
+        # Step 6b: Remove Vulkan backend DLL from llama_cpp in dist.
+        # The pip-installed llama-cpp-python ships ggml-vulkan.dll which causes
+        # access violation crashes in the frozen build (Vulkan init fails in
+        # PyInstaller's bundled environment). Removing it forces CPU-only.
+        if not config.onefile:
+            vulkan_dll = output_path.parent / "_internal" / "llama_cpp" / "lib" / "ggml-vulkan.dll"
+            if vulkan_dll.exists():
+                vulkan_dll.unlink()
+                print(f"      Removed ggml-vulkan.dll (CPU-only build)")
         
         duration = time.time() - start_time
         

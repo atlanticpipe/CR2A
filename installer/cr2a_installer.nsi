@@ -126,9 +126,12 @@ VIAddVersionKey "ProductVersion" "${PRODUCT_VERSION}"
 !define MUI_FINISHPAGE_TEXT "The ${PRODUCT_NAME} has been successfully installed on your computer.$\r$\n$\r$\nClick Finish to close the installer."
 
 ; Requirement 7.4: Offer an option to launch the CR2A_Application immediately
-!define MUI_FINISHPAGE_RUN "$INSTDIR\${EXE_NAME}"
+; Launch as the normal (non-elevated) user so mapped network drives (e.g. F:\)
+; are visible. The installer runs as admin, but the app must not.
+!define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Launch ${PRODUCT_NAME}"
 !define MUI_FINISHPAGE_RUN_CHECKED
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchAsUser
 
 ; Finish page - displays completion message with launch option
 !insertmacro MUI_PAGE_FINISH
@@ -202,6 +205,17 @@ FunctionEnd
 
 Function .onInit
     ; Any initialization code can go here
+FunctionEnd
+
+;--------------------------------
+; Launch as Normal User Function
+;--------------------------------
+; Mapped network drives (e.g. F:\) are per-user and invisible to elevated
+; processes. ShellExecAsUser (via ShellExecute with explorer.exe) launches
+; the app de-elevated so the current user's drive mappings are available.
+
+Function LaunchAsUser
+    Exec '"$WINDIR\explorer.exe" "$INSTDIR\${EXE_NAME}"'
 FunctionEnd
 
 ;--------------------------------

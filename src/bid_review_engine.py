@@ -34,6 +34,7 @@ from src.bid_review_models import (
     StandardContractItems,
 )
 from src.analysis_models import ContractMetadata
+from src.contract_uploader import page_from_char_position
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,7 @@ class BidReviewEngine:
         # Gather context: regex matches + keyword search fallback + section fallback
         context_parts = []
         regex_matches = prepared.regex_results.get(item_key, [])
+        self._last_keyword_positions = []  # Reset for this item
 
         if regex_matches:
             for match in regex_matches[:3]:  # Top 3 matches
@@ -195,6 +197,19 @@ class BidReviewEngine:
                     confidence="not_found",
                     notes=str(e),
                 )
+
+            # Fix page number: AI often can't see page markers in snippets,
+            # so compute from the character position in the full text instead
+            if item.page is None:
+                best_pos = None
+                if regex_matches:
+                    best_pos = regex_matches[0].get("position")
+                elif self._last_keyword_positions:
+                    best_pos = self._last_keyword_positions[0]
+                if best_pos is not None:
+                    item.page = page_from_char_position(
+                        prepared.contract_text, best_pos
+                    )
         else:
             # Regex-only mode: use captured value or context snippet
             if regex_hint:
@@ -308,6 +323,9 @@ class BidReviewEngine:
 
         Uses SEARCH_KEYWORDS for domain-specific phrases first, then falls
         back to splitting the display name into individual words.
+
+        Also populates self._last_keyword_positions with match positions
+        so page numbers can be computed from character offsets.
         """
         # Use domain-specific phrases first (higher quality matches)
         phrase_keywords = SEARCH_KEYWORDS.get(item_key, [])
@@ -317,6 +335,7 @@ class BidReviewEngine:
         ))
 
         snippets = []
+        match_positions = []  # Track character positions of matches
         seen_positions = set()  # Avoid overlapping snippets
         text_lower = text.lower()
         context_radius = 800  # chars around each match
@@ -336,6 +355,7 @@ class BidReviewEngine:
                     start = max(0, pos - context_radius)
                     end = min(len(text), pos + context_radius)
                     snippets.append(text[start:end])
+                    match_positions.append(pos)
                 idx = pos + len(kw_lower)
 
         # If phrases didn't find enough, try individual words
@@ -354,8 +374,10 @@ class BidReviewEngine:
                         start = max(0, pos - context_radius)
                         end = min(len(text), pos + context_radius)
                         snippets.append(text[start:end])
+                        match_positions.append(pos)
                     idx = pos + len(kw)
 
+        self._last_keyword_positions = match_positions[:max_snippets]
         return snippets[:max_snippets]
 
     def _section_fallback(

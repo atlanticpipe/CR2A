@@ -78,10 +78,9 @@ CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "price_escalation": [
         "price escalation", "cost adjustment", "inflation", "escalation clause",
         "price adjustment", "labor escalation", "material escalation",
-    ],
-    "fuel_price_adjustment": [
         "fuel price", "fuel adjustment", "fuel surcharge", "fuel cost",
-        "fuel escalation", "diesel", "gasoline price",
+        "fuel escalation", "diesel",
+        "adjustments to price", "producer price index", "ppi",
     ],
     "change_orders": [
         "change order", "change orders", "scope change", "field order",
@@ -144,6 +143,8 @@ CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "suspension_of_work": [
         "suspension", "suspend work", "stop work", "work stoppage",
         "suspension of work", "resumption", "standby",
+        "delay performance", "stopped or delayed", "stoppage or delay",
+        "right to delay", "stop the work",
     ],
     "submittals": [
         "submittal", "shop drawing", "product data", "sample",
@@ -242,6 +243,8 @@ CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "site_conditions": [
         "site condition", "differing site condition", "subsurface",
         "changed condition", "concealed condition", "unforeseen condition",
+        "access to work site", "site access", "free access",
+        "work site", "work area", "other contractors",
     ],
     "environmental": [
         "environmental", "hazardous material", "waste disposal", "asbestos",
@@ -267,6 +270,7 @@ CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "eeo": [
         "equal opportunity", "eeo", "non-discrimination", "affirmative action",
         "title vi", "civil rights", "nondiscrimination",
+        "anti-discrimination", "discriminate", "discrimination",
     ],
     "mwbe_dbe": [
         "minority business", "dbe", "mbe", "wbe", "disadvantaged business",

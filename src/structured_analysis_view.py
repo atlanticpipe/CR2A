@@ -10,7 +10,8 @@ import logging
 from typing import Dict, Any, Optional, List
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QScrollArea, QTextEdit
+    QFrame, QScrollArea, QTextEdit, QDialog, QDialogButtonBox,
+    QPlainTextEdit, QLineEdit
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -130,6 +131,13 @@ class StructuredAnalysisView(QWidget):
 
     # Signal emitted when user clicks Analyze on a category box (emits cat_key)
     analyze_requested = pyqtSignal(str)
+
+    # Knowledge feedback signals
+    feedback_accepted = pyqtSignal(str, dict)       # cat_key, clause_block data
+    feedback_corrected = pyqtSignal(str, dict, str)  # cat_key, original_data, corrected_text
+
+    # Signal emitted when user adds a manual clause (cat_key, clause_block dict)
+    clause_added = pyqtSignal(str, dict)
 
     # Section display names and icons
     SECTION_INFO = {
@@ -326,7 +334,69 @@ class StructuredAnalysisView(QWidget):
         """Handle Analyze button click on a category box."""
         if box.cat_key:
             self.analyze_requested.emit(box.cat_key)
-    
+
+    def _on_add_clause_clicked(self, box: CollapsibleSection, cat_key: str):
+        """Open a dialog for the user to manually add an additional clause instance."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Add Clause: {cat_key.replace('_', ' ').title()}")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(300)
+
+        layout = QVBoxLayout(dialog)
+
+        location_label = QLabel("Clause Location:")
+        location_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(location_label)
+
+        location_edit = QLineEdit()
+        location_edit.setPlaceholderText("e.g. Section 5.3, Page 12 or Addendum B, Article IV")
+        layout.addWidget(location_edit)
+
+        summary_label = QLabel("Clause Summary:")
+        summary_label.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        layout.addWidget(summary_label)
+
+        summary_edit = QPlainTextEdit()
+        summary_edit.setPlaceholderText("Describe what this clause covers...")
+        summary_edit.setMinimumHeight(100)
+        layout.addWidget(summary_edit)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addWidget(btn_box)
+
+        if dialog.exec_() == QDialog.Accepted:
+            location = location_edit.text().strip()
+            summary = summary_edit.toPlainText().strip()
+            if location or summary:
+                new_clause = {
+                    'Clause Location': location or '(not specified)',
+                    'Clause Summary': summary or '(not specified)',
+                    'Redline Recommendations': [],
+                    'Harmful Language / Policy Conflicts': [],
+                }
+                # Add the new clause content widget before the Add Clause button
+                if hasattr(box, 'content_widget_layout'):
+                    # Insert instance header + content before the last widget (the Add Clause button)
+                    insert_pos = max(0, box.content_widget_layout.count() - 1)
+
+                    instance_label = QLabel("Added by user")
+                    instance_label.setStyleSheet(
+                        "font-weight: bold; color: #FF9800; font-size: 11px; "
+                        "padding: 4px 0 2px 0; border-bottom: 1px solid #e0e0e0;"
+                    )
+                    box.content_widget_layout.insertWidget(insert_pos, instance_label)
+
+                    content = self._create_clause_block_content(new_clause, cat_key=cat_key)
+                    if content:
+                        box.content_widget_layout.insertWidget(insert_pos + 1, content)
+
+                    box.is_empty = False
+
+                # Emit signal so the main window can persist the new clause
+                self.clause_added.emit(cat_key, new_clause)
+
     def set_contract_file_path(self, path: Optional[str]):
         """Set the full path to the loaded contract file for hyperlink generation."""
         self.contract_file_path = path
@@ -674,8 +744,9 @@ class StructuredAnalysisView(QWidget):
             return
         
         # Check if this is a "Not found" clause
+        cat_key = box.cat_key  # cat_key for feedback signals
         if self._is_not_found_clause(clause_data):
-            # Display "Not found" message
+            # Display "Not found" message with feedback buttons
             not_found_frame = QFrame()
             not_found_frame.setStyleSheet("""
                 QFrame {
@@ -685,16 +756,21 @@ class StructuredAnalysisView(QWidget):
                 }
             """)
             not_found_layout = QVBoxLayout(not_found_frame)
-            
-            not_found_label = QLabel("⚠️ Not found in contract")
+
+            not_found_label = QLabel("Not found in contract")
             not_found_label.setStyleSheet("font-style: italic; color: #666; font-size: 11px;")
             not_found_layout.addWidget(not_found_label)
-            
+
+            # Feedback buttons — allow user to override "not found"
+            if cat_key:
+                feedback_bar = self._create_feedback_bar(cat_key, clause_data)
+                not_found_layout.addLayout(feedback_bar)
+
             box.content_widget_layout.addWidget(not_found_frame)
             box.is_empty = True  # Treat "not found" as empty for minimization
         else:
             # Display full clause details
-            content = self._create_clause_block_content(clause_data)
+            content = self._create_clause_block_content(clause_data, cat_key=cat_key)
             if content:
                 box.content_widget_layout.addWidget(content)
                 box.is_empty = False
@@ -846,7 +922,7 @@ class StructuredAnalysisView(QWidget):
             url_path = '/' + url_path
         return f"file://{url_path}#page={page}"
 
-    def _create_clause_block_content(self, data: Dict[str, Any]) -> Optional[QWidget]:
+    def _create_clause_block_content(self, data: Dict[str, Any], cat_key: str = None) -> Optional[QWidget]:
         """Create content for a single clause block with all 6 required fields."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -978,9 +1054,133 @@ class StructuredAnalysisView(QWidget):
                 field_layout.addWidget(value_label)
 
             layout.addWidget(field_frame)
-        
+
+        # Feedback buttons for knowledge learning
+        if cat_key:
+            feedback_bar = self._create_feedback_bar(cat_key, data)
+            layout.addLayout(feedback_bar)
+
         return widget
-    
+
+    def _create_feedback_bar(self, cat_key: str, data: dict) -> QHBoxLayout:
+        """Create Accept/Correct feedback button bar for a clause result."""
+        feedback_bar = QHBoxLayout()
+        feedback_bar.setContentsMargins(0, 5, 0, 0)
+
+        accept_btn = QPushButton("Accept")
+        accept_btn.setFixedHeight(24)
+        accept_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50; color: white;
+                border: none; border-radius: 3px;
+                padding: 2px 12px; font-size: 11px;
+            }
+            QPushButton:hover { background-color: #43A047; }
+            QPushButton:disabled { background-color: #A5D6A7; }
+        """)
+        accept_btn.setToolTip("Save this as a good example for future analyses")
+
+        correct_btn = QPushButton("Correct")
+        correct_btn.setFixedHeight(24)
+        correct_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800; color: white;
+                border: none; border-radius: 3px;
+                padding: 2px 12px; font-size: 11px;
+            }
+            QPushButton:hover { background-color: #FB8C00; }
+            QPushButton:disabled { background-color: #FFCC80; }
+        """)
+        correct_btn.setToolTip("Edit this summary and save the correction")
+
+        def on_accept():
+            self.feedback_accepted.emit(cat_key, data)
+            accept_btn.setText("Saved")
+            accept_btn.setEnabled(False)
+            correct_btn.setEnabled(False)
+
+        def on_correct():
+            self._open_correction_dialog(cat_key, data, accept_btn, correct_btn)
+
+        accept_btn.clicked.connect(on_accept)
+        correct_btn.clicked.connect(on_correct)
+
+        feedback_bar.addWidget(accept_btn)
+        feedback_bar.addWidget(correct_btn)
+        feedback_bar.addStretch()
+
+        return feedback_bar
+
+    def _open_correction_dialog(self, cat_key: str, original_data: dict,
+                                accept_btn: QPushButton, correct_btn: QPushButton):
+        """Open a dialog for the user to correct the AI summary."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Correct: {cat_key.replace('_', ' ').title()}")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(350)
+
+        layout = QVBoxLayout(dialog)
+
+        # Original summary (read-only)
+        original_summary = (original_data.get('Clause Summary')
+                          or original_data.get('clause_summary') or "")
+        is_not_found = not original_summary or original_summary.upper() == "NOT FOUND"
+
+        orig_label = QLabel("Original:")
+        orig_label.setStyleSheet("font-weight: bold; color: #666;")
+        layout.addWidget(orig_label)
+
+        orig_display = QLabel("(Not found)" if is_not_found else original_summary)
+        orig_display.setWordWrap(True)
+        orig_display.setStyleSheet(
+            "background: #f5f5f5; padding: 8px; border-radius: 3px; color: #666;"
+        )
+        layout.addWidget(orig_display)
+
+        # Corrected summary (editable)
+        corrected_label = QLabel("Corrected Summary:")
+        corrected_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(corrected_label)
+
+        corrected_edit = QPlainTextEdit()
+        corrected_edit.setPlaceholderText("Enter the correct summary for this clause...")
+        if not is_not_found:
+            corrected_edit.setPlainText(original_summary)
+        corrected_edit.setMinimumHeight(80)
+        layout.addWidget(corrected_edit)
+
+        # Lesson field (optional)
+        lesson_label = QLabel("Lesson (optional):")
+        lesson_label.setStyleSheet("font-weight: bold; margin-top: 5px;")
+        layout.addWidget(lesson_label)
+
+        lesson_edit = QLineEdit()
+        lesson_edit.setPlaceholderText("What should the AI look for next time?")
+        if is_not_found:
+            lesson_edit.setText("AI missed this clause - ")
+        layout.addWidget(lesson_edit)
+
+        # Buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec_() == QDialog.Accepted:
+            corrected_text = corrected_edit.toPlainText().strip()
+            if corrected_text:
+                # Build corrected data with lesson appended
+                lesson = lesson_edit.text().strip()
+                corrected_with_lesson = corrected_text
+                if lesson:
+                    corrected_with_lesson += f"\n[LESSON: {lesson}]"
+                self.feedback_corrected.emit(cat_key, original_data, corrected_with_lesson)
+                correct_btn.setText("Corrected")
+                correct_btn.setEnabled(False)
+                accept_btn.setEnabled(False)
+
     def _create_final_analysis_content(self, data: Any) -> QWidget:
         """Create content for final analysis section."""
         widget = QWidget()
@@ -1177,13 +1377,14 @@ class StructuredAnalysisView(QWidget):
                 box.analyze_btn.setEnabled(True)
                 box.analyze_btn.setText("Analyze")
 
-    def fill_single_category(self, cat_key: str, clause_data: dict, category_map: dict):
+    def fill_single_category(self, cat_key: str, clause_data, category_map: dict):
         """
         Fill a single category box with clause data.
 
         Args:
             cat_key: The category key
-            clause_data: ClauseBlock dict
+            clause_data: ClauseBlock dict, or list of ClauseBlock dicts for
+                         multiple clause instances in the same category
             category_map: AnalysisEngine.CATEGORY_MAP
         """
         mapping = category_map.get(cat_key)
@@ -1203,8 +1404,55 @@ class StructuredAnalysisView(QWidget):
                 if child.widget():
                     child.widget().deleteLater()
 
-        # Fill with new data
-        self._fill_category_box(box, clause_data)
+        # Normalise to list
+        if isinstance(clause_data, dict):
+            clause_blocks = [clause_data]
+        elif isinstance(clause_data, list):
+            clause_blocks = clause_data
+        else:
+            clause_blocks = [clause_data] if clause_data else []
+
+        # Fill each clause block — track emptiness across all blocks
+        any_found = False
+        for i, block in enumerate(clause_blocks):
+            if len(clause_blocks) > 1:
+                # Add instance header
+                instance_label = QLabel(f"Instance {i + 1} of {len(clause_blocks)}")
+                instance_label.setStyleSheet(
+                    "font-weight: bold; color: #1976D2; font-size: 11px; "
+                    "padding: 4px 0 2px 0; border-bottom: 1px solid #e0e0e0;"
+                )
+                box.content_widget_layout.addWidget(instance_label)
+            self._fill_category_box(box, block)
+            if not box.is_empty:
+                any_found = True
+        box.is_empty = not any_found
+
+        # Add "Add Clause" button for adding additional instances
+        add_clause_btn = QPushButton("+ Add Clause")
+        add_clause_btn.setFixedHeight(26)
+        add_clause_btn.setStyleSheet("""
+            QPushButton {
+                background: #e3f2fd;
+                color: #1565C0;
+                border: 1px dashed #90CAF9;
+                border-radius: 3px;
+                font-size: 11px;
+                padding: 2px 12px;
+            }
+            QPushButton:hover {
+                background: #bbdefb;
+                border-color: #42A5F5;
+            }
+        """)
+        add_clause_btn.setToolTip(
+            "Add an additional clause instance for this category "
+            "(e.g. when the same topic appears in multiple sections/pages)"
+        )
+        add_clause_btn.clicked.connect(
+            lambda checked, b=box, ck=cat_key: self._on_add_clause_clicked(b, ck)
+        )
+        box.content_widget_layout.addWidget(add_clause_btn)
 
         # Expand the box to show the result
         box.expand()

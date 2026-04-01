@@ -2,7 +2,7 @@
 Configuration Manager Module
 
 Handles loading and saving application configuration for the CR2A Application.
-Uses local Llama 3.1 8B model for all AI analysis (no cloud API required).
+Supports local Llama models and Claude API backends for AI analysis.
 """
 
 import json
@@ -36,6 +36,12 @@ class ConfigManager:
         "gpu_mode": "auto",  # "auto" = auto-detect, "cpu" = force CPU-only, "gpu" = force GPU
         "ram_reserved_os_mb": None,  # None = auto-detect; MB of RAM reserved for OS
         "gpu_offload_layers": None,  # None = auto-detect; explicit layer count for GPU offload
+        # AI backend settings
+        "ai_backend": "local",  # "local" = local Llama model, "claude" = Anthropic Claude API
+        "claude_model": "claude-sonnet",  # "claude-sonnet" or "claude-opus"
+        "anthropic_api_key_encrypted": None,  # Fernet-encrypted API key (machine-bound)
+        "fallback_to_local": False,  # Auto-fallback to local model if API unavailable
+        "show_cost_estimate": True,  # Show cost estimate dialog before Claude analysis
         # Storage settings for multi-user network drive support
         "storage_mode": "local",  # "local" = %APPDATA%, "shared" = network drive
         "shared_storage_path": None,  # Path to network drive (e.g., "F:\\ContractAnalysis")
@@ -383,6 +389,58 @@ class ConfigManager:
             "ram_reserved_os_mb": self.get_ram_reserved_os_mb(),
             "gpu_offload_layers": self.get_gpu_offload_layers(),
         }
+
+    # =========================================================================
+    # AI Backend Settings (Local vs Claude API)
+    # =========================================================================
+
+    def get_ai_backend(self) -> str:
+        """Get AI backend: 'local' or 'claude'."""
+        return self.config.get("ai_backend", self.DEFAULT_CONFIG["ai_backend"])
+
+    def set_ai_backend(self, backend: str) -> None:
+        """Set AI backend. Must be 'local' or 'claude'."""
+        if backend not in ("local", "claude"):
+            logger.warning("Invalid AI backend: %s. Using 'local'.", backend)
+            backend = "local"
+        self.config["ai_backend"] = backend
+        logger.info(f"AI backend set to: {backend}")
+
+    def get_claude_model(self) -> str:
+        """Get Claude model tier: 'claude-sonnet' or 'claude-opus'."""
+        return self.config.get("claude_model", self.DEFAULT_CONFIG["claude_model"])
+
+    def set_claude_model(self, model: str) -> None:
+        """Set Claude model tier."""
+        if model not in ("claude-sonnet", "claude-opus"):
+            logger.warning("Invalid Claude model: %s. Using 'claude-sonnet'.", model)
+            model = "claude-sonnet"
+        self.config["claude_model"] = model
+        logger.info(f"Claude model set to: {model}")
+
+    def get_anthropic_api_key_encrypted(self) -> Optional[str]:
+        """Get encrypted Anthropic API key, or None if not stored."""
+        return self.config.get("anthropic_api_key_encrypted")
+
+    def set_anthropic_api_key_encrypted(self, encrypted_key: Optional[str]) -> None:
+        """Set encrypted Anthropic API key."""
+        self.config["anthropic_api_key_encrypted"] = encrypted_key
+
+    def get_fallback_to_local(self) -> bool:
+        """Get whether to auto-fallback to local model if API unavailable."""
+        return self.config.get("fallback_to_local", self.DEFAULT_CONFIG["fallback_to_local"])
+
+    def set_fallback_to_local(self, fallback: bool) -> None:
+        """Set auto-fallback behavior."""
+        self.config["fallback_to_local"] = bool(fallback)
+
+    def get_show_cost_estimate(self) -> bool:
+        """Get whether to show cost estimate before Claude analysis."""
+        return self.config.get("show_cost_estimate", self.DEFAULT_CONFIG["show_cost_estimate"])
+
+    def set_show_cost_estimate(self, show: bool) -> None:
+        """Set cost estimate dialog visibility."""
+        self.config["show_cost_estimate"] = bool(show)
 
     # ===== Storage Settings (Multi-User Network Drive Support) =====
 

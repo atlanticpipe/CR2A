@@ -178,6 +178,11 @@ class ProjectStorage:
 
         return contract_dir / filename
 
+    @property
+    def excel_path(self) -> Path:
+        """Path to the CR2A analysis workbook in the project folder."""
+        return self.project_root / "CR2A_Analysis.xlsx"
+
     def exists(self) -> bool:
         """
         Check if the .cr2a/ storage directory already exists.
@@ -201,9 +206,30 @@ class ProjectStorage:
         if extensions is None:
             extensions = ['.pdf', '.docx', '.txt', '.xlsx']
 
+        ext_set = set(extensions)
+
+        # Exclude CR2A output files and temp files
+        exclude_names = {"cr2a_analysis.xlsx", "template.xlsx"}
+        cr2a_storage = self.project_root / self.STORAGE_DIR_NAME
+
         files = []
-        for ext in extensions:
-            files.extend(self.project_root.glob(f"*{ext}"))
+        for f in self.project_root.rglob("*"):
+            if not f.is_file():
+                continue
+            if f.suffix.lower() not in ext_set:
+                continue
+            # Skip .cr2a storage directory
+            try:
+                f.relative_to(cr2a_storage)
+                continue
+            except ValueError:
+                pass
+            # Skip CR2A output files and Excel temp files
+            if f.name.lower() in exclude_names:
+                continue
+            if f.name.startswith("~$"):
+                continue
+            files.append(f)
 
         # Sort by filename
         return sorted(files, key=lambda f: f.name.lower())

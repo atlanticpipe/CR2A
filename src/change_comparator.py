@@ -264,8 +264,6 @@ class ChangeComparator:
             clause_map['pay_when_paid'] = admin.pay_when_paid
         if admin.price_escalation:
             clause_map['price_escalation'] = admin.price_escalation
-        if admin.fuel_price_adjustment:
-            clause_map['fuel_price_adjustment'] = admin.fuel_price_adjustment
         if admin.change_orders:
             clause_map['change_orders'] = admin.change_orders
         if admin.termination_for_convenience:

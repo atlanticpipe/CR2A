@@ -10,16 +10,33 @@ import sys
 import json
 import logging
 from pathlib import Path
+
+# Use software rendering for Qt so the GPU is fully available for LLM inference.
+# Intel iGPU Vulkan compute (llama.cpp) conflicts with Qt's GPU rendering.
+os.environ.setdefault("QT_OPENGL", "software")
+
+# IMPORTANT: Initialize llama.cpp's Vulkan backend BEFORE PyQt5 is imported.
+# Qt5 loads GPU libraries that corrupt the Vulkan compute state if initialized
+# after Qt. Calling llama_backend_init() first claims the Vulkan device cleanly.
+try:
+    import llama_cpp as _llama_cpp
+    _llama_cpp.llama_backend_init()
+    from src.local_model_client import LocalModelClient  # noqa: F811 — re-imported below
+except Exception:
+    pass
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTextEdit, QFileDialog, QMessageBox,
     QProgressBar, QTabWidget, QScrollArea, QGroupBox, QLineEdit,
     QMenuBar, QMenu, QAction, QDialog, QFormLayout, QDialogButtonBox,
     QCheckBox, QSpinBox, QRadioButton, QComboBox, QButtonGroup,
-    QSplitter, QSlider, QFrame
+    QSplitter, QSlider, QFrame, QStackedWidget, QTreeView,
+    QHeaderView, QListWidget, QListWidgetItem
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QUrl, QSortFilterProxyModel, QModelIndex
+from PyQt5.QtGui import QFont, QColor, QDesktopServices, QIcon
+from PyQt5.QtWidgets import QFileSystemModel
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +62,659 @@ from src.history_tab import HistoryTab
 from src.specs_tab import SpecsTab
 from src.bid_review_tab import BidReviewTab
 from src.structured_analysis_view import StructuredAnalysisView
+
+import html as html_module
+import re as _re
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Chat message widget — individual message frames with optional feedback buttons
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ChatMessageWidget(QFrame):
+    """A single chat message displayed in the scrollable chat panel.
+
+    For 'summary' messages (analysis results), includes Accept/Correct buttons.
+    For 'not_found' messages, includes an 'I Found This' button.
+    """
+
+    feedback_accepted = pyqtSignal(str, dict)        # cat_key, clause_block
+    feedback_corrected = pyqtSignal(str, dict, str)   # cat_key, original_data, corrected_text
+    feedback_found = pyqtSignal(str)                  # cat_key (user says they found a missed clause)
+
+    def __init__(self, msg_type, content, title=None, theme=None, parent=None,
+                 cat_key=None, clause_block=None):
+        super().__init__(parent)
+        self.cat_key = cat_key
+        self.clause_block = clause_block or {}
+        self.msg_type = msg_type
+
+        if theme is None:
+            theme = THEMES.get('light', {})
+        t = theme
+
+        styles = {
+            'system':      f'color: {t.get("text_muted","#888")}; font-style: italic; padding: 4px 8px;',
+            'log':         f'color: {t.get("text_dim","#666")}; font-size: 11px; padding: 2px 8px;',
+            'info':        f'color: {t.get("text_dim","#666")}; font-size: 11px; padding: 2px 8px;',
+            'prompt':      f'background: {t.get("prompt_bg","#f0f0f0")}; border-left: 3px solid {t.get("prompt_border","#ccc")}; padding: 6px 10px; margin: 4px 0; font-family: monospace; font-size: 11px; white-space: pre-wrap;',
+            'response':    f'background: {t.get("observation_bg","#f0f0f0")}; border-left: 3px solid {t.get("observation_border","#ccc")}; padding: 6px 10px; margin: 4px 0; font-family: monospace; font-size: 11px; white-space: pre-wrap;',
+            'summary':     f'padding: 6px 8px; background: {t.get("summary_bg","#f5f5f5")}; border-left: 3px solid {t.get("summary_border","#888")}; margin: 2px 0;',
+            'not_found':   f'padding: 6px 8px; background: {t.get("summary_bg","#f5f5f5")}; border-left: 3px solid {t.get("warning","#cca700")}; margin: 2px 0;',
+            'user':        f'padding: 6px 8px; background: {t.get("user_msg_bg","#e3f2fd")}; border-radius: 4px; margin: 4px 0;',
+            'answer':      f'padding: 8px; background: {t.get("answer_bg","#fff")}; border-left: 3px solid {t.get("answer_border","#569cd6")}; margin: 4px 0;',
+            'error':       f'color: {t.get("error","#f44747")}; padding: 4px 8px;',
+            'thought':     f'color: {t.get("text_dim","#666")}; font-style: italic; font-size: 11px; padding: 2px 8px;',
+            'tool_call':   f'background: {t.get("tool_bg","#fffde7")}; border-left: 3px solid {t.get("tool_border","#cca700")}; padding: 4px 10px; margin: 2px 0; font-family: monospace; font-size: 11px;',
+            'observation': f'background: {t.get("observation_bg","#f0f0f0")}; border-left: 3px solid {t.get("observation_border","#ccc")}; padding: 4px 10px; margin: 2px 0; font-size: 11px;',
+        }
+
+        style = styles.get(msg_type, 'padding: 4px 8px;')
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        self.setLayout(layout)
+
+        # Render message body as HTML label
+        if msg_type in ('answer', 'response'):
+            body = _md_to_html(content)
+        else:
+            body = html_module.escape(content).replace('\n', '<br>')
+
+        if title:
+            safe_title = html_module.escape(title)
+            html_text = f'<div style="{style}"><b>{safe_title}</b><br>{body}</div>'
+        else:
+            html_text = f'<div style="{style}">{body}</div>'
+
+        self.message_label = QLabel(html_text)
+        self.message_label.setWordWrap(True)
+        self.message_label.setTextFormat(Qt.RichText)
+        self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(self.message_label)
+
+        # Feedback buttons for analysis results
+        if msg_type == 'summary' and cat_key:
+            self._add_feedback_buttons(layout, t)
+        elif msg_type == 'not_found' and cat_key:
+            self._add_found_button(layout, t)
+
+    def _add_feedback_buttons(self, layout, t):
+        """Add Accept / Correct buttons for analysis result messages."""
+        btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(8, 2, 8, 4)
+        btn_layout.setSpacing(6)
+
+        accept_btn = QPushButton("Accept")
+        accept_btn.setToolTip("Mark this analysis as correct — saves as a learning example")
+        accept_btn.setStyleSheet(
+            f"padding: 3px 10px; font-size: 10px; background: {t.get('success','#4ec9b0')}; "
+            f"color: white; border: none; border-radius: 3px;"
+        )
+        accept_btn.setCursor(Qt.PointingHandCursor)
+        accept_btn.clicked.connect(self._on_accept)
+        btn_layout.addWidget(accept_btn)
+
+        correct_btn = QPushButton("Correct")
+        correct_btn.setToolTip("Provide the correct analysis — saves as a correction for learning")
+        correct_btn.setStyleSheet(
+            f"padding: 3px 10px; font-size: 10px; background: {t.get('warning','#cca700')}; "
+            f"color: white; border: none; border-radius: 3px;"
+        )
+        correct_btn.setCursor(Qt.PointingHandCursor)
+        correct_btn.clicked.connect(self._on_correct)
+        btn_layout.addWidget(correct_btn)
+
+        btn_layout.addStretch()
+
+        self.feedback_status = QLabel("")
+        self.feedback_status.setStyleSheet("font-size: 10px; font-style: italic;")
+        btn_layout.addWidget(self.feedback_status)
+
+        layout.addLayout(btn_layout)
+
+    def _add_found_button(self, layout, t):
+        """Add 'I Found This' button for not-found results."""
+        btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(8, 2, 8, 4)
+        btn_layout.setSpacing(6)
+
+        found_btn = QPushButton("I Found This")
+        found_btn.setToolTip("The AI missed this clause — provide the correct text so it learns")
+        found_btn.setStyleSheet(
+            f"padding: 3px 10px; font-size: 10px; background: {t.get('accent','#569cd6')}; "
+            f"color: white; border: none; border-radius: 3px;"
+        )
+        found_btn.setCursor(Qt.PointingHandCursor)
+        found_btn.clicked.connect(self._on_found)
+        btn_layout.addWidget(found_btn)
+
+        btn_layout.addStretch()
+
+        self.feedback_status = QLabel("")
+        self.feedback_status.setStyleSheet("font-size: 10px; font-style: italic;")
+        btn_layout.addWidget(self.feedback_status)
+
+        layout.addLayout(btn_layout)
+
+    def _on_accept(self):
+        if self.cat_key:
+            self.feedback_accepted.emit(self.cat_key, self.clause_block)
+            self.feedback_status.setText("Saved as learning example")
+
+    def _on_correct(self):
+        if self.cat_key:
+            # Open correction dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Correct: {self.cat_key.replace('_', ' ').title()}")
+            dialog.setMinimumWidth(500)
+            dialog.setMinimumHeight(350)
+
+            dlg_layout = QVBoxLayout()
+            dialog.setLayout(dlg_layout)
+
+            original = self.clause_block.get('Clause Summary', '')
+            dlg_layout.addWidget(QLabel("Original AI analysis:"))
+            orig_display = QTextEdit()
+            orig_display.setPlainText(original)
+            orig_display.setReadOnly(True)
+            orig_display.setMaximumHeight(100)
+            dlg_layout.addWidget(orig_display)
+
+            dlg_layout.addWidget(QLabel("Your correction:"))
+            correction_edit = QTextEdit()
+            correction_edit.setPlaceholderText("Enter the correct analysis...")
+            dlg_layout.addWidget(correction_edit)
+
+            dlg_layout.addWidget(QLabel("Lesson (optional — why was the AI wrong?):"))
+            lesson_edit = QLineEdit()
+            lesson_edit.setPlaceholderText("e.g., 'This clause was in the addendum, not the main spec'")
+            dlg_layout.addWidget(lesson_edit)
+
+            btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            btn_box.accepted.connect(dialog.accept)
+            btn_box.rejected.connect(dialog.reject)
+            dlg_layout.addWidget(btn_box)
+
+            if dialog.exec_() == QDialog.Accepted:
+                corrected = correction_edit.toPlainText().strip()
+                lesson = lesson_edit.text().strip()
+                if corrected:
+                    if lesson:
+                        corrected += f"\n[LESSON: {lesson}]"
+                    self.feedback_corrected.emit(self.cat_key, self.clause_block, corrected)
+                    self.feedback_status.setText("Correction saved for learning")
+
+    def _on_found(self):
+        """User says they found a clause the AI missed."""
+        if not self.cat_key:
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Found: {self.cat_key.replace('_', ' ').title()}")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(300)
+
+        dlg_layout = QVBoxLayout()
+        dialog.setLayout(dlg_layout)
+
+        dlg_layout.addWidget(QLabel("The AI reported this clause as NOT FOUND."))
+        dlg_layout.addWidget(QLabel("Paste or type the correct clause summary:"))
+
+        correction_edit = QTextEdit()
+        correction_edit.setPlaceholderText("Enter what the clause actually says...")
+        dlg_layout.addWidget(correction_edit)
+
+        dlg_layout.addWidget(QLabel("Where did you find it? (optional):"))
+        location_edit = QLineEdit()
+        location_edit.setPlaceholderText("e.g., 'Addendum 2, Section 7.3'")
+        dlg_layout.addWidget(location_edit)
+
+        dlg_layout.addWidget(QLabel("Lesson (optional — why did the AI miss it?):"))
+        lesson_edit = QLineEdit()
+        lesson_edit.setPlaceholderText("e.g., 'It was under a non-standard heading'")
+        dlg_layout.addWidget(lesson_edit)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        dlg_layout.addWidget(btn_box)
+
+        if dialog.exec_() == QDialog.Accepted:
+            corrected = correction_edit.toPlainText().strip()
+            location = location_edit.text().strip()
+            lesson = lesson_edit.text().strip()
+            if corrected:
+                # Build a clause block for the missed clause
+                found_block = {
+                    'Clause Summary': '',  # original was empty (not found)
+                    'Clause Location': location or 'User-provided',
+                    '_was_missed': True,
+                }
+                if lesson:
+                    corrected += f"\n[LESSON: AI missed this clause — {lesson}]"
+                else:
+                    corrected += "\n[LESSON: AI missed this clause entirely]"
+                self.feedback_corrected.emit(self.cat_key, found_block, corrected)
+                self.feedback_status.setText("Correction saved — AI will look for this next time")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Theme definitions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+THEMES = {
+    "dark": {
+        # Window / global
+        "window_bg": "#1e1e1e",
+        "panel_bg": "#252526",
+        "input_bg": "#3c3c3c",
+        "border": "#3c3c3c",
+        "text": "#cccccc",
+        "text_muted": "#888888",
+        "text_dim": "#666666",
+        "accent": "#569cd6",
+        "accent_hover": "#4a8abf",
+        "accent_text": "#ffffff",
+        "error": "#f44747",
+        "warning": "#cca700",
+        "success": "#4ec9b0",
+        "header_bg": "#2d2d2d",
+        "header_border": "#3c3c3c",
+        "hover_bg": "#2a2d2e",
+        "selection_bg": "#264f78",
+        "chat_bg": "#1e1e1e",
+        "user_msg_bg": "#264f78",
+        "answer_bg": "#252526",
+        "answer_border": "#569cd6",
+        "summary_bg": "#2d2d2d",
+        "summary_border": "#888888",
+        "tool_bg": "#332b00",
+        "tool_border": "#cca700",
+        "observation_bg": "#1a2e1a",
+        "observation_border": "#4ec9b0",
+        "prompt_bg": "#1a2740",
+        "prompt_border": "#569cd6",
+        "scrollbar_bg": "#1e1e1e",
+        "scrollbar_handle": "#424242",
+        "quick_btn_bg": "#2d2d2d",
+        "quick_btn_border": "#3c3c3c",
+    },
+    "light": {
+        "window_bg": "#ffffff",
+        "panel_bg": "#f5f5f5",
+        "input_bg": "#ffffff",
+        "border": "#e0e0e0",
+        "text": "#1e1e1e",
+        "text_muted": "#666666",
+        "text_dim": "#999999",
+        "accent": "#1976D2",
+        "accent_hover": "#1565C0",
+        "accent_text": "#ffffff",
+        "error": "#c62828",
+        "warning": "#FF9800",
+        "success": "#4CAF50",
+        "header_bg": "#e8e8e8",
+        "header_border": "#cccccc",
+        "hover_bg": "#e3f2fd",
+        "selection_bg": "#bbdefb",
+        "chat_bg": "#fafafa",
+        "user_msg_bg": "#e3f2fd",
+        "answer_bg": "#f9f9f9",
+        "answer_border": "#1976D2",
+        "summary_bg": "#f5f5f5",
+        "summary_border": "#999999",
+        "tool_bg": "#fff3e0",
+        "tool_border": "#FF9800",
+        "observation_bg": "#e8f5e9",
+        "observation_border": "#4CAF50",
+        "prompt_bg": "#e3f2fd",
+        "prompt_border": "#1976D2",
+        "scrollbar_bg": "#f5f5f5",
+        "scrollbar_handle": "#cccccc",
+        "quick_btn_bg": "#e3f2fd",
+        "quick_btn_border": "#90CAF9",
+    },
+}
+
+
+def build_app_stylesheet(t):
+    """Build a full QSS stylesheet from a theme dict."""
+    return f"""
+        QMainWindow, QDialog, QWidget {{
+            background-color: {t['window_bg']};
+            color: {t['text']};
+        }}
+        QLabel {{
+            color: {t['text']};
+        }}
+        QLineEdit, QSpinBox, QComboBox {{
+            background: {t['input_bg']};
+            color: {t['text']};
+            border: 1px solid {t['border']};
+            border-radius: 4px;
+            padding: 4px;
+        }}
+        QLineEdit:focus, QSpinBox:focus, QComboBox:focus {{
+            border-color: {t['accent']};
+        }}
+        QPushButton {{
+            background: {t['panel_bg']};
+            color: {t['text']};
+            border: 1px solid {t['border']};
+            border-radius: 4px;
+            padding: 6px 12px;
+        }}
+        QPushButton:hover {{
+            background: {t['hover_bg']};
+        }}
+        QPushButton:pressed {{
+            background: {t['selection_bg']};
+        }}
+        QTextEdit, QListWidget {{
+            background: {t['chat_bg']};
+            color: {t['text']};
+            border: 1px solid {t['border']};
+            border-radius: 4px;
+        }}
+        QTreeView {{
+            background: {t['panel_bg']};
+            color: {t['text']};
+            border: none;
+        }}
+        QTreeView::item:hover {{
+            background: {t['hover_bg']};
+        }}
+        QTreeView::item:selected {{
+            background: {t['selection_bg']};
+        }}
+        QHeaderView::section {{
+            background: {t['header_bg']};
+            color: {t['text']};
+            border: 1px solid {t['border']};
+        }}
+        QGroupBox {{
+            color: {t['text']};
+            border: 1px solid {t['border']};
+            border-radius: 4px;
+            margin-top: 8px;
+            padding-top: 14px;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: 10px;
+            color: {t['text']};
+        }}
+        QMenuBar {{
+            background: {t['header_bg']};
+            color: {t['text']};
+        }}
+        QMenuBar::item:selected {{
+            background: {t['selection_bg']};
+        }}
+        QMenu {{
+            background: {t['panel_bg']};
+            color: {t['text']};
+            border: 1px solid {t['border']};
+        }}
+        QMenu::item:selected {{
+            background: {t['selection_bg']};
+        }}
+        QStatusBar {{
+            background: {t['header_bg']};
+            color: {t['text_muted']};
+        }}
+        QScrollBar:vertical {{
+            background: {t['scrollbar_bg']};
+            width: 10px;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {t['scrollbar_handle']};
+            min-height: 20px;
+            border-radius: 5px;
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0;
+        }}
+        QScrollBar:horizontal {{
+            background: {t['scrollbar_bg']};
+            height: 10px;
+        }}
+        QScrollBar::handle:horizontal {{
+            background: {t['scrollbar_handle']};
+            min-width: 20px;
+            border-radius: 5px;
+        }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0;
+        }}
+        QProgressBar {{
+            background: {t['panel_bg']};
+            border: 1px solid {t['border']};
+            border-radius: 3px;
+            text-align: center;
+            color: {t['text']};
+        }}
+        QProgressBar::chunk {{
+            background: {t['accent']};
+            border-radius: 3px;
+        }}
+        QSlider::groove:horizontal {{
+            background: {t['border']};
+            height: 6px;
+            border-radius: 3px;
+        }}
+        QSlider::handle:horizontal {{
+            background: {t['accent']};
+            width: 14px;
+            margin: -4px 0;
+            border-radius: 7px;
+        }}
+        QSplitter::handle {{
+            background: {t['border']};
+        }}
+        QTabWidget::pane {{
+            border: 1px solid {t['border']};
+            background: {t['panel_bg']};
+        }}
+        QTabBar::tab {{
+            background: {t['panel_bg']};
+            color: {t['text']};
+            border: 1px solid {t['border']};
+            padding: 6px 12px;
+        }}
+        QTabBar::tab:selected {{
+            background: {t['window_bg']};
+            border-bottom: 2px solid {t['accent']};
+        }}
+        QCheckBox, QRadioButton {{
+            color: {t['text']};
+        }}
+        QDialogButtonBox QPushButton {{
+            min-width: 80px;
+        }}
+        /* Named element overrides */
+        #landing_title {{
+            color: {t['accent']};
+        }}
+        #landing_subtitle {{
+            color: {t['text_muted']};
+        }}
+        #muted_label {{
+            color: {t['text_muted']};
+        }}
+        #accent_btn {{
+            background: {t['accent']};
+            color: {t['accent_text']};
+            border: none;
+            border-radius: 6px;
+        }}
+        #accent_btn:hover {{
+            background: {t['accent_hover']};
+        }}
+        #section_header {{
+            text-align: left;
+            padding: 6px 10px;
+            font-weight: bold;
+            font-size: 11px;
+            background: {t['header_bg']};
+            border: none;
+            border-bottom: 1px solid {t['header_border']};
+        }}
+        #section_header:hover {{
+            background: {t['hover_bg']};
+        }}
+        #chat_status {{
+            color: {t['text_muted']};
+        }}
+    """
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Lightweight Markdown → HTML converter
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _md_to_html(text):
+    """Convert basic Markdown to HTML for chat display.
+
+    Handles: headers, bold, italic, code blocks, inline code, bullet lists,
+    numbered lists, and line breaks.
+    """
+    lines = text.split('\n')
+    html_parts = []
+    in_code_block = False
+    in_list = False
+    list_type = None  # 'ul' or 'ol'
+
+    for line in lines:
+        # Fenced code blocks
+        if line.strip().startswith('```'):
+            if in_code_block:
+                html_parts.append('</pre>')
+                in_code_block = False
+            else:
+                if in_list:
+                    html_parts.append(f'</{list_type}>')
+                    in_list = False
+                html_parts.append(
+                    '<pre style="background: rgba(128,128,128,0.15); '
+                    'padding: 8px; border-radius: 4px; font-family: monospace; '
+                    'font-size: 12px; white-space: pre-wrap; margin: 4px 0;">'
+                )
+                in_code_block = True
+            continue
+
+        if in_code_block:
+            html_parts.append(html_module.escape(line))
+            html_parts.append('\n')
+            continue
+
+        stripped = line.strip()
+
+        # Close list if line is not a list item
+        if in_list and not _re.match(r'^[-*]\s', stripped) and not _re.match(r'^\d+\.\s', stripped) and stripped:
+            html_parts.append(f'</{list_type}>')
+            in_list = False
+
+        # Empty line
+        if not stripped:
+            if in_list:
+                html_parts.append(f'</{list_type}>')
+                in_list = False
+            html_parts.append('<br>')
+            continue
+
+        # Headers
+        m = _re.match(r'^(#{1,3})\s+(.*)', stripped)
+        if m:
+            level = len(m.group(1))
+            sizes = {1: '16px', 2: '14px', 3: '13px'}
+            html_parts.append(
+                f'<div style="font-weight: bold; font-size: {sizes[level]}; '
+                f'margin: 6px 0 2px 0;">{_inline_md(m.group(2))}</div>'
+            )
+            continue
+
+        # Bullet list
+        m = _re.match(r'^[-*]\s+(.*)', stripped)
+        if m:
+            if not in_list or list_type != 'ul':
+                if in_list:
+                    html_parts.append(f'</{list_type}>')
+                html_parts.append('<ul style="margin: 2px 0 2px 16px; padding: 0;">')
+                in_list = True
+                list_type = 'ul'
+            html_parts.append(f'<li>{_inline_md(m.group(1))}</li>')
+            continue
+
+        # Numbered list
+        m = _re.match(r'^(\d+)\.\s+(.*)', stripped)
+        if m:
+            if not in_list or list_type != 'ol':
+                if in_list:
+                    html_parts.append(f'</{list_type}>')
+                html_parts.append('<ol style="margin: 2px 0 2px 16px; padding: 0;">')
+                in_list = True
+                list_type = 'ol'
+            html_parts.append(f'<li>{_inline_md(m.group(2))}</li>')
+            continue
+
+        # Regular paragraph
+        html_parts.append(f'<div>{_inline_md(stripped)}</div>')
+
+    if in_code_block:
+        html_parts.append('</pre>')
+    if in_list:
+        html_parts.append(f'</{list_type}>')
+
+    return ''.join(html_parts)
+
+
+def _inline_md(text):
+    """Convert inline markdown: bold, italic, inline code."""
+    text = html_module.escape(text)
+    # Inline code
+    text = _re.sub(r'`([^`]+)`', r'<code style="background: rgba(128,128,128,0.2); padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 12px;">\1</code>', text)
+    # Bold
+    text = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    # Italic
+    text = _re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)
+    return text
+
+
+class CR2AFolderFilterProxy(QSortFilterProxyModel):
+    """Filter proxy that only shows 'prompts' and 'templates' folders (and their contents) in the CR2A tree."""
+
+    ALLOWED_FOLDERS = {"prompts", "templates"}
+
+    def __init__(self, root_path, parent=None):
+        super().__init__(parent)
+        self._root_path = root_path
+
+    def filterAcceptsRow(self, source_row, source_parent):
+        model = self.sourceModel()
+        index = model.index(source_row, 0, source_parent)
+        file_path = model.filePath(index)
+        file_name = model.fileName(index)
+
+        # Get the path relative to the CR2A root
+        try:
+            rel = os.path.relpath(file_path, self._root_path).replace("\\", "/")
+        except ValueError:
+            # Cross-drive paths (e.g. F: vs E:) cannot be made relative
+            return False
+        parts = rel.split("/")
+
+        if len(parts) == 0:
+            return False
+
+        # Top-level items: only show allowed folders
+        if len(parts) == 1:
+            return file_name in self.ALLOWED_FOLDERS and model.isDir(index)
+
+        # Deeper items: show if their top-level ancestor is an allowed folder
+        return parts[0] in self.ALLOWED_FOLDERS
 
 
 class AnalysisThread(QThread):
@@ -214,11 +884,22 @@ class PrepareFolderThread(QThread):
             skipped_files = []
             for idx, file_path in enumerate(self.files):
                 filename = file_path.name
-                pct = int(((idx) / total) * 60)  # 0-60% for extraction
-                self.progress.emit(f"Extracting text from {filename}...", pct)
+                file_base_pct = int((idx / total) * 60)  # 0-60% for extraction
+                file_range = int(60 / total)  # % range per file
+                self.progress.emit(f"Extracting text from {filename}...", file_base_pct)
+
+                # Sub-range callback: map page progress into this file's slice
+                def make_file_progress(base, rng, fname):
+                    def cb(status, pct):
+                        mapped = base + int(pct * rng / 100)
+                        self.progress.emit(f"{fname}: {status}", mapped)
+                    return cb
 
                 try:
-                    text = self.engine.uploader.extract_text(str(file_path))
+                    text = self.engine.uploader.extract_text(
+                        str(file_path),
+                        progress_callback=make_file_progress(file_base_pct, file_range, filename)
+                    )
                     if text and text.strip():
                         # Add file separator so AI knows which file content came from
                         combined_text_parts.append(
@@ -374,8 +1055,90 @@ class AnalyzeAllThread(QThread):
         self.all_finished.emit()
 
 
+class ChatOrchestrationThread(QThread):
+    """Background thread for ReAct-style tool-calling chat loop."""
+    message = pyqtSignal(str, str)       # role, content — for incremental chat updates
+    token_stream = pyqtSignal(str)       # individual token for streaming display
+    tool_started = pyqtSignal(str, str)  # tool_name, args_str
+    tool_finished = pyqtSignal(str, str) # tool_name, result_preview
+    finished = pyqtSignal(list)          # full message list
+    error = pyqtSignal(str)
+    progress = pyqtSignal(str, int)
+
+    def __init__(self, ai_client, tool_registry, user_message, conversation_history=None):
+        super().__init__()
+        self.ai_client = ai_client
+        self.tool_registry = tool_registry
+        self.user_message = user_message
+        self.conversation_history = conversation_history or []
+
+    def run(self):
+        try:
+            def progress_callback(status, percent):
+                self.progress.emit(status, percent)
+
+            def token_callback(token_text):
+                self.token_stream.emit(token_text)
+
+            result_messages = self.ai_client.process_with_tools(
+                self.user_message,
+                self.tool_registry,
+                conversation_history=self.conversation_history,
+                progress_callback=progress_callback,
+                token_callback=token_callback,
+            )
+
+            # Emit individual messages for real-time display
+            for msg in result_messages:
+                role = msg.get("role", "assistant")
+                content = msg.get("content", "")
+                if role == "tool_call":
+                    self.tool_started.emit(content, "")
+                elif role == "observation":
+                    self.tool_finished.emit("", content[:200])
+                else:
+                    self.message.emit(role, content)
+
+            self.finished.emit(result_messages)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class QuickToolThread(QThread):
+    """Background thread for direct tool execution (no ReAct loop)."""
+    finished_signal = pyqtSignal(str, str)  # tool_name, result
+    error_signal = pyqtSignal(str)
+    progress_signal = pyqtSignal(str, int)  # message, percentage
+    item_complete_signal = pyqtSignal(str, str, str, dict)  # type, key, display_name, data
+
+    def __init__(self, tool_registry, tool_name):
+        super().__init__()
+        self.tool_registry = tool_registry
+        self.tool_name = tool_name
+
+    def run(self):
+        try:
+            # Wire up progress and per-item callbacks
+            self.tool_registry.progress_callback = self._on_progress
+            self.tool_registry.item_callback = self._on_item
+            result = self.tool_registry.execute(self.tool_name, {})
+            self.finished_signal.emit(self.tool_name, result)
+        except Exception as e:
+            self.error_signal.emit(str(e))
+        finally:
+            self.tool_registry.progress_callback = None
+            self.tool_registry.item_callback = None
+
+    def _on_progress(self, message, pct):
+        self.progress_signal.emit(message, pct)
+
+    def _on_item(self, item_type, key, display_name, data):
+        self.item_complete_signal.emit(item_type, key, display_name, data)
+
+
 class CR2A_GUI(QMainWindow):
-    """Main application window."""
+    """Main application window — Chat-first interface."""
 
     def __init__(self):
         super().__init__()
@@ -396,6 +1159,14 @@ class CR2A_GUI(QMainWindow):
         self.project_storage = None  # ProjectStorage instance for project-based storage
         self.chat_history_manager = None  # ChatHistoryManager for project chat history
         self.session_manager = None  # SessionManager for session persistence
+        self.excel_builder = None  # ExcelTemplateBuilder for auto-populating workbook
+        self.tool_registry = None  # ToolRegistry for chat-based tool calling
+        self.chat_thread = None  # ChatOrchestrationThread
+        self.conversation_messages = []  # Chat conversation history for ReAct context
+        self._streaming_tokens = []  # Token buffer for streaming display
+        self._streaming_active = False  # Whether streaming is in progress
+        self.prepared_bid_review = None  # PreparedBidReview for bid review engine
+        self.bid_review_engine = None  # BidReviewEngine instance
 
         # Per-item on-demand analysis state
         self.prepared_contract = None  # PreparedContract after loading
@@ -412,6 +1183,7 @@ class CR2A_GUI(QMainWindow):
 
         self.init_ui()
         self.init_config()
+        self.apply_theme()  # Apply theme after config is loaded
         self.init_versioning()
         self.init_history_store()
         self.init_engines()
@@ -428,6 +1200,24 @@ class CR2A_GUI(QMainWindow):
                 f"Failed to load configuration:\n{str(e)}\n\nUsing defaults."
             )
     
+    def apply_theme(self, theme_name=None):
+        """Apply a theme to the entire application."""
+        if theme_name is None:
+            theme_name = self.config_manager.get_theme() if self.config_manager else "light"
+        t = THEMES.get(theme_name, THEMES["light"])
+        self._current_theme = t
+        self._current_theme_name = theme_name
+
+        # Apply global stylesheet
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(build_app_stylesheet(t))
+
+        # Save if changed
+        if self.config_manager and self.config_manager.get_theme() != theme_name:
+            self.config_manager.set_theme(theme_name)
+            self.config_manager.save_config()
+
     def init_versioning(self):
         """Initialize versioning components for contract change tracking."""
         try:
@@ -521,7 +1311,8 @@ class CR2A_GUI(QMainWindow):
                 )
 
                 # Add tab after Contract tab
-                self.tabs.addTab(self.history_tab, "History")
+                if self.tabs:
+                    self.tabs.addTab(self.history_tab, "History")
 
                 # Connect signals to handler methods
                 self.history_tab.analysis_selected.connect(self.on_history_selected)
@@ -595,13 +1386,14 @@ class CR2A_GUI(QMainWindow):
             
             # Enable Chat tab for querying (it's already enabled by default, but ensure it's accessible)
             # The chat tab is always enabled, but we can update the chat history to indicate a new analysis is loaded
-            self.chat_history.append(
-                f"<br><b>Historical Analysis Loaded:</b> {analysis_result.metadata.filename}<br>"
-                f"<i>You can now ask questions about this analysis.</i><br>"
+            self._log_to_chat('system',
+                f"Historical Analysis Loaded: {analysis_result.metadata.filename}\n"
+                f"You can now ask questions about this analysis."
             )
             
             # Switch to Contract tab (merged upload + analysis at index 0)
-            self.tabs.setCurrentIndex(0)
+            if self.tabs:
+                self.tabs.setCurrentIndex(0)
             
             logger.info("Successfully loaded historical analysis: %s", record_id)
             self.statusBar().showMessage(f"Loaded analysis: {analysis_result.metadata.filename}")
@@ -639,9 +1431,9 @@ class CR2A_GUI(QMainWindow):
             self._clear_analysis_display()
             
             # Update the chat history to indicate the analysis was deleted
-            self.chat_history.append(
-                "<br><b>Notice:</b> The currently loaded analysis has been deleted from history.<br>"
-                "<i>Please analyze a new contract or select another analysis from history.</i><br>"
+            self._log_to_chat('system',
+                "The currently loaded analysis has been deleted from history.\n"
+                "Please analyze a new contract or select another analysis from history."
             )
             
             # Update status bar
@@ -658,166 +1450,371 @@ class CR2A_GUI(QMainWindow):
                 child.widget().deleteLater()
 
         # Clear the structured view
-        self.structured_view._clear_all_boxes()
-        self.structured_view.enable_analyze_buttons(False)
+        if self.structured_view:
+            self.structured_view._clear_all_boxes()
+            self.structured_view.enable_analyze_buttons(False)
     
     def init_ui(self):
-        """Initialize the user interface."""
+        """Initialize the chat-first user interface (Phase 2)."""
         self.setWindowTitle("CR2A - Contract Review & Analysis")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1400, 900)
 
         # Create menu bar
         self.create_menu_bar()
 
-        # Central widget
+        # Central widget with stacked pages
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        central_widget.setLayout(main_layout)
 
-        # Main layout
-        layout = QVBoxLayout()
-        central_widget.setLayout(layout)
+        self.stacked = QStackedWidget()
+        main_layout.addWidget(self.stacked)
 
-        # Title
-        title = QLabel("Contract Review & Analysis")
-        title.setFont(QFont("Arial", 20, QFont.Bold))
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        # ── Page 0: Folder Selection ──
+        self.stacked.addWidget(self._create_folder_selection_page())
 
-        # --- Global file selection bar (always visible above tabs) ---
-        file_bar = QHBoxLayout()
-        file_bar.setSpacing(6)
+        # ── Page 1: Workspace (file browser + chat) ──
+        self.stacked.addWidget(self._create_workspace_page())
 
-        self.file_label = QLabel("No file selected")
-        self.file_label.setStyleSheet("padding: 6px; border: 1px solid #ccc; background: #f5f5f5; font-size: 12px;")
-        self.file_label.setMinimumWidth(200)
-        file_bar.addWidget(self.file_label, stretch=1)
+        # Start on folder selection
+        self.stacked.setCurrentIndex(0)
 
-        browse_file_btn = QPushButton("Browse File...")
-        browse_file_btn.clicked.connect(self.browse_file)
-        browse_file_btn.setStyleSheet("padding: 6px 12px; font-size: 12px;")
-        browse_file_btn.setToolTip("Select a single contract file")
-        file_bar.addWidget(browse_file_btn)
-
-        browse_folder_btn = QPushButton("Browse Folder...")
-        browse_folder_btn.clicked.connect(self.browse_folder)
-        browse_folder_btn.setStyleSheet("padding: 6px 12px; font-size: 12px;")
-        browse_folder_btn.setToolTip("Select a folder for batch analysis")
-        file_bar.addWidget(browse_folder_btn)
-
-        self.load_btn = QPushButton("Load Contract")
-        self.load_btn.clicked.connect(self.load_contract)
-        self.load_btn.setEnabled(False)
-        self.load_btn.setStyleSheet(
-            "padding: 6px 16px; font-size: 13px; font-weight: bold; "
-            "background: #4CAF50; color: white;"
-        )
-        self.load_btn.setToolTip("Extract text and run pattern matching (fast, no AI)")
-        file_bar.addWidget(self.load_btn)
-
-        # Load All button (only shown in folder mode)
-        self.load_all_btn = QPushButton("Load All")
-        self.load_all_btn.clicked.connect(self._load_folder)
-        self.load_all_btn.setEnabled(False)
-        self.load_all_btn.setVisible(False)
-        self.load_all_btn.setStyleSheet(
-            "padding: 6px 16px; font-size: 13px; font-weight: bold; "
-            "background: #4CAF50; color: white;"
-        )
-        self.load_all_btn.setToolTip("Load all files as context for analysis")
-        file_bar.addWidget(self.load_all_btn)
-
-        layout.addLayout(file_bar)
-
-        # Upload mode / status row
-        status_row = QHBoxLayout()
-        self.upload_mode_label = QLabel("")
-        self.upload_mode_label.setStyleSheet("color: #666; font-size: 10px; font-style: italic; padding: 2px 5px;")
-        status_row.addWidget(self.upload_mode_label)
-
-        self.upload_status = QLabel("")
-        self.upload_status.setWordWrap(True)
-        self.upload_status.setStyleSheet("padding: 2px 5px; font-size: 11px; color: #555;")
-        status_row.addWidget(self.upload_status, stretch=1)
-        layout.addLayout(status_row)
-
-        # Global progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setMaximumHeight(16)
-        layout.addWidget(self.progress_bar)
-
-        # Top-level splitter: tabs on left, chat on right
-        self.main_splitter = QSplitter(Qt.Horizontal)
-
-        # LEFT: Tab widget
-        self.tabs = QTabWidget()
-        self.main_splitter.addWidget(self.tabs)
-
-        # Bid Review tab (default - first tab)
-        self.bid_review_tab = BidReviewTab()
-        self.bid_review_tab.analysis_requested.connect(self.on_bid_review_analysis_requested)
-        self.bid_review_tab.item_analyzed.connect(self._on_bid_item_session_save)
-        self.bid_review_tab.review_finished.connect(self._on_bid_review_session_save)
-        self.tabs.addTab(self.bid_review_tab, "Bid Review")
-
-        # Contract tab (analysis sidebar)
-        self.contract_tab = self.create_contract_tab()
-        self.tabs.addTab(self.contract_tab, "Contract")
-
-        # Specs tab (technical specification extraction)
-        self.specs_tab = SpecsTab()
-        self.specs_tab.analysis_requested.connect(self.on_specs_analysis_requested)
-        self.specs_tab.analysis_finished.connect(self._on_specs_finished)
-        self.tabs.addTab(self.specs_tab, "Specs")
-
-        # History tab (will be initialized after history_store is ready)
+        # Compatibility stubs for old tab-based code paths
+        self.tabs = None
+        self.bid_review_tab = None
+        self.specs_tab = None
         self.history_tab = None
-
-        # RIGHT: Chat panel (always visible)
-        chat_panel = self._create_chat_panel()
-        self.main_splitter.addWidget(chat_panel)
-
-        self.main_splitter.setSizes([700, 500])
-        self.main_splitter.setStretchFactor(0, 1)  # Tabs stretch
-        self.main_splitter.setStretchFactor(1, 0)  # Chat stays fixed width
-
-        layout.addWidget(self.main_splitter, stretch=1)
-
-        # Welcome message in chat
-        self._log_to_chat('system', 'Welcome to CR2A Contract Review & Analysis')
-        self._log_to_chat('log', 'Browse and load a contract file above to begin analysis.')
-        self._log_to_chat('log', 'Ask questions about the contract in the input box below.')
+        self.structured_view = None
+        self.file_label = self.folder_name_label  # alias for backward compat
+        self.upload_mode_label = QLabel("")  # hidden
+        self.upload_status = self.workspace_status_label
+        self.load_btn = QPushButton()  # hidden dummy
+        self.load_all_btn = QPushButton()  # hidden dummy
+        self.analyze_all_btn = QPushButton()  # hidden dummy
 
         # Status bar
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("Ready — Open a folder to begin")
+
+    def _create_folder_selection_page(self):
+        """Create the folder selection landing page."""
+        page = QWidget()
+        layout = QVBoxLayout()
+        layout.setAlignment(Qt.AlignCenter)
+        page.setLayout(layout)
+
+        layout.addStretch(2)
+
+        # Logo / Title
+        title = QLabel("CR2A")
+        title.setFont(QFont("Arial", 48, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        title.setObjectName("landing_title")
+        layout.addWidget(title)
+
+        subtitle = QLabel("Contract Review & Analysis")
+        subtitle.setFont(QFont("Arial", 16))
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setObjectName("landing_subtitle")
+        layout.addWidget(subtitle)
+
+        # Open Folder button
+        open_btn = QPushButton("Open Folder")
+        open_btn.setFont(QFont("Arial", 14, QFont.Bold))
+        open_btn.setFixedSize(220, 50)
+        open_btn.setObjectName("accent_btn")
+        open_btn.clicked.connect(self.browse_folder)
+        btn_container = QHBoxLayout()
+        btn_container.setAlignment(Qt.AlignCenter)
+        btn_container.addWidget(open_btn)
+        layout.addLayout(btn_container)
+
+        # Direct path entry for network/mapped drives the dialog can't see
+        path_row = QHBoxLayout()
+        path_row.setAlignment(Qt.AlignCenter)
+        self.path_entry = QLineEdit()
+        self.path_entry.setPlaceholderText("Or type/paste a folder path (e.g. F:\\APS Drive\\Job Files\\...)")
+        self.path_entry.setFixedWidth(400)
+        self.path_entry.returnPressed.connect(self._open_typed_path)
+        path_go_btn = QPushButton("Go")
+        path_go_btn.setFixedWidth(50)
+        path_go_btn.clicked.connect(self._open_typed_path)
+        path_row.addWidget(self.path_entry)
+        path_row.addWidget(path_go_btn)
+        layout.addLayout(path_row)
+
+        layout.addSpacing(20)
+
+        # Recent projects list
+        recent_label = QLabel("Recent Projects")
+        recent_label.setFont(QFont("Arial", 11))
+        recent_label.setObjectName("muted_label")
+        recent_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(recent_label)
+
+        self.recent_list = QListWidget()
+        self.recent_list.setMaximumWidth(500)
+        self.recent_list.setMaximumHeight(150)
+        self.recent_list.setStyleSheet("font-size: 12px;")
+        self.recent_list.itemDoubleClicked.connect(self._on_recent_project_clicked)
+        recent_container = QHBoxLayout()
+        recent_container.setAlignment(Qt.AlignCenter)
+        recent_container.addWidget(self.recent_list)
+        layout.addLayout(recent_container)
+
+        # Settings button
+        settings_btn = QPushButton("Settings")
+        settings_btn.setStyleSheet("padding: 6px 16px; font-size: 12px;")
+        settings_btn.clicked.connect(self.open_settings)
+        settings_container = QHBoxLayout()
+        settings_container.setAlignment(Qt.AlignCenter)
+        settings_container.addWidget(settings_btn)
+        layout.addLayout(settings_container)
+
+        layout.addStretch(3)
+        return page
+
+    def _create_workspace_page(self):
+        """Create the workspace page: file browser (left) + chat (right)."""
+        page = QWidget()
+        page_layout = QVBoxLayout()
+        page_layout.setContentsMargins(4, 4, 4, 4)
+        page_layout.setSpacing(4)
+        page.setLayout(page_layout)
+
+        # Top toolbar
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
+
+        back_btn = QPushButton("< Back")
+        back_btn.setStyleSheet("padding: 4px 10px; font-size: 11px;")
+        back_btn.clicked.connect(lambda: self.stacked.setCurrentIndex(0))
+        toolbar.addWidget(back_btn)
+
+        self.folder_name_label = QLabel("No folder loaded")
+        self.folder_name_label.setFont(QFont("Arial", 12, QFont.Bold))
+        self.folder_name_label.setStyleSheet("padding: 2px 8px;")
+        toolbar.addWidget(self.folder_name_label, stretch=1)
+
+        self.workspace_status_label = QLabel("")
+        self.workspace_status_label.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+        toolbar.addWidget(self.workspace_status_label)
+
+        settings_btn = QPushButton("Settings")
+        settings_btn.setStyleSheet("padding: 4px 10px; font-size: 11px;")
+        settings_btn.clicked.connect(self.open_settings)
+        toolbar.addWidget(settings_btn)
+
+        page_layout.addLayout(toolbar)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setMaximumHeight(14)
+        page_layout.addWidget(self.progress_bar)
+
+        # Main splitter: file browser (left) + chat (right)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+
+        # LEFT: Two-section file browser
+        self.main_splitter.addWidget(self._create_file_browser_panel())
+
+        # RIGHT: Chat panel
+        self.main_splitter.addWidget(self._create_chat_panel())
+
+        self.main_splitter.setSizes([300, 900])
+        self.main_splitter.setStretchFactor(0, 0)  # File browser fixed width
+        self.main_splitter.setStretchFactor(1, 1)  # Chat stretches
+
+        page_layout.addWidget(self.main_splitter, stretch=1)
+        return page
+
+    def _create_file_browser_panel(self):
+        """Create the two-section file browser (VS Code workspace explorer style)."""
+        panel = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        panel.setLayout(layout)
+
+        # Section 1: CR2A app folder (auto-collapsed)
+        cr2a_header = QPushButton("CR2A")
+        cr2a_header.setObjectName("section_header")
+        cr2a_header.setCheckable(True)
+        cr2a_header.setChecked(False)  # Auto-collapsed
+        layout.addWidget(cr2a_header)
+
+        # CR2A folder tree (templates, prompts)
+        self.cr2a_tree = QTreeView()
+        self.cr2a_tree.setMaximumHeight(0)  # Collapsed
+        self.cr2a_tree.setHeaderHidden(True)
+        self.cr2a_tree.setStyleSheet("font-size: 11px;")
+        self.cr2a_tree.doubleClicked.connect(self._on_file_double_clicked)
+
+        # Set up CR2A file model — only show prompts/ and templates/ folders
+        self.cr2a_model = QFileSystemModel()
+        app_dir = str(Path(__file__).resolve().parent.parent)
+        self.cr2a_model.setRootPath(app_dir)
+        self.cr2a_proxy = CR2AFolderFilterProxy(app_dir, self)
+        self.cr2a_proxy.setSourceModel(self.cr2a_model)
+        self.cr2a_tree.setModel(self.cr2a_proxy)
+        self.cr2a_tree.setRootIndex(self.cr2a_proxy.mapFromSource(self.cr2a_model.index(app_dir)))
+        # Hide size, type, date columns
+        for col in range(1, 4):
+            self.cr2a_tree.hideColumn(col)
+
+        layout.addWidget(self.cr2a_tree)
+
+        # Toggle CR2A section
+        def toggle_cr2a(checked):
+            self.cr2a_tree.setMaximumHeight(200 if checked else 0)
+        cr2a_header.toggled.connect(toggle_cr2a)
+
+        # Section 2: User's bid folder (expanded)
+        self.bid_folder_header = QPushButton("Bid Folder")
+        self.bid_folder_header.setObjectName("section_header")
+        layout.addWidget(self.bid_folder_header)
+
+        self.bid_tree = QTreeView()
+        self.bid_tree.setHeaderHidden(True)
+        self.bid_tree.setStyleSheet("font-size: 11px;")
+        self.bid_tree.doubleClicked.connect(self._on_file_double_clicked)
+
+        self.bid_model = QFileSystemModel()
+        self.bid_model.setNameFilters(["*.pdf", "*.docx", "*.txt", "*.xlsx", "*.xls"])
+        self.bid_model.setNameFilterDisables(False)
+        self.bid_tree.setModel(self.bid_model)
+        for col in range(1, 4):
+            self.bid_tree.hideColumn(col)
+
+        layout.addWidget(self.bid_tree, stretch=1)
+
+        return panel
+
+    def _on_file_double_clicked(self, index):
+        """Handle double-click on a file in the browser — open with OS default."""
+        model = index.model()
+        # Unwrap proxy model to get to QFileSystemModel
+        if isinstance(model, QSortFilterProxyModel):
+            source_index = model.mapToSource(index)
+            source_model = model.sourceModel()
+        else:
+            source_index = index
+            source_model = model
+        if source_model and not source_model.isDir(source_index):
+            file_path = source_model.filePath(source_index)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+
+    def _on_recent_project_clicked(self, item):
+        """Handle double-click on a recent project."""
+        folder_path = item.data(Qt.UserRole)
+        if folder_path and os.path.isdir(folder_path):
+            self._open_folder(folder_path)
     
     def _create_chat_panel(self):
-        """Create the chat/log panel widget (always visible, independent of tabs)."""
+        """Create the main chat panel with message display and input."""
         chat_panel = QWidget()
         chat_layout = QVBoxLayout()
-        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.setContentsMargins(4, 0, 4, 4)
         chat_layout.setSpacing(4)
         chat_panel.setLayout(chat_layout)
 
-        self.chat_history = QTextEdit()
-        self.chat_history.setReadOnly(True)
-        self.chat_history.setStyleSheet("padding: 8px; font-size: 13px;")
-        chat_layout.addWidget(self.chat_history)
+        # Chat message display — scrollable list of ChatMessageWidget frames
+        self.chat_scroll = QScrollArea()
+        self.chat_scroll.setWidgetResizable(True)
+        self.chat_scroll.setStyleSheet("padding: 4px; font-size: 13px; border: none;")
+        self._chat_container = QWidget()
+        self._chat_layout = QVBoxLayout()
+        self._chat_layout.setContentsMargins(8, 8, 8, 8)
+        self._chat_layout.setSpacing(4)
+        self._chat_layout.addStretch()  # push messages to top initially
+        self._chat_container.setLayout(self._chat_layout)
+        self.chat_scroll.setWidget(self._chat_container)
+        chat_layout.addWidget(self.chat_scroll)
 
+        # Backward-compat alias so old code referencing self.chat_history doesn't crash
+        self.chat_history = self.chat_scroll
+
+        # Inline status indicator (replaces progress bar for chat operations)
+        self.chat_status_label = QLabel("")
+        self.chat_status_label.setObjectName("chat_status")
+        self.chat_status_label.setStyleSheet(
+            "font-size: 11px; padding: 4px 8px; font-style: italic;"
+        )
+        self.chat_status_label.setVisible(False)
+        chat_layout.addWidget(self.chat_status_label)
+
+        # Quick action buttons
+        action_bar = QHBoxLayout()
+        action_bar.setSpacing(4)
+
+        for label, cmd in [
+            ("Run Bid Review", "Run a full bid review"),
+            ("Analyze Contract", "Run a full contract analysis"),
+            ("Extract Specs", "Run specs extraction"),
+        ]:
+            btn = QPushButton(label)
+            btn.setObjectName("quick_action_btn")
+            btn.setStyleSheet("padding: 4px 10px; font-size: 11px;")
+            btn.clicked.connect(lambda checked, c=cmd: self._send_quick_command(c))
+            action_bar.addWidget(btn)
+
+        action_bar.addStretch()
+        chat_layout.addLayout(action_bar)
+
+        # Chat input
         input_layout = QHBoxLayout()
         input_layout.setContentsMargins(0, 0, 0, 0)
         self.question_input = QLineEdit()
-        self.question_input.setPlaceholderText("Ask a question about the contract...")
-        self.question_input.setStyleSheet("padding: 8px; font-size: 13px;")
+        self.question_input.setPlaceholderText("Ask about the contract, or request an analysis...")
+        self.question_input.setStyleSheet("padding: 10px; font-size: 13px;")
         self.question_input.returnPressed.connect(self.send_question)
         input_layout.addWidget(self.question_input)
         self.send_btn = QPushButton("Send")
         self.send_btn.clicked.connect(self.send_question)
-        self.send_btn.setStyleSheet("padding: 8px 16px; font-size: 13px;")
+        self.send_btn.setObjectName("accent_btn")
+        self.send_btn.setStyleSheet("padding: 10px 20px; font-size: 13px; font-weight: bold;")
         input_layout.addWidget(self.send_btn)
         chat_layout.addLayout(input_layout)
 
         return chat_panel
+
+    # Map quick command text to tool names for direct execution
+    _QUICK_COMMAND_TOOLS = {
+        "Run a full bid review": "run_full_bid_review",
+        "Run a full contract analysis": "run_full_contract_analysis",
+        "Run specs extraction": "run_specs_extraction",
+    }
+
+    def _send_quick_command(self, command):
+        """Execute a quick action — bypass ReAct loop and call the tool directly."""
+        tool_name = self._QUICK_COMMAND_TOOLS.get(command)
+
+        if not tool_name or not self.tool_registry:
+            # Fallback to chat if tool not found
+            self.question_input.setText(command)
+            self.send_question()
+            return
+
+        if not self.contract_text:
+            QMessageBox.warning(self, "No Contract", "Please open a folder and load documents first.")
+            return
+
+        # Display user message
+        self._log_to_chat('user', command, 'You:')
+        self.send_btn.setEnabled(False)
+        self.statusBar().showMessage("Processing...")
+        self.chat_status_label.setText(f"Running {tool_name}...")
+        self.chat_status_label.setVisible(True)
+
+        # Execute tool directly in a background thread (no ReAct loop)
+        self._quick_tool_thread = QuickToolThread(self.tool_registry, tool_name)
+        self._quick_tool_thread.finished_signal.connect(self._on_quick_tool_finished)
+        self._quick_tool_thread.error_signal.connect(self._on_quick_tool_error)
+        self._quick_tool_thread.progress_signal.connect(self._on_quick_tool_progress)
+        self._quick_tool_thread.item_complete_signal.connect(self._on_quick_tool_item)
+        self._quick_tool_thread.start()
 
     def create_contract_tab(self):
         """Create the Contract tab with analysis sidebar."""
@@ -844,6 +1841,9 @@ class CR2A_GUI(QMainWindow):
         # Analysis sidebar (StructuredAnalysisView)
         self.structured_view = StructuredAnalysisView()
         self.structured_view.analyze_requested.connect(self.on_category_analyze_requested)
+        self.structured_view.feedback_accepted.connect(self.on_feedback_accepted)
+        self.structured_view.feedback_corrected.connect(self.on_feedback_corrected)
+        self.structured_view.clause_added.connect(self.on_clause_added)
         self.structured_view.setMinimumWidth(280)
         layout.addWidget(self.structured_view, stretch=1)
 
@@ -861,42 +1861,35 @@ class CR2A_GUI(QMainWindow):
         return widget
     
     def create_menu_bar(self):
-        """Create the menu bar."""
+        """Create the simplified menu bar."""
         menubar = self.menuBar()
-        
+
         # File menu
         file_menu = menubar.addMenu("File")
-        
+
+        open_folder_action = QAction("Open Folder...", self)
+        open_folder_action.triggered.connect(self.browse_folder)
+        file_menu.addAction(open_folder_action)
+
+        open_workbook_action = QAction("Open Analysis Workbook", self)
+        open_workbook_action.triggered.connect(self.open_analysis_workbook)
+        file_menu.addAction(open_workbook_action)
+
+        file_menu.addSeparator()
+
         settings_action = QAction("Settings...", self)
         settings_action.triggered.connect(self.open_settings)
         file_menu.addAction(settings_action)
-        
+
         file_menu.addSeparator()
-        
-        # Export submenu
-        export_menu = file_menu.addMenu("Export")
-        
-        export_analysis_action = QAction("Export Analysis Report...", self)
-        export_analysis_action.triggered.connect(self.export_analysis_report)
-        export_menu.addAction(export_analysis_action)
-        
-        export_chat_action = QAction("Export Chat Log...", self)
-        export_chat_action.triggered.connect(self.export_chat_log)
-        export_menu.addAction(export_chat_action)
-        
-        export_all_action = QAction("Export All...", self)
-        export_all_action.triggered.connect(self.export_all)
-        export_menu.addAction(export_all_action)
-        
-        file_menu.addSeparator()
-        
+
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        
+
         # Help menu
         help_menu = menubar.addMenu("Help")
-        
+
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
@@ -905,6 +1898,8 @@ class CR2A_GUI(QMainWindow):
         """Open settings dialog."""
         dialog = SettingsDialog(self, self.config_manager)
         if dialog.exec_() == QDialog.Accepted:
+            # Apply theme immediately
+            self.apply_theme()
             # Reload API key and reinitialize engines
             self.init_engines()
             QMessageBox.information(
@@ -934,6 +1929,27 @@ class CR2A_GUI(QMainWindow):
             return True
         return False
 
+    def open_analysis_workbook(self):
+        """Open the CR2A analysis Excel workbook with the default application."""
+        if not self.excel_builder:
+            QMessageBox.information(
+                self, "No Workbook",
+                "No analysis workbook available.\n\n"
+                "Load a contract or folder first to create the workbook."
+            )
+            return
+        path = self.excel_builder.excel_path
+        if not path.exists():
+            QMessageBox.information(
+                self, "No Workbook",
+                f"Workbook not found at:\n{path}\n\n"
+                "Load a contract or folder first."
+            )
+            return
+        from PyQt5.QtCore import QUrl
+        from PyQt5.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
     def export_analysis_report(self):
         """Export analysis report to a text file."""
         if not self._has_any_results():
@@ -960,7 +1976,7 @@ class CR2A_GUI(QMainWindow):
     
     def export_chat_log(self):
         """Export chat log to a text file."""
-        chat_text = self.chat_history.toPlainText()
+        chat_text = self._get_chat_plain_text()
         if not chat_text.strip():
             QMessageBox.warning(self, "No Chat", "No chat history to export.")
             return
@@ -1002,7 +2018,7 @@ class CR2A_GUI(QMainWindow):
         
         try:
             report = self._generate_analysis_report()
-            chat_text = self.chat_history.toPlainText()
+            chat_text = self._get_chat_plain_text()
             
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(report)
@@ -1212,7 +2228,103 @@ class CR2A_GUI(QMainWindow):
         return lines
 
     def init_engines(self):
-        """Initialize analysis and query engines with local AI model."""
+        """Initialize analysis and query engines with configured AI backend."""
+        backend = self.config_manager.get_ai_backend() if self.config_manager else "local"
+
+        # Clear previous engine so a failed init doesn't leave a stale backend
+        self.analysis_engine = None
+        self.query_engine = None
+
+        if backend == "claude":
+            self._init_engines_claude()
+        else:
+            self._init_engines_local()
+
+        # Update tool registry if it already exists (e.g. after settings change)
+        if self.tool_registry and self.analysis_engine:
+            self.tool_registry.analysis_engine = self.analysis_engine
+            ai_client = self.analysis_engine.ai_client
+            self.tool_registry.query_engine = self.query_engine
+            if hasattr(self, 'bid_review_engine') and self.bid_review_engine:
+                self.bid_review_engine.ai_client = ai_client
+
+    def _init_engines_claude(self):
+        """Initialize engines with Claude API backend."""
+        try:
+            import anthropic  # noqa: F401 — verify package is installed
+        except ImportError:
+            self.statusBar().showMessage("anthropic package not installed")
+            QMessageBox.critical(
+                self, "Missing Package",
+                "The 'anthropic' Python package is not installed.\n\n"
+                "Install it with:  pip install anthropic"
+            )
+            return
+
+        try:
+            claude_model = self.config_manager.get_claude_model() if self.config_manager else "claude-sonnet"
+            logger.info(f"Initializing Claude API engine: {claude_model}")
+            self.statusBar().showMessage(f"Connecting to Claude API ({claude_model})...")
+
+            from src.api_key_manager import ApiKeyManager
+            mgr = ApiKeyManager(self.config_manager)
+            api_key = mgr.get_key()
+
+            if not api_key:
+                self.statusBar().showMessage("Claude API key required. Go to Settings to configure.")
+                QMessageBox.warning(
+                    self, "API Key Required",
+                    "No Anthropic API key found.\n\n"
+                    "Set the ANTHROPIC_API_KEY environment variable\n"
+                    "or enter your key in Settings → AI Backend."
+                )
+                return
+
+            self.analysis_engine = AnalysisEngine(
+                ai_backend="claude",
+                api_key=api_key,
+                claude_model=claude_model,
+            )
+
+            from src.document_retriever import DocumentRetriever
+            self.retriever = DocumentRetriever()
+
+        except Exception as e:
+            logger.error(f"Failed to create Claude analysis engine: {e}", exc_info=True)
+            self.analysis_engine = None
+            QMessageBox.critical(self, "Engine Error", f"Failed to initialize Claude API:\n\n{e}")
+            return
+
+        try:
+            self.statusBar().showMessage(f"Validating Claude API key...")
+            self.analysis_engine.ai_client.ensure_loaded()
+            self.query_engine = QueryEngine(
+                self.analysis_engine.ai_client,
+                retriever=self.retriever
+            )
+            model_id = self.analysis_engine.ai_client.model
+            self.statusBar().showMessage(f"Ready (Claude API: {model_id})")
+            logger.info("Claude API engine initialized successfully")
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Failed to validate Claude API: {error_msg}", exc_info=True)
+            # Engine exists but API key is bad — keep engine for document loading
+            # but create query engine without AI so chat still works for non-AI features
+            self.statusBar().showMessage("Claude API unavailable — check key and connection")
+            QMessageBox.warning(
+                self,
+                "Claude API Error",
+                f"Failed to connect to Claude API:\n\n{error_msg}\n\n"
+                "Document loading still works, but AI analysis requires a valid key.\n\n"
+                "Options:\n"
+                "1. Check your API key in Settings\n"
+                "2. Verify internet connection\n"
+                "3. Switch to Local AI in Settings"
+            )
+
+    def _init_engines_local(self):
+        """Initialize engines with local Llama model backend."""
         try:
             model_name = self.config_manager.get_local_model_name() if self.config_manager else "llama-3.2-3b-q4"
 
@@ -1258,6 +2370,7 @@ class CR2A_GUI(QMainWindow):
         # Load the AI model separately so a model failure doesn't block contract loading.
         # llama_cpp's Llama() constructor is not thread-safe on Windows, so load on main thread.
         try:
+            model_name = self.config_manager.get_local_model_name() if self.config_manager else "llama-3.2-3b-q4"
             self.statusBar().showMessage(f"Loading AI model into memory ({model_name})...")
             self.analysis_engine.ai_client.ensure_loaded()
             self.query_engine = QueryEngine(
@@ -1270,6 +2383,9 @@ class CR2A_GUI(QMainWindow):
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Failed to load AI model: {error_msg}", exc_info=True)
+            # Null out the broken AI client so AI-dependent tools fail early
+            # with a clear message instead of retrying the broken model load.
+            self.analysis_engine.ai_client = None
             self.statusBar().showMessage("AI model unavailable — load contract and document features still work")
             QMessageBox.critical(
                 self,
@@ -1279,7 +2395,8 @@ class CR2A_GUI(QMainWindow):
                 "Options:\n"
                 "1. Try a different model in Settings\n"
                 "2. Check available memory (need 8GB+ RAM)\n"
-                "3. Ensure model is downloaded (Settings → Manage Models)"
+                "3. Ensure model is downloaded (Settings → Manage Models)\n"
+                "4. Switch to Claude API in Settings → AI Backend"
             )
     
     def browse_file(self):
@@ -1306,26 +2423,55 @@ class CR2A_GUI(QMainWindow):
             self.upload_status.setText(f"File selected: {os.path.basename(filename)} — Click 'Load Contract' to begin.")
 
     def browse_folder(self):
-        """Open folder browser for batch processing."""
-        from pathlib import Path
-
+        """Open folder browser — the only entry point for loading documents."""
         folder_path = QFileDialog.getExistingDirectory(
             self,
             "Select Contract Folder",
             "",
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            QFileDialog.ShowDirsOnly
         )
+        if folder_path:
+            self._open_folder(folder_path)
 
-        if not folder_path:
+    def _open_typed_path(self):
+        """Open a folder from the manually typed path entry."""
+        path = self.path_entry.text().strip()
+        if not path:
             return
+        if os.path.isdir(path):
+            self._open_folder(path)
+        else:
+            QMessageBox.warning(self, "Invalid Path", f"Folder not found:\n\n{path}")
+
+    def _open_folder(self, folder_path):
+        """Open a bid folder: validate, switch to workspace page, and start loading."""
+        from pathlib import Path
 
         folder = Path(folder_path)
 
-        # Find all supported files in folder
-        supported_exts = ['.pdf', '.docx', '.txt', '.xlsx']
+        # Find all supported files in folder (recursive — includes subfolders)
+        supported_exts = {'.pdf', '.docx', '.txt', '.xlsx'}
+        # Exclude CR2A output files and temp files
+        exclude_names = {"cr2a_analysis.xlsx", "template.xlsx"}
+        cr2a_storage = folder / ".cr2a"
         files = []
-        for ext in supported_exts:
-            files.extend(folder.glob(f"*{ext}"))
+        for f in folder.rglob("*"):
+            if not f.is_file():
+                continue
+            if f.suffix.lower() not in supported_exts:
+                continue
+            # Skip .cr2a storage directory
+            try:
+                f.relative_to(cr2a_storage)
+                continue
+            except ValueError:
+                pass
+            # Skip CR2A output files and Excel temp files
+            if f.name.lower() in exclude_names:
+                continue
+            if f.name.startswith("~$"):
+                continue
+            files.append(f)
 
         if not files:
             QMessageBox.warning(
@@ -1336,46 +2482,48 @@ class CR2A_GUI(QMainWindow):
             )
             return
 
-        # Sort files by name
         files = sorted(files, key=lambda f: f.name.lower())
-
-        # Warn for large batches
-        if len(files) > 50:
-            reply = QMessageBox.question(
-                self,
-                "Large Batch Warning",
-                f"Found {len(files)} files. This may take several hours and incur significant API costs.\n\n"
-                f"Do you want to continue?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply == QMessageBox.No:
-                return
 
         # Update state
         self.upload_mode = "folder"
         self.current_folder = folder_path
         self.folder_files = files
-        self.current_file = None
+        self.current_file = str(files[0])  # Primary file for session matching
 
-        # Update UI - folder mode shows Load All button
-        self.file_label.setText(f"{folder.name} ({len(files)} files)")
-        self.upload_mode_label.setText(f"Mode: Folder ({len(files)} files)")
-        self.load_btn.setVisible(False)
-        self.load_all_btn.setVisible(True)
-        self.load_all_btn.setEnabled(True)
-        self.analyze_all_btn.setEnabled(False)
+        # Switch to workspace page
+        self.stacked.setCurrentIndex(1)
 
-        # Show file list
-        file_list = "\n".join([f"  • {f.name}" for f in files[:10]])
-        if len(files) > 10:
-            file_list += f"\n  ... and {len(files) - 10} more"
+        # Update file browser to show this folder
+        self.bid_folder_header.setText(f"{folder.name} ({len(files)} files)")
+        self.folder_name_label.setText(folder.name)
+        self.bid_model.setRootPath(folder_path)
+        self.bid_tree.setRootIndex(self.bid_model.index(folder_path))
 
-        self.upload_status.setText(f"Ready to load {len(files)} files:\n{file_list}")
+        # Welcome chat message
+        self._log_to_chat('system', f'Opened folder: {folder.name} ({len(files)} files)')
+        # Show relative paths so user can see subfolder structure
+        def _rel_name(f):
+            try:
+                rel = f.relative_to(folder)
+                return str(rel) if str(rel) != f.name else f.name
+            except ValueError:
+                return f.name
+        file_list = ", ".join(_rel_name(f) for f in files[:8])
+        if len(files) > 8:
+            file_list += f", +{len(files) - 8} more"
+        self._log_to_chat('log', f'Files: {file_list}')
+        self._log_to_chat('log', 'Loading documents...')
+
+        # Save to recent projects
+        self._add_recent_project(folder_path, folder.name)
+
+        # Start folder load automatically
+        self._load_folder()
 
     def _load_folder(self):
-        """Load all folder files as combined context (no AI). Same as Load Contract but for multiple files."""
+        """Load all folder files as combined context (no AI)."""
         if not self.analysis_engine:
-            QMessageBox.warning(self, "Error", "Analysis engine not initialized. Check API key.")
+            QMessageBox.warning(self, "Error", "Analysis engine not initialized.")
             return
 
         if not self.folder_files:
@@ -1384,10 +2532,9 @@ class CR2A_GUI(QMainWindow):
 
         # Reset previous state
         self.prepared_contract = None
+        self.prepared_bid_review = None
         self.category_results = {}
         self.current_analysis = None
-        if self.specs_tab:
-            self.specs_tab.clear()
 
         # Initialize project storage for the folder
         from pathlib import Path
@@ -1399,22 +2546,29 @@ class CR2A_GUI(QMainWindow):
             if valid:
                 self.project_storage.initialize_structure()
                 self._reinit_storage_for_project()
+                self._init_excel_builder()
                 if self.session_manager:
                     self.session_manager.set_contract_info(
                         contract_file=f"{len(self.folder_files)} files",
                         contract_file_path=self.current_folder,
                         upload_mode=self.upload_mode,
                     )
+            else:
+                logger.warning(f"Project folder not writable: {error}")
+                self._log_to_chat('error',
+                    f"Cannot save results to this folder: {error}\n"
+                    "Analysis will run but results won't be saved to Excel or session.")
         except Exception as e:
             logger.warning(f"Project storage init failed: {e}")
+            self._log_to_chat('error',
+                f"Project storage initialization failed: {e}\n"
+                "Analysis will run but results won't be saved.")
 
         # Update UI
-        self.load_all_btn.setEnabled(False)
-        self.analyze_all_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.upload_status.setText("Loading files...")
+        self.workspace_status_label.setText("Loading files...")
         self.statusBar().showMessage(f"Loading {len(self.folder_files)} files...")
 
         # Start preparation in background
@@ -1465,6 +2619,7 @@ class CR2A_GUI(QMainWindow):
 
             self.project_storage.initialize_structure()
             self._reinit_storage_for_project()
+            self._init_excel_builder()
 
             logger.info(f"Project storage initialized at: {self.project_storage.project_root}")
 
@@ -1518,8 +2673,8 @@ class CR2A_GUI(QMainWindow):
             from src.session_manager import SessionManager
             self.session_manager = SessionManager(self.project_storage.storage_root)
 
-            # Reinitialize History tab with new project-specific history store
-            self.init_history_tab()
+            # History tab removed in Phase 2 (chat-first UI)
+            # self.init_history_tab()
 
             logger.info("Storage components reinitialized for project mode")
             logger.info(f"History now saving to: {self.project_storage.analyses_dir}")
@@ -1658,7 +2813,8 @@ class CR2A_GUI(QMainWindow):
         self._load_chat_history_for_contract()
 
         # Contract tab is already at index 0 (merged)
-        self.tabs.setCurrentIndex(0)
+        if self.tabs:
+            self.tabs.setCurrentIndex(0)
 
         QMessageBox.information(self, "Success", "Contract analysis complete!\n\nView results in the Contract tab or ask questions in the Chat tab.")
     
@@ -1955,6 +3111,7 @@ class CR2A_GUI(QMainWindow):
             if valid:
                 self.project_storage.initialize_structure()
                 self._reinit_storage_for_project()
+                self._init_excel_builder()
                 # Record contract info in session
                 if self.session_manager:
                     self.session_manager.set_contract_info(
@@ -1962,8 +3119,16 @@ class CR2A_GUI(QMainWindow):
                         contract_file_path=self.current_file,
                         upload_mode=self.upload_mode,
                     )
+            else:
+                logger.warning(f"Project folder not writable: {error}")
+                self._log_to_chat('error',
+                    f"Cannot save results to this folder: {error}\n"
+                    "Analysis will run but results won't be saved to Excel or session.")
         except Exception as e:
             logger.warning(f"Project storage init failed: {e}")
+            self._log_to_chat('error',
+                f"Project storage initialization failed: {e}\n"
+                "Analysis will run but results won't be saved.")
 
         # Start preparation in background
         self.prepare_thread = PrepareContractThread(
@@ -1977,11 +3142,16 @@ class CR2A_GUI(QMainWindow):
     def on_prepare_complete(self, prepared):
         """Handle contract preparation completion."""
         self.prepared_contract = prepared
-        self.contract_text = prepared.contract_text  # Store for bid review and chat
+        self.contract_text = prepared.contract_text
+
+        # Detect contract type from content for knowledge retrieval
+        if self.analysis_engine and hasattr(self.analysis_engine, 'knowledge_store'):
+            from src.knowledge_store import KnowledgeStore
+            prepared.contract_type = KnowledgeStore._detect_contract_type(
+                prepared.contract_text or ""
+            )
+
         self.progress_bar.setVisible(False)
-        self.load_btn.setEnabled(True)
-        self.load_all_btn.setEnabled(True)
-        self.analyze_all_btn.setEnabled(True)
 
         # Count regex hits
         regex_count = sum(len(v) for v in prepared.extracted_clauses.values())
@@ -2000,58 +3170,41 @@ class CR2A_GUI(QMainWindow):
 
         self._log_to_chat('system', f'Contract loaded: {filename}')
         self._log_to_chat('log', f'Extracted {text_len:,} characters, parsed {section_count} sections')
-        self._log_to_chat('log', f'Indexed {section_count} sections for search (regex + keyword + TF-IDF)')
         self._log_to_chat('log', f'Pattern matching found {regex_count} clause matches across {cat_count} categories')
-        self._log_to_chat('log', "Click 'Analyze' on individual items or 'Analyze All' to run AI analysis.")
+        self._log_to_chat('log', 'Ready! Ask questions or use the quick action buttons below.')
 
-        self.upload_status.setText(
-            f"Contract loaded! {regex_count} pattern matches across {cat_count} categories. "
-            f"Click 'Analyze' on individual items or 'Analyze All' to run AI analysis."
+        self.workspace_status_label.setText(
+            f"Loaded: {text_len:,} chars, {regex_count} pattern matches"
         )
         self.statusBar().showMessage(f"Contract loaded: {filename}")
 
-        # Enable Specs tab now that contract is loaded
-        if self.specs_tab:
-            self.specs_tab.set_contract_loaded(True)
-
-        # Enable Bid Review tab now that contract is loaded
-        if self.bid_review_tab:
-            # Prepare bid engine so per-item Analyze buttons work immediately
-            # Works with or without AI client (regex-only mode if AI unavailable)
-            from src.bid_review_engine import BidReviewEngine
-            ai_client = self.analysis_engine.ai_client if self.analysis_engine else None
-            bid_engine = BidReviewEngine(ai_client)
-            bid_prepared = bid_engine.prepare_bid_review(
-                contract_text=self.contract_text,
-                file_path=self.file_label.text() if hasattr(self, 'file_label') else "",
-                page_count=getattr(self, '_page_count', 0),
-                file_size_bytes=getattr(self, '_file_size_bytes', 0),
-            )
-            self.bid_review_tab.set_engine_and_prepared(bid_engine, bid_prepared)
-            self.bid_review_tab.set_contract_file_path(self.current_file)
-            self.bid_review_tab.set_contract_loaded(True)
-
-        # Set up the structured view for per-item analysis
-        self.structured_view.set_category_key_map(self.analysis_engine.CATEGORY_MAP)
-        self.structured_view.set_regex_indicators(
-            prepared.extracted_clauses, self.analysis_engine.CATEGORY_MAP
+        # Prepare bid review engine (for tool registry)
+        from src.bid_review_engine import BidReviewEngine
+        ai_client = self.analysis_engine.ai_client if self.analysis_engine else None
+        self.bid_review_engine = BidReviewEngine(ai_client)
+        self.prepared_bid_review = self.bid_review_engine.prepare_bid_review(
+            contract_text=self.contract_text,
+            file_path=self.current_file or "",
+            page_count=getattr(self, '_page_count', 0),
+            file_size_bytes=getattr(self, '_file_size_bytes', 0),
         )
-        self.structured_view.enable_analyze_buttons(True)
-        self.structured_view.set_contract_file_path(self.current_file)
 
-        # Clear all boxes first
-        self.structured_view._clear_all_boxes()
+        # Initialize tool registry for chat-based tool calling
+        self._init_tool_registry()
 
         # Attempt to restore previous session for this contract
         self._try_restore_session()
 
+        # Refresh file browser to show any new files (e.g., CR2A_Analysis.xlsx)
+        if self.current_folder:
+            self.bid_model.setRootPath(self.current_folder)
+
     def on_prepare_error(self, error):
         """Handle contract preparation error."""
         self.progress_bar.setVisible(False)
-        self.load_btn.setEnabled(True)
-        self.load_all_btn.setEnabled(True)
-        self.upload_status.setText(f"Load failed: {error}")
+        self.workspace_status_label.setText(f"Load failed: {error}")
         self.statusBar().showMessage("Load failed")
+        self._log_to_chat('error', str(error), 'Load Error')
         QMessageBox.critical(self, "Load Error", f"Failed to load contract:\n\n{error}")
 
     def on_category_analyze_requested(self, cat_key):
@@ -2080,9 +3233,10 @@ class CR2A_GUI(QMainWindow):
             return
 
         # Update status
-        self.structured_view.update_category_status(
-            cat_key, "loading", self.analysis_engine.CATEGORY_MAP
-        )
+        if self.structured_view:
+            self.structured_view.update_category_status(
+                cat_key, "loading", self.analysis_engine.CATEGORY_MAP
+            )
         self.statusBar().showMessage(f"Analyzing {cat_key}...")
 
         # Start single-category analysis in background
@@ -2096,107 +3250,299 @@ class CR2A_GUI(QMainWindow):
         self.active_category_thread.start()
 
     def on_category_complete(self, cat_key, display_name, clause_block, prompt='', response=''):
-        """Handle single category analysis completion."""
-        # Store result
-        self.category_results[cat_key] = clause_block
+        """Handle single category analysis completion.
+
+        clause_block may be a single dict or a list of dicts when the AI
+        found multiple distinct clause instances for the same category.
+        """
+        # Normalise to a list
+        if isinstance(clause_block, dict):
+            clause_blocks = [clause_block]
+        elif isinstance(clause_block, list):
+            clause_blocks = clause_block
+        else:
+            return
+
+        # Store result — keep first block as the canonical result for
+        # session persistence and tool-registry (backward compat)
+        primary = clause_blocks[0]
+        self.category_results[cat_key] = primary
 
         # Auto-save to session
         if self.session_manager:
-            self.session_manager.update_category_result(cat_key, clause_block)
+            self.session_manager.update_category_result(cat_key, primary)
             self.session_manager.save()
 
-        # Update the view
-        self.structured_view.fill_single_category(
-            cat_key, clause_block, self.analysis_engine.CATEGORY_MAP
-        )
-        self.structured_view.update_category_status(
-            cat_key, "analyzed", self.analysis_engine.CATEGORY_MAP
-        )
+        # Auto-save to Excel workbook — write all instances
+        if self.excel_builder:
+            contract_file = os.path.basename(self.current_file) if self.current_file else ""
+            self.excel_builder.update_contract_category_multi(
+                cat_key, clause_blocks, contract_file
+            )
 
-        # Log to chat panel
-        summary = clause_block.get('Clause Summary', '') if isinstance(clause_block, dict) else ''
-        location = clause_block.get('Clause Location', '') if isinstance(clause_block, dict) else ''
-        self._log_to_chat('summary', f'{summary}\nLocation: {location}', f'Analyzed: {display_name}')
+        # Sync to tool registry
+        if self.tool_registry:
+            self.tool_registry.category_results[cat_key] = primary
 
-        if prompt:
-            self._log_to_chat('prompt', prompt[:1200] + ('...' if len(prompt) > 1200 else ''), 'Prompt sent to AI:')
-        if response:
-            self._log_to_chat('response', response[:1200] + ('...' if len(response) > 1200 else ''), 'AI response:')
+        # Log to chat panel — with feedback buttons
+        instance_count = len(clause_blocks)
+        for i, block in enumerate(clause_blocks):
+            if isinstance(block, dict):
+                summary = block.get('Clause Summary', '')
+                location = block.get('Clause Location', '')
+                logger.info(f"Chat log block {i} for {cat_key}: "
+                           f"summary={repr(summary[:80] if summary else '')}, "
+                           f"location={repr(location)}, keys={list(block.keys())}")
+            else:
+                summary = ''
+                location = ''
+                logger.warning(f"Chat log block {i} for {cat_key}: not a dict, type={type(block)}")
+            label = f'Analyzed: {display_name}'
+            if instance_count > 1:
+                label += f' ({i + 1}/{instance_count})'
+            # Build visible content lines
+            lines = []
+            if summary:
+                lines.append(summary)
+            if location:
+                lines.append(f'Location: {location}')
+            content = '\n'.join(lines) if lines else '(no details returned)'
+            self._log_to_chat('summary', content, label,
+                              cat_key=cat_key, clause_block=block)
+
+        # Update structured view with results
+        if self.structured_view and self.analysis_engine:
+            self.structured_view.fill_single_category(
+                cat_key, clause_blocks, self.analysis_engine.CATEGORY_MAP
+            )
+            self.structured_view.update_category_status(
+                cat_key, "analyzed", self.analysis_engine.CATEGORY_MAP
+            )
 
         # Build current analysis for chat/export
         self._rebuild_current_analysis()
 
-        # On first category completion, extract contract overview in background
-        if len(self.category_results) == 1 and not getattr(self, '_overview_extracted', False):
-            self._extract_overview_async()
-
         self.statusBar().showMessage(f"Analyzed: {display_name}")
-        self.upload_status.setText(
+        self.workspace_status_label.setText(
             f"Analyzed: {display_name} ({len(self.category_results)} categories done)"
         )
+
+    def on_feedback_accepted(self, cat_key: str, clause_block: dict):
+        """Save accepted result as pattern knowledge."""
+        if not self.analysis_engine or not self.analysis_engine.knowledge_store:
+            return
+        summary = clause_block.get('Clause Summary') or clause_block.get('clause_summary', '')
+        if not summary:
+            return
+        source = os.path.basename(self.current_file) if self.current_file else "unknown"
+        contract_type = getattr(self.prepared_contract, 'contract_type', '') if self.prepared_contract else ''
+        try:
+            store = self.analysis_engine.knowledge_store
+            store.save_pattern(cat_key, contract_type, summary, source)
+            display = cat_key.replace('_', ' ').title()
+            stats = store.get_stats(contract_type)
+            self._log_to_chat('info',
+                f'Saved as good example for future analyses. '
+                f'Knowledge base: {stats}',
+                f'Knowledge: {display}')
+            self.statusBar().showMessage(f"Pattern saved for {display}")
+
+            # Auto-update profile for this contract type
+            if contract_type:
+                try:
+                    store.update_profile(contract_type)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Failed to save pattern for {cat_key}: {e}")
+
+    def on_feedback_corrected(self, cat_key: str, original_data: dict, corrected_text: str):
+        """Save correction as knowledge."""
+        if not self.analysis_engine or not self.analysis_engine.knowledge_store:
+            return
+        original = original_data.get('Clause Summary') or original_data.get('clause_summary', '')
+        source = os.path.basename(self.current_file) if self.current_file else "unknown"
+        contract_type = getattr(self.prepared_contract, 'contract_type', '') if self.prepared_contract else ''
+        was_missed = original_data.get('_was_missed', False)
+
+        # Extract lesson if embedded in corrected text
+        lesson = ""
+        corrected_summary = corrected_text
+        if "\n[LESSON: " in corrected_text:
+            parts = corrected_text.rsplit("\n[LESSON: ", 1)
+            corrected_summary = parts[0]
+            lesson = parts[1].rstrip("]") if len(parts) > 1 else ""
+
+        try:
+            self.analysis_engine.knowledge_store.save_correction(
+                cat_key, contract_type, original, corrected_summary, lesson, source,
+                was_missed=was_missed
+            )
+            display = cat_key.replace('_', ' ').title()
+            kind = "missed clause" if was_missed else "correction"
+            # Show knowledge stats
+            store = self.analysis_engine.knowledge_store
+            stats = store.get_stats(contract_type)
+            self._log_to_chat('info',
+                f'Saved {kind} for future analyses. '
+                f'Knowledge base: {stats}',
+                f'Knowledge: {display}')
+            self.statusBar().showMessage(f"Correction saved for {display}")
+
+            # Auto-update profile for this contract type
+            if contract_type:
+                try:
+                    store.update_profile(contract_type)
+                except Exception:
+                    pass
+
+            # Update the displayed result with the corrected text
+            corrected_block = dict(original_data)
+            corrected_block['Clause Summary'] = corrected_summary
+            if not corrected_block.get('Clause Location'):
+                corrected_block['Clause Location'] = 'User-provided'
+            corrected_block.pop('_was_missed', None)
+            self.on_category_complete(cat_key,
+                self.analysis_engine.CATEGORY_MAP.get(cat_key, ('', cat_key))[1],
+                corrected_block)
+        except Exception as e:
+            logger.warning(f"Failed to save correction for {cat_key}: {e}")
+
+    def on_clause_added(self, cat_key: str, clause_block: dict):
+        """Handle user manually adding an additional clause instance."""
+        display_name = cat_key.replace('_', ' ').title()
+        if self.analysis_engine:
+            mapping = self.analysis_engine.CATEGORY_MAP.get(cat_key)
+            if mapping:
+                display_name = mapping[1]
+
+        # Log to chat
+        summary = clause_block.get('Clause Summary', '')
+        location = clause_block.get('Clause Location', '')
+        self._log_to_chat('summary', f'{summary}\nLocation: {location}',
+                          f'Added by user: {display_name}',
+                          cat_key=cat_key, clause_block=clause_block)
+
+        # Save to Excel if available
+        if self.excel_builder and self.current_file:
+            contract_file = os.path.basename(self.current_file)
+            self.excel_builder.update_contract_category_multi(
+                cat_key, [clause_block], contract_file
+            )
+
+        self.statusBar().showMessage(f"Added clause: {display_name}")
 
     def _extract_overview_async(self):
         """Contract overview extraction removed — section no longer displayed."""
         pass
 
+    def _init_tool_registry(self):
+        """Initialize the tool registry for chat-based tool calling."""
+        try:
+            from src.tool_registry import ToolRegistry
+            self.tool_registry = ToolRegistry(
+                analysis_engine=self.analysis_engine,
+                bid_review_engine=self.bid_review_engine,
+                query_engine=self.query_engine,
+                prepared_contract=self.prepared_contract,
+                prepared_bid_review=self.prepared_bid_review,
+                excel_builder=self.excel_builder,
+            )
+            logger.info("Tool registry initialized with %d tools", len(self.tool_registry.get_tool_names()))
+        except Exception as e:
+            logger.warning("Failed to initialize tool registry: %s", e)
+            self.tool_registry = None
+
+    def _add_recent_project(self, folder_path, folder_name):
+        """Add a folder to the recent projects list."""
+        # Check for duplicates
+        for i in range(self.recent_list.count()):
+            item = self.recent_list.item(i)
+            if item.data(Qt.UserRole) == folder_path:
+                # Move to top
+                self.recent_list.takeItem(i)
+                break
+
+        item = QListWidgetItem(f"{folder_name}  —  {folder_path}")
+        item.setData(Qt.UserRole, folder_path)
+        self.recent_list.insertItem(0, item)
+
+        # Keep max 10
+        while self.recent_list.count() > 10:
+            self.recent_list.takeItem(self.recent_list.count() - 1)
+
+    def _init_excel_builder(self):
+        """Initialize the Excel template builder for the current project."""
+        if not self.project_storage:
+            return
+        try:
+            from src.excel_template_builder import ExcelTemplateBuilder
+            # Gather contract file names
+            contract_files = []
+            if self.upload_mode == "folder" and self.folder_files:
+                contract_files = [os.path.basename(f) for f in self.folder_files]
+            elif self.current_file:
+                contract_files = [os.path.basename(self.current_file)]
+            self.excel_builder = ExcelTemplateBuilder(
+                self.project_storage.project_root, contract_files
+            )
+            path = self.excel_builder.initialize_workbook()
+            logger.info("Excel workbook ready: %s", path)
+        except Exception as e:
+            logger.warning("Failed to initialize Excel builder: %s", e)
+            self.excel_builder = None
+
     def on_category_not_found(self, cat_key, prompt='', response=''):
         """Handle category not found by AI."""
-        self.structured_view.update_category_status(
-            cat_key, "not_found", self.analysis_engine.CATEGORY_MAP
-        )
-
-        # Auto-save to session
         if self.session_manager:
             self.session_manager.mark_category_not_found(cat_key)
             self.session_manager.save()
         mapping = self.analysis_engine.CATEGORY_MAP.get(cat_key)
         name = mapping[1] if mapping else cat_key
-        self._log_to_chat('log', f'Not found in contract: {name}')
-        if prompt:
-            self._log_to_chat('prompt', prompt[:1200] + ('...' if len(prompt) > 1200 else ''), f'Prompt sent to AI ({name}):')
-        if response:
-            self._log_to_chat('response', response[:1200] + ('...' if len(response) > 1200 else ''), f'AI response ({name}):')
+        self._log_to_chat('not_found', f'Not found in contract: {name}',
+                          cat_key=cat_key)
+        # Update structured view with not-found status and content
+        if self.structured_view and self.analysis_engine:
+            not_found_data = {'Clause Location': 'Not found', 'Clause Summary': ''}
+            self.structured_view.fill_single_category(
+                cat_key, not_found_data, self.analysis_engine.CATEGORY_MAP
+            )
+            self.structured_view.update_category_status(
+                cat_key, "not_found", self.analysis_engine.CATEGORY_MAP
+            )
         self.statusBar().showMessage(f"Not found: {name}")
 
     def on_category_error(self, cat_key, error_msg):
         """Handle single category analysis error."""
-        self.structured_view.update_category_status(
-            cat_key, "error", self.analysis_engine.CATEGORY_MAP
-        )
-        mapping = self.analysis_engine.CATEGORY_MAP.get(cat_key)
+        mapping = self.analysis_engine.CATEGORY_MAP.get(cat_key) if self.analysis_engine else None
         name = mapping[1] if mapping else cat_key
         self._log_to_chat('error', f'{name}: {error_msg}', 'Analysis Error')
+        if self.structured_view and self.analysis_engine:
+            self.structured_view.update_category_status(
+                cat_key, "error", self.analysis_engine.CATEGORY_MAP
+            )
         self.statusBar().showMessage(f"Error analyzing {name}: {error_msg}")
         logger.error(f"Category analysis error for {cat_key}: {error_msg}")
 
     def analyze_all(self):
-        """Analyze all categories sequentially. Triggered by 'Analyze All' button."""
+        """Analyze all categories sequentially."""
         if not self.prepared_contract:
-            QMessageBox.warning(self, "Error", "No contract loaded. Click 'Load Contract' first.")
+            QMessageBox.warning(self, "Error", "No contract loaded.")
             return
-
         if not self.analysis_engine:
             QMessageBox.warning(self, "Error", "Analysis engine not initialized.")
             return
 
-        # Prevent concurrent model access (llama_cpp not thread-safe)
-        bid_thread = getattr(self.bid_review_tab, '_current_thread', None) if self.bid_review_tab else None
-        if bid_thread and bid_thread.isRunning():
-            QMessageBox.warning(
-                self, "Please Wait",
-                "A bid review analysis is in progress.\n"
-                "Please wait for it to finish before analyzing contract categories."
-            )
+        # Prevent concurrent model access
+        if self.chat_thread and self.chat_thread.isRunning():
+            self._log_to_chat('log', 'Please wait for the current task to finish.')
             return
 
-        # Disable buttons during analysis
-        self.analyze_all_btn.setEnabled(False)
-        self.load_btn.setEnabled(False)
-        self.structured_view.enable_analyze_buttons(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.upload_status.setText("Running AI analysis on all categories...")
+        self.send_btn.setEnabled(False)
+        self._log_to_chat('system', 'Starting full contract analysis...')
 
         self.analyze_all_thread = AnalyzeAllThread(
             self.analysis_engine, self.prepared_contract
@@ -2211,27 +3557,21 @@ class CR2A_GUI(QMainWindow):
     def on_analyze_all_finished(self):
         """Handle completion of Analyze All."""
         self.progress_bar.setVisible(False)
-        self.analyze_all_btn.setEnabled(True)
-        self.load_btn.setEnabled(True)
-        self.structured_view.enable_analyze_buttons(True)
+        self.send_btn.setEnabled(True)
 
         count = len(self.category_results)
-        self.upload_status.setText(
-            f"Analysis complete! {count} categories analyzed."
-        )
+        self.workspace_status_label.setText(f"Analysis complete: {count} categories")
         self.statusBar().showMessage("Analysis complete")
+        self._log_to_chat('system', f'Contract analysis complete: {count} categories analyzed. Results saved to Excel.')
 
-        # Build and save the full result (safe to extract overview now — no AI thread running)
         self._rebuild_current_analysis(include_overview=True)
 
-        # Extract overview now that all category threads are done (safe for llama_cpp)
-        if not getattr(self, '_overview_extracted', False):
-            self._extract_overview_async()
-
-        # Auto-save
         if self.current_analysis:
             self._auto_save_analysis(self.current_analysis)
-            self._load_chat_history_for_contract()
+
+        # Refresh file browser
+        if self.current_folder:
+            self.bid_model.setRootPath(self.current_folder)
 
     def on_specs_analysis_requested(self):
         """Handle spec analysis request from Specs tab."""
@@ -2249,10 +3589,11 @@ class CR2A_GUI(QMainWindow):
             )
             return
 
-        self.specs_tab.start_analysis(
-            self.analysis_engine.ai_client,
-            self.contract_text
-        )
+        if self.specs_tab:
+            self.specs_tab.start_analysis(
+                self.analysis_engine.ai_client,
+                self.contract_text
+            )
 
     def _on_specs_finished(self, text):
         """Handle specs analysis completion — log to chat."""
@@ -2262,6 +3603,10 @@ class CR2A_GUI(QMainWindow):
         if len(lines) > 10:
             preview += f'\n... ({len(lines) - 10} more lines)'
         self._log_to_chat('summary', preview, f'Specs Analysis ({len(lines)} lines)')
+
+        # Auto-save to Excel workbook
+        if self.excel_builder:
+            self.excel_builder.update_specs(text)
 
     def on_bid_review_analysis_requested(self):
         """Handle bid review analysis request from Bid Review tab."""
@@ -2289,6 +3634,9 @@ class CR2A_GUI(QMainWindow):
             )
             return
 
+        if not self.bid_review_tab:
+            return
+
         # Reuse engine/prepared if already set during contract load, else create
         bid_engine = self.bid_review_tab.bid_engine
         prepared = self.bid_review_tab.prepared
@@ -2312,6 +3660,10 @@ class CR2A_GUI(QMainWindow):
             self.session_manager.update_bid_review_item(item_key, item.to_dict())
             self.session_manager.save()
 
+        # Auto-save to Excel workbook
+        if self.excel_builder:
+            self.excel_builder.update_bid_review_item(item_key, item)
+
         # Log to chat
         value = item.value if hasattr(item, 'value') else str(item)
         conf = item.confidence if hasattr(item, 'confidence') else ''
@@ -2330,23 +3682,20 @@ class CR2A_GUI(QMainWindow):
             self.session_manager.update_bid_review_result(result.to_dict())
             self.session_manager.save()
 
-        # Log summary to chat
-        items = self.bid_review_tab.item_results if self.bid_review_tab else {}
-        found = sum(1 for item in items.values() if hasattr(item, 'found') and item.found)
-        total = len(items)
-        self._log_to_chat('system', f'Bid Review complete: {found}/{total} items found ({round(found/total*100) if total else 0}%)')
+        # Auto-save full bid review to Excel workbook
+        if self.excel_builder and result:
+            count = self.excel_builder.update_bid_review_full(result)
+            logger.info("Excel: wrote %d bid review items", count)
+
+        self._log_to_chat('system', 'Bid Review complete. Results saved to Excel workbook.')
 
     def _try_restore_session(self):
-        """Attempt to restore a previous session for the loaded contract.
-
-        Called at the end of on_prepare_complete(). At this point prepared_contract,
-        structured_view, analysis_engine, and session_manager are all ready.
-        """
+        """Attempt to restore a previous session for the loaded contract."""
         if not self.session_manager:
             return
 
         if not self.session_manager.load():
-            return  # No session file or corrupt
+            return
 
         if not self.session_manager.has_session_for(self.current_file):
             logger.info("Session file is for a different contract, skipping restore")
@@ -2359,32 +3708,41 @@ class CR2A_GUI(QMainWindow):
             self.category_results = dict(saved_categories)
             logger.info("Restored %d category results from session", len(self.category_results))
 
-            for cat_key, clause_block in self.category_results.items():
-                self.structured_view.fill_single_category(
-                    cat_key, clause_block, self.analysis_engine.CATEGORY_MAP
-                )
-                self.structured_view.update_category_status(
-                    cat_key, "analyzed", self.analysis_engine.CATEGORY_MAP
-                )
-
-        # --- Mark not-found categories ---
-        for cat_key in self.session_manager.categories_not_found:
-            self.structured_view.update_category_status(
-                cat_key, "not_found", self.analysis_engine.CATEGORY_MAP
-            )
-
         # --- Rebuild current_analysis for chat/export ---
         if self.category_results:
             self._rebuild_current_analysis()
 
-        # --- Restore bid review items ---
+        # --- Sync tool registry with restored results ---
+        if self.tool_registry:
+            self.tool_registry.category_results = dict(self.category_results)
+
+        # --- Restore bid review items (to tool registry) ---
         bid_items = self.session_manager.bid_review_item_results
-        bid_result_dict = self.session_manager.bid_review_result
-        if bid_items and self.bid_review_tab:
-            self._restore_bid_review(bid_result_dict, bid_items)
+        if bid_items and self.tool_registry:
+            from src.bid_review_models import ChecklistItem
+            for item_key, item_dict in bid_items.items():
+                try:
+                    item = ChecklistItem.from_dict(item_dict)
+                    self.tool_registry.bid_item_results[item_key] = item
+                except Exception:
+                    pass
 
         # --- Load chat history into panel ---
         self._load_chat_history_for_contract()
+
+        # --- Rebuild Excel workbook from restored session ---
+        if self.excel_builder:
+            contract_file = os.path.basename(self.current_file) if self.current_file else ""
+            for cat_key, clause_block in self.category_results.items():
+                self.excel_builder.update_contract_category(cat_key, clause_block, contract_file)
+            if bid_items:
+                from src.bid_review_models import ChecklistItem
+                for item_key, item_dict in bid_items.items():
+                    try:
+                        item = ChecklistItem.from_dict(item_dict)
+                        self.excel_builder.update_bid_review_item(item_key, item)
+                    except Exception:
+                        pass
 
         # --- Update status ---
         n_cats = len(self.category_results)
@@ -2399,12 +3757,15 @@ class CR2A_GUI(QMainWindow):
             parts.append(f"{n_bid} bid items")
         if parts:
             summary = ", ".join(parts)
-            self.upload_status.setText(f"Session restored: {summary}. Chat enabled.")
+            self.workspace_status_label.setText(f"Restored: {summary}")
             self.statusBar().showMessage("Previous session restored")
             self._log_to_chat('system', f"Previous session restored ({summary}). You can ask questions or continue analyzing.")
 
     def _restore_bid_review(self, result_dict, item_results_dict):
         """Restore bid review tab from saved session data."""
+        if not self.bid_review_tab:
+            return
+
         from src.bid_review_models import ChecklistItem
         from analyzer.bid_spec_patterns import BID_ITEM_MAP
 
@@ -2480,10 +3841,11 @@ class CR2A_GUI(QMainWindow):
             logger.error(f"Error getting result keys: {e}")
         
         # Pass the contract file path so location fields can be rendered as hyperlinks
-        self.structured_view.set_contract_file_path(self.current_file)
+        if self.structured_view:
+            self.structured_view.set_contract_file_path(self.current_file)
 
-        # Display in structured view
-        self.structured_view.display_analysis(result)
+            # Display in structured view
+            self.structured_view.display_analysis(result)
         
         # Store current analysis for chat
         self.current_analysis = result
@@ -2560,82 +3922,326 @@ class CR2A_GUI(QMainWindow):
     # Chat panel logging
     # =========================================================================
 
-    def _log_to_chat(self, msg_type: str, content: str, title: str = None):
+    def _log_to_chat(self, msg_type: str, content: str, title: str = None,
+                     cat_key: str = None, clause_block: dict = None):
         """
-        Append a styled message to the chat panel.
+        Append a styled message widget to the chat panel.
 
         Args:
             msg_type: 'system', 'log', 'prompt', 'response', 'summary',
-                      'user', 'answer', 'error'
-            content: Message text (plain text, will be HTML-escaped)
+                      'not_found', 'user', 'answer', 'error', 'info'
+            content: Message text (supports markdown for 'answer' type)
             title: Optional bold title line
+            cat_key: Category key for feedback buttons (summary/not_found messages)
+            clause_block: Clause data dict for feedback (summary messages)
         """
-        import html
-        safe = html.escape(content)
+        t = getattr(self, '_current_theme', THEMES['light'])
 
-        styles = {
-            'system':   'color: #555; font-style: italic; padding: 4px 8px;',
-            'log':      'color: #888; font-size: 11px; padding: 2px 8px;',
-            'prompt':   'background: #e3f2fd; border-left: 3px solid #1976D2; padding: 6px 10px; margin: 4px 0; font-family: monospace; font-size: 11px; white-space: pre-wrap;',
-            'response': 'background: #e8f5e9; border-left: 3px solid #4CAF50; padding: 6px 10px; margin: 4px 0; font-family: monospace; font-size: 11px; white-space: pre-wrap;',
-            'summary':  'padding: 4px 8px;',
-            'user':     'padding: 4px 8px;',
-            'answer':   'padding: 4px 8px;',
-            'error':    'color: #c62828; padding: 4px 8px;',
-        }
+        widget = ChatMessageWidget(
+            msg_type=msg_type,
+            content=content,
+            title=title,
+            theme=t,
+            parent=self._chat_container,
+            cat_key=cat_key,
+            clause_block=clause_block,
+        )
 
-        style = styles.get(msg_type, 'padding: 4px 8px;')
+        # Wire feedback signals to main window handlers
+        if cat_key:
+            widget.feedback_accepted.connect(self.on_feedback_accepted)
+            widget.feedback_corrected.connect(self.on_feedback_corrected)
+            widget.feedback_found.connect(self._on_chat_feedback_found)
 
-        if title:
-            safe_title = html.escape(title)
-            html_msg = f'<div style="{style}"><b>{safe_title}</b><br>{safe}</div>'
-        else:
-            html_msg = f'<div style="{style}">{safe}</div>'
+        # Insert before the stretch at the bottom
+        count = self._chat_layout.count()
+        self._chat_layout.insertWidget(count - 1, widget)
 
-        self.chat_history.append(html_msg)
+        # Limit visible messages to prevent performance issues
+        max_messages = 300
+        while self._chat_layout.count() > max_messages + 1:  # +1 for stretch
+            item = self._chat_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+
         # Auto-scroll to bottom
-        scrollbar = self.chat_history.verticalScrollBar()
+        QApplication.processEvents()
+        scrollbar = self.chat_scroll.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
+    def _on_chat_feedback_found(self, cat_key: str):
+        """Handle 'I Found This' from a not_found chat message — opens correction dialog."""
+        # This is handled by the ChatMessageWidget's _on_found which emits feedback_corrected
+        pass
+
+    def _clear_chat_display(self):
+        """Remove all message widgets from the chat scroll area."""
+        while self._chat_layout.count() > 1:  # keep the stretch
+            item = self._chat_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+    def _get_chat_plain_text(self):
+        """Extract plain text from all chat message widgets."""
+        lines = []
+        for i in range(self._chat_layout.count()):
+            item = self._chat_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), (ChatMessageWidget, QLabel)):
+                w = item.widget()
+                label = getattr(w, 'message_label', w)
+                lines.append(label.text())
+        # Strip HTML tags for plain text
+        import re
+        plain = "\n".join(lines)
+        plain = re.sub(r'<[^>]+>', '', plain)
+        return plain
+
     def send_question(self):
-        """Send a question to the query engine."""
+        """Send a question — uses ReAct tool calling if available, else direct query."""
         question = self.question_input.text().strip()
         if not question:
             return
 
-        if not self.query_engine:
-            QMessageBox.warning(self, "Error", "Query engine not initialized.")
+        if not self.contract_text:
+            QMessageBox.warning(self, "No Contract", "Please open a folder and load documents first.")
             return
 
-        # Try to build/get current analysis, fall back to minimal context
-        analysis = self.get_or_build_current_analysis()
-        if analysis:
-            analysis_dict = analysis.to_dict()
-        elif self.contract_text:
-            # No analysis yet, but contract is loaded — provide minimal metadata
-            # so the DocumentRetriever can still search the raw text
-            analysis_dict = {
-                'metadata': {
-                    'filename': os.path.basename(self.current_file) if self.current_file else 'unknown',
-                    'schema_version': 'minimal',
-                },
-            }
-        else:
-            QMessageBox.warning(self, "No Contract", "Please load a contract first.")
-            return
-
-        # Display question
+        # Display user message
         self._log_to_chat('user', question, 'You:')
         self.question_input.clear()
         self.send_btn.setEnabled(False)
-        self.statusBar().showMessage("Processing query...")
+        self.statusBar().showMessage("Processing...")
 
-        # Start query in background thread
-        self.query_thread = QueryThread(self.query_engine, question, analysis_dict)
-        self.query_thread.finished.connect(self.on_query_complete)
-        self.query_thread.error.connect(self.on_query_error)
-        self.query_thread.start()
+        # Store in conversation history
+        self.conversation_messages.append({"role": "user", "content": question})
+
+        # Route: ReAct tool calling (preferred) or direct query (fallback)
+        ai_client = self.analysis_engine.ai_client if self.analysis_engine else None
+
+        if ai_client and self.tool_registry:
+            # ReAct-style tool calling via ChatOrchestrationThread
+            self.chat_thread = ChatOrchestrationThread(
+                ai_client, self.tool_registry, question,
+                conversation_history=self.conversation_messages[-6:]
+            )
+            # Initialize streaming state
+            self._streaming_tokens = []
+            self._streaming_active = False
+
+            self.chat_thread.token_stream.connect(self._on_token_stream)
+            self.chat_thread.message.connect(self._on_chat_message)
+            self.chat_thread.tool_started.connect(self._on_tool_started)
+            self.chat_thread.tool_finished.connect(self._on_tool_finished)
+            self.chat_thread.finished.connect(self._on_chat_finished)
+            self.chat_thread.error.connect(self.on_query_error)
+            self.chat_thread.progress.connect(self._on_chat_progress)
+            self.chat_thread.start()
+
+            # Show inline status
+            self.chat_status_label.setText("Thinking...")
+            self.chat_status_label.setVisible(True)
+        elif self.query_engine:
+            # Fallback: direct query without tools
+            analysis = self.get_or_build_current_analysis()
+            analysis_dict = analysis.to_dict() if analysis else {
+                'metadata': {'filename': os.path.basename(self.current_file or ''), 'schema_version': 'minimal'}
+            }
+            self.query_thread = QueryThread(self.query_engine, question, analysis_dict)
+            self.query_thread.finished.connect(self.on_query_complete)
+            self.query_thread.error.connect(self.on_query_error)
+            self.query_thread.start()
+        else:
+            self._log_to_chat('error', 'AI engine not available. Check Settings.', 'Error')
+            self.send_btn.setEnabled(True)
+
+    def _on_token_stream(self, token_text):
+        """Handle a single streamed token — append to chat in real-time."""
+        if not self._streaming_active:
+            # First token: start a new streaming message widget
+            self._streaming_active = True
+            self._streaming_tokens = [token_text]
+            t = getattr(self, '_current_theme', THEMES['light'])
+            # Create a streaming label widget
+            self._streaming_label = QLabel()
+            self._streaming_label.setWordWrap(True)
+            self._streaming_label.setTextFormat(Qt.RichText)
+            self._streaming_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self._streaming_label.setStyleSheet(
+                f"padding: 8px; background: {t['answer_bg']}; "
+                f"border-left: 3px solid {t['answer_border']}; margin: 4px 0;"
+            )
+            self._streaming_label.setText(
+                f"<b>CR2A:</b><br>{html_module.escape(token_text)}"
+            )
+            count = self._chat_layout.count()
+            self._chat_layout.insertWidget(count - 1, self._streaming_label)
+        else:
+            self._streaming_tokens.append(token_text)
+            # Update the streaming label with all tokens so far
+            full_text = "".join(self._streaming_tokens)
+            self._streaming_label.setText(
+                f"<b>CR2A:</b><br>{html_module.escape(full_text)}"
+            )
+
+        # Auto-scroll
+        scrollbar = self.chat_scroll.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _on_chat_progress(self, status, percent):
+        """Update inline status indicator for chat operations."""
+        self.chat_status_label.setText(f"{status}")
+        self.chat_status_label.setVisible(True)
+
+    def _on_chat_message(self, role, content):
+        """Handle incremental chat message from ReAct loop."""
+        # If we were streaming, the final answer was already shown token-by-token
+        if role == "assistant" and self._streaming_active:
+            self._streaming_active = False
+            self._streaming_tokens = []
+            return  # Already displayed via streaming
+
+        if role == "thought":
+            self._log_to_chat('log', content, 'Thinking:')
+        elif role == "assistant":
+            self._log_to_chat('answer', content, 'CR2A:')
+        elif role == "error":
+            self._log_to_chat('error', content, 'Error:')
+
+    def _on_tool_started(self, tool_call, args_str):
+        """Handle tool execution start."""
+        # End any active streaming before showing tool activity
+        if self._streaming_active:
+            self._streaming_active = False
+            self._streaming_tokens = []
+        self._log_to_chat('log', f'Running: {tool_call}')
+
+    def _on_tool_finished(self, tool_name, result_preview):
+        """Handle tool execution completion."""
+        if result_preview:
+            self._log_to_chat('summary', result_preview)
+
+    def _on_chat_finished(self, messages):
+        """Handle ReAct chat loop completion."""
+        self._streaming_active = False
+        self._streaming_tokens = []
+        self.send_btn.setEnabled(True)
+        self.statusBar().showMessage("Ready")
+        self.chat_status_label.setVisible(False)
+        self.progress_bar.setVisible(False)
+
+        # Store assistant response in conversation history
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                self.conversation_messages.append(msg)
+                break
+
+        # Update Excel and session after tool calls
+        self._sync_tool_results_to_session()
+
+        # Refresh file browser to show updated Excel
+        if self.current_folder:
+            self.bid_model.setRootPath(self.current_folder)
     
+    def _on_quick_tool_finished(self, tool_name, result):
+        """Handle direct tool execution completion."""
+        self._log_to_chat('summary', result[:500] if len(result) > 500 else result, f'{tool_name}')
+        self._log_to_chat('system', 'Complete.')
+        self.send_btn.setEnabled(True)
+        self.statusBar().showMessage("Ready")
+        self.chat_status_label.setVisible(False)
+
+        # Sync tool registry results to session manager
+        self._sync_tool_results_to_session(tool_name)
+
+        # Refresh file browser to show updated Excel
+        if self.current_folder:
+            self.bid_model.setRootPath(self.current_folder)
+
+    def _on_quick_tool_item(self, item_type, key, display_name, data):
+        """Handle per-item results from running tools — display each in chat."""
+        if item_type == 'bid_review':
+            value = data.get('value', '')
+            location = data.get('location', '')
+            page = data.get('page', '')
+            confidence = data.get('confidence', '')
+            notes = data.get('notes', '')
+
+            if confidence == 'not_found':
+                self._log_to_chat('not_found', f'Not found: {display_name}',
+                                  cat_key=key)
+            else:
+                parts = [f'Value: {value}']
+                if location:
+                    parts.append(f'Location: {location}')
+                if page:
+                    parts.append(f'Page: {page}')
+                parts.append(f'Confidence: {confidence}')
+                if notes:
+                    parts.append(f'Notes: {notes}')
+                self._log_to_chat('summary', '\n'.join(parts), f'Bid Review: {display_name}',
+                                  cat_key=key, clause_block=data)
+
+        elif item_type == 'contract':
+            summary = data.get('Clause Summary', '')
+            location = data.get('Clause Location', '')
+            self._log_to_chat('summary', f'{summary}\nLocation: {location}',
+                              f'Analyzed: {display_name}',
+                              cat_key=key, clause_block=data)
+            # Also store in category_results for session persistence
+            self.category_results[key] = data
+
+        elif item_type == 'contract_not_found':
+            self._log_to_chat('not_found', f'Not found in contract: {display_name}',
+                              cat_key=key)
+
+    def _on_quick_tool_progress(self, message, pct):
+        """Handle per-item progress from a running tool."""
+        self.chat_status_label.setText(message)
+        self.statusBar().showMessage(f"Processing... {pct}%")
+
+    def _on_quick_tool_error(self, error_msg):
+        """Handle direct tool execution error."""
+        self._log_to_chat('error', error_msg, 'Error:')
+        self.send_btn.setEnabled(True)
+        self.statusBar().showMessage("Ready")
+        self.chat_status_label.setVisible(False)
+
+    def _sync_tool_results_to_session(self, tool_name=None):
+        """Sync tool registry results (categories, bid items, specs) to session storage."""
+        if not self.tool_registry:
+            return
+
+        if not self.session_manager:
+            logger.warning("Session manager not available — results will not be persisted to disk")
+
+        dirty = False
+
+        # Sync category results
+        for cat_key, clause_block in self.tool_registry.category_results.items():
+            if cat_key not in self.category_results:
+                self.category_results[cat_key] = clause_block
+            if self.session_manager:
+                self.session_manager.update_category_result(cat_key, clause_block)
+                dirty = True
+
+        # Sync bid review item results
+        for item_key, item in self.tool_registry.bid_item_results.items():
+            if self.session_manager:
+                item_dict = item.to_dict() if hasattr(item, 'to_dict') else item
+                self.session_manager.update_bid_review_item(item_key, item_dict)
+                dirty = True
+
+        # Sync specs text (store in session as a pseudo-category)
+        if self.tool_registry.specs_text and self.session_manager:
+            self.session_manager.update_category_result(
+                '_specs', {'Clause Summary': self.tool_registry.specs_text}
+            )
+            dirty = True
+
+        if dirty and self.session_manager:
+            self.session_manager.save()
+            logger.info("Session saved after tool completion (tool=%s)", tool_name)
+
     def on_query_complete(self, answer):
         """Handle query completion."""
         self._log_to_chat('answer', answer, 'Answer:')
@@ -2678,11 +4284,10 @@ class CR2A_GUI(QMainWindow):
                 return
 
             # Clear existing chat display
-            self.chat_history.clear()
+            self._clear_chat_display()
 
             # Display welcome message
-            self.chat_history.append("<b>Welcome to CR2A Chat!</b><br>")
-            self.chat_history.append(f"<i>Loaded {len(chats)} previous conversation(s) for {filename}</i><br>")
+            self._log_to_chat('system', f'Welcome to CR2A Chat!\nLoaded {len(chats)} previous conversation(s) for {filename}')
 
             # Display all previous chats with user attribution
             for chat in chats:
@@ -2692,10 +4297,10 @@ class CR2A_GUI(QMainWindow):
                 answer = chat.get('answer', '')
 
                 # Display question
-                self.chat_history.append(f"<br><b>User ({username}@{computer_name}):</b> {question}<br>")
+                self._log_to_chat('user', question, f'User ({username}@{computer_name})')
 
                 # Display answer
-                self.chat_history.append(f"<b>Answer:</b><br>{answer}<br>")
+                self._log_to_chat('answer', answer, 'Answer')
 
             logger.info(f"Loaded {len(chats)} chat entries for {filename}")
 
@@ -2736,6 +4341,81 @@ class SettingsDialog(QDialog):
         """Initialize the dialog UI."""
         layout = QVBoxLayout()
         self.setLayout(layout)
+
+        # =====================================================================
+        # 0. Appearance
+        # =====================================================================
+        appearance_group = QGroupBox("Appearance")
+        appearance_layout = QHBoxLayout()
+        appearance_group.setLayout(appearance_layout)
+
+        appearance_layout.addWidget(QLabel("Theme:"))
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Light", "light")
+        self.theme_combo.addItem("Dark", "dark")
+        appearance_layout.addWidget(self.theme_combo)
+        appearance_layout.addStretch()
+
+        layout.addWidget(appearance_group)
+
+        # =====================================================================
+        # 0b. AI Backend Selection
+        # =====================================================================
+        backend_group = QGroupBox("AI Backend")
+        backend_layout = QVBoxLayout()
+        backend_group.setLayout(backend_layout)
+
+        backend_row = QHBoxLayout()
+        backend_row.addWidget(QLabel("Backend:"))
+        self.backend_combo = QComboBox()
+        self.backend_combo.addItem("Local AI (Offline)", "local")
+        self.backend_combo.addItem("Claude API (Cloud)", "claude")
+        self.backend_combo.currentIndexChanged.connect(self._on_backend_changed)
+        backend_row.addWidget(self.backend_combo)
+        backend_row.addStretch()
+        backend_layout.addLayout(backend_row)
+
+        # Claude-specific controls (hidden by default)
+        self.claude_widget = QWidget()
+        claude_form = QFormLayout()
+        claude_form.setContentsMargins(0, 6, 0, 0)
+        self.claude_widget.setLayout(claude_form)
+
+        self.claude_model_combo = QComboBox()
+        self.claude_model_combo.addItem("Claude Sonnet (Faster / Lower Cost)", "claude-sonnet")
+        self.claude_model_combo.addItem("Claude Opus (Highest Quality)", "claude-opus")
+        claude_form.addRow("Model:", self.claude_model_combo)
+
+        api_key_row = QHBoxLayout()
+        self.api_key_input = QLineEdit()
+        self.api_key_input.setEchoMode(QLineEdit.Password)
+        self.api_key_input.setPlaceholderText("sk-ant-...")
+        api_key_row.addWidget(self.api_key_input)
+
+        self.show_key_btn = QPushButton("Show")
+        self.show_key_btn.setCheckable(True)
+        self.show_key_btn.setFixedWidth(50)
+        self.show_key_btn.toggled.connect(
+            lambda checked: self.api_key_input.setEchoMode(
+                QLineEdit.Normal if checked else QLineEdit.Password
+            )
+        )
+        api_key_row.addWidget(self.show_key_btn)
+
+        self.test_key_btn = QPushButton("Test")
+        self.test_key_btn.setFixedWidth(50)
+        self.test_key_btn.clicked.connect(self._test_api_key)
+        api_key_row.addWidget(self.test_key_btn)
+        claude_form.addRow("API Key:", api_key_row)
+
+        self.api_key_status = QLabel("")
+        self.api_key_status.setStyleSheet("color: #666; font-size: 11px;")
+        claude_form.addRow("", self.api_key_status)
+
+        self.claude_widget.hide()
+        backend_layout.addWidget(self.claude_widget)
+
+        layout.addWidget(backend_group)
 
         # =====================================================================
         # A. System Hardware Info (read-only)
@@ -2902,6 +4582,9 @@ class SettingsDialog(QDialog):
         self.gpu_group.setVisible(self.hw_info.gpu_type != "none")
         layout.addWidget(self.gpu_group)
 
+        # Track local-only groups for visibility toggling
+        self._local_only_groups = [hw_group, preset_group, model_group, ram_group, self.gpu_group]
+
         # =====================================================================
         # F. Dialog Buttons
         # =====================================================================
@@ -2909,6 +4592,38 @@ class SettingsDialog(QDialog):
         button_box.accepted.connect(self.save_settings)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
+
+    def _on_backend_changed(self):
+        """Toggle visibility of local vs Claude controls."""
+        is_claude = self.backend_combo.currentData() == "claude"
+        self.claude_widget.setVisible(is_claude)
+        for group in self._local_only_groups:
+            group.setVisible(not is_claude)
+
+    def _test_api_key(self):
+        """Test the entered Anthropic API key."""
+        key = self.api_key_input.text().strip()
+        if not key:
+            self.api_key_status.setText("Enter an API key first.")
+            self.api_key_status.setStyleSheet("color: orange; font-size: 11px;")
+            return
+
+        self.api_key_status.setText("Testing...")
+        self.api_key_status.setStyleSheet("color: #666; font-size: 11px;")
+        QApplication.processEvents()
+
+        try:
+            from src.api_key_manager import ApiKeyManager
+            mgr = ApiKeyManager(self.config_manager)
+            if mgr.validate_key(key):
+                self.api_key_status.setText("Valid — connected to Claude API.")
+                self.api_key_status.setStyleSheet("color: green; font-size: 11px;")
+            else:
+                self.api_key_status.setText("Invalid key or connection failed.")
+                self.api_key_status.setStyleSheet("color: red; font-size: 11px;")
+        except Exception as e:
+            self.api_key_status.setText(f"Error: {e}")
+            self.api_key_status.setStyleSheet("color: red; font-size: 11px;")
 
     def _get_selected_model_info(self):
         """Return MODEL_REGISTRY entry for currently selected model."""
@@ -3067,6 +4782,37 @@ class SettingsDialog(QDialog):
         if not self.config_manager:
             return
 
+        # Theme
+        theme = self.config_manager.get_theme()
+        idx = self.theme_combo.findData(theme)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+
+        # AI Backend
+        backend = self.config_manager.get_ai_backend()
+        idx = self.backend_combo.findData(backend)
+        if idx >= 0:
+            self.backend_combo.setCurrentIndex(idx)
+        self._on_backend_changed()
+
+        # Claude model
+        claude_model = self.config_manager.get_claude_model()
+        idx = self.claude_model_combo.findData(claude_model)
+        if idx >= 0:
+            self.claude_model_combo.setCurrentIndex(idx)
+
+        # Load API key from encrypted storage (if available)
+        try:
+            from src.api_key_manager import ApiKeyManager
+            mgr = ApiKeyManager(self.config_manager)
+            key = mgr.get_key()
+            if key:
+                self.api_key_input.setText(key)
+                self.api_key_status.setText("Key loaded from storage.")
+                self.api_key_status.setStyleSheet("color: #666; font-size: 11px;")
+        except Exception:
+            pass
+
         model_name = self.config_manager.get_local_model_name()
         index = self.model_combo.findData(model_name)
         if index >= 0:
@@ -3116,6 +4862,25 @@ class SettingsDialog(QDialog):
             return
 
         try:
+            # Save theme
+            theme = self.theme_combo.currentData()
+            self.config_manager.set_theme(theme)
+
+            # Save AI backend settings
+            backend = self.backend_combo.currentData()
+            self.config_manager.set_ai_backend(backend)
+            self.config_manager.set_claude_model(self.claude_model_combo.currentData())
+
+            # Save API key (encrypted) if entered
+            api_key = self.api_key_input.text().strip()
+            if api_key:
+                try:
+                    from src.api_key_manager import ApiKeyManager
+                    mgr = ApiKeyManager(self.config_manager)
+                    mgr.set_key(api_key)
+                except Exception as e:
+                    logger.warning("Failed to encrypt API key: %s", e)
+
             model_name = self.model_combo.currentData()
             self.config_manager.set_local_model_name(model_name)
 
@@ -3821,6 +5586,17 @@ def main():
         sys.__excepthook__(exc_type, exc_value, exc_tb)
 
     sys.excepthook = global_exception_hook
+
+    # Ensure Qt can find its platform plugins when running from a venv
+    import os
+    if not os.environ.get('QT_QPA_PLATFORM_PLUGIN_PATH'):
+        try:
+            import PyQt5
+            plugins_path = os.path.join(os.path.dirname(PyQt5.__file__), 'Qt5', 'plugins', 'platforms')
+            if os.path.isdir(plugins_path):
+                os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugins_path
+        except Exception:
+            pass
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')  # Modern look

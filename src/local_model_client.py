@@ -14,18 +14,37 @@ Supports:
 
 import json
 import logging
+import os
 import re
+import sys
 import multiprocessing
 from pathlib import Path
 from typing import Dict, Optional, Callable, List, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Allow Vulkan GPU backend (including Intel integrated graphics).
+# Intel iGPU via Vulkan is usable for inference acceleration.
+
+# In frozen (PyInstaller) builds, add llama_cpp/lib to DLL search path
+# so that llama.dll can find ggml-*.dll dependencies.
+if getattr(sys, 'frozen', False):
+    _llama_lib_dir = os.path.join(sys._MEIPASS, 'llama_cpp', 'lib')
+    if os.path.isdir(_llama_lib_dir):
+        os.add_dll_directory(_llama_lib_dir)
+        os.environ['PATH'] = _llama_lib_dir + os.pathsep + os.environ.get('PATH', '')
+    # Prevent Vulkan backend from crashing — point ICD to a nonexistent
+    # file so Vulkan finds no drivers and ggml-vulkan skips GPU init
+    # gracefully instead of crashing with an access violation.
+    os.environ['VK_ICD_FILENAMES'] = 'CR2A_no_vulkan.json'
+    os.environ['VK_DRIVER_FILES'] = 'CR2A_no_vulkan.json'
+
 # Try to import llama-cpp-python (optional dependency)
 # Catch OSError too: Vulkan-compiled builds raise OSError if vulkan-1.dll is missing
 try:
     from llama_cpp import Llama
     LLAMA_CPP_AVAILABLE = True
+
 except (ImportError, OSError) as e:
     LLAMA_CPP_AVAILABLE = False
     logger.warning("llama-cpp-python not available: %s", e)
@@ -33,19 +52,13 @@ except (ImportError, OSError) as e:
 
 def _check_vulkan_devices() -> bool:
     """
-    Check whether a discrete (non-Intel) GPU is available using the Windows registry.
-
-    Uses the display adapter registry key — completely Vulkan-free. Calling any
-    Vulkan API (vkCreateInstance, etc.) before llama.cpp touches it poisons the
-    Intel Vulkan ICD state, causing subsequent CPU-only Llama() calls to crash
-    with access violations. The registry approach avoids that entirely.
+    Check whether any GPU (including Intel integrated) is available via the Windows registry.
 
     Returns:
-        True if at least one non-Intel GPU is found, False otherwise.
+        True if at least one GPU adapter is found, False otherwise.
     """
     try:
         import winreg
-        # Display adapter class: HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-...}
         CLASS_KEY = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, CLASS_KEY) as class_key:
             i = 0
@@ -56,15 +69,13 @@ def _check_vulkan_devices() -> bool:
                         with winreg.OpenKey(class_key, subkey_name) as gpu_key:
                             desc = winreg.QueryValueEx(gpu_key, "DriverDesc")[0]
                             logger.info("GPU adapter found: %s", desc)
-                            if "Intel" not in desc:
-                                logger.info("Non-Intel GPU detected (%s) — GPU offload available", desc)
-                                return True
+                            return True
                     except (FileNotFoundError, OSError):
                         pass
                     i += 1
                 except OSError:
                     break
-        logger.info("Only Intel GPU(s) found in registry — using CPU-only inference")
+        logger.info("No GPU adapters found in registry")
         return False
     except Exception as e:
         logger.info("Registry GPU check failed: %s — defaulting to CPU-only", e)
@@ -87,16 +98,9 @@ def detect_gpu_support() -> Tuple[bool, int, str]:
 
     import sys
     if sys.platform == 'win32':
-        # On Windows, NEVER call llama_supports_gpu_offload() or any other llama_cpp
-        # function here. On machines with Intel iGPU + Vulkan driver, calling those
-        # functions triggers ggml_vulkan_init() inside the DLL which crashes with an
-        # access violation, permanently corrupting the DLL state so that even
-        # subsequent CPU-only Llama() calls fail.
-        #
-        # Instead rely entirely on the ctypes Vulkan probe, which is safe because it
-        # uses its own VkInstance and never touches the llama_cpp DLL.
+        # Use registry check to detect GPUs (avoids calling Vulkan APIs directly)
         if not _check_vulkan_devices():
-            logger.info("No usable Vulkan GPU — using CPU-only inference")
+            logger.info("No GPU found — using CPU-only inference")
             return False, 0, "cpu"
         logger.info("Vulkan GPU available — enabling GPU offload")
         return True, -1, "vulkan"
@@ -511,9 +515,14 @@ class LocalModelClient:
         logger.info(f"Loading model from: {self.model_path}{gpu_info}")
 
         # Determine load order: try GPU first (if configured), then CPU fallback
+        # In frozen (PyInstaller) builds, llama-cpp-python is CPU-only from pip,
+        # so skip GPU attempts to avoid access violation crashes in Vulkan init.
         load_attempts = []
-        if self.n_gpu_layers != 0:
+        is_frozen = getattr(sys, 'frozen', False)
+        if self.n_gpu_layers != 0 and not is_frozen:
             load_attempts.append(("gpu", self.n_gpu_layers))
+        elif is_frozen and self.n_gpu_layers != 0:
+            logger.info("Frozen build detected — skipping GPU, using CPU-only inference")
         load_attempts.append(("cpu", 0))
 
         last_error = None
@@ -525,15 +534,39 @@ class LocalModelClient:
                     if progress_callback:
                         progress_callback("GPU failed, loading on CPU...", 5)
 
+                # Intel iGPU Vulkan crashes with default n_batch=512 on large prompts.
+                # Use n_batch=128 for GPU to keep Vulkan buffer sizes manageable.
+                n_batch = 128 if gpu_layers != 0 else 512
                 self._model = Llama(
                     model_path=str(self.model_path),
                     n_ctx=self.n_ctx,
                     n_threads=self.n_threads,
                     n_gpu_layers=gpu_layers,
+                    n_batch=n_batch,
                     verbose=False
                 )
 
                 self._model_loaded = True
+
+                # Verify GPU inference with a large prompt (Intel iGPU Vulkan
+                # can pass small tests but crash on real-sized prompts)
+                if gpu_layers != 0:
+                    try:
+                        logger.info("Testing GPU inference with large prompt...")
+                        test_prompt = ("The contractor shall provide labor and materials " * 50)[:3000]
+                        test_out = self._model.create_completion(
+                            test_prompt, max_tokens=5, temperature=0.0,
+                        )
+                        test_text = test_out["choices"][0]["text"] if test_out.get("choices") else ""
+                        self._model.reset()
+                        logger.info("GPU inference test passed (output: %s)", test_text[:50])
+                    except (OSError, Exception) as gpu_err:
+                        logger.warning("GPU inference test failed (%s), falling back to CPU", gpu_err)
+                        self._model_loaded = False
+                        del self._model
+                        self._model = None
+                        raise RuntimeError(f"GPU inference failed: {gpu_err}")
+
                 if gpu_layers != 0:
                     self.gpu_backend = self.gpu_backend or "gpu"
                     logger.info("Model loaded successfully (GPU-accelerated, %s)", self.gpu_backend)
@@ -618,6 +651,7 @@ class LocalModelClient:
         max_tokens: int,
         temperature: Optional[float] = None,
         progress_callback: Optional[Callable[[str, int], None]] = None,
+        token_callback: Optional[Callable[[str], None]] = None,
         progress_start: int = 0,
         progress_end: int = 100
     ) -> str:
@@ -651,13 +685,18 @@ class LocalModelClient:
         prompt_chars = len(prompt)
         logger.info(f"Running inference: max_tokens={max_tokens}, temp={temp}, prompt_chars={prompt_chars}")
 
-        # Warn if prompt is too large for context
+        # Hard-truncate prompt if it would exceed context window
         estimated_prompt_tokens = prompt_chars // 3  # Conservative estimate
-        if estimated_prompt_tokens > self.n_ctx - max_tokens:
+        safe_prompt_tokens = self.n_ctx - max_tokens - 256  # 256 token safety buffer
+        if estimated_prompt_tokens > safe_prompt_tokens and safe_prompt_tokens > 0:
+            safe_chars = safe_prompt_tokens * 3
             logger.warning(
-                f"Prompt may exceed context window: ~{estimated_prompt_tokens} tokens "
-                f"+ {max_tokens} output > {self.n_ctx} context"
+                f"Prompt exceeds context window: ~{estimated_prompt_tokens} tokens "
+                f"+ {max_tokens} output > {self.n_ctx} context. "
+                f"Truncating prompt from {prompt_chars} to {safe_chars} chars."
             )
+            # Truncate the user_message portion, preserving system message framing
+            prompt = prompt[:safe_chars]
 
         try:
             import time
@@ -680,6 +719,10 @@ class LocalModelClient:
                     text = choice.get('text', '')
                     output_tokens.append(text)
                     tokens_generated += 1
+
+                    # Stream token to UI
+                    if token_callback and text:
+                        token_callback(text)
 
                     # Update progress every 10 tokens (frequent updates for responsiveness)
                     if progress_callback and tokens_generated % 10 == 0:
@@ -704,6 +747,29 @@ class LocalModelClient:
 
             return response_text
 
+        except OSError as e:
+            # Vulkan GPU compute crash — reload model on CPU and retry once
+            if self.n_gpu_layers != 0 and not getattr(self, '_gpu_fallback_attempted', False):
+                self._gpu_fallback_attempted = True
+                logger.warning("GPU inference crashed (%s), reloading model on CPU...", e)
+                try:
+                    del self._model
+                    self._model = None
+                    self._model_loaded = False
+                    self.n_gpu_layers = 0
+                    self.gpu_backend = "cpu"
+                    self.ensure_loaded()
+                    logger.info("Model reloaded on CPU, retrying inference")
+                    return self._run_inference(
+                        system_message, user_message, max_tokens,
+                        temperature, progress_callback, token_callback,
+                        progress_start, progress_end,
+                    )
+                except Exception as reload_err:
+                    logger.error("CPU fallback failed: %s", reload_err)
+                    raise RuntimeError(f"GPU inference failed and CPU fallback failed: {reload_err}")
+            logger.error(f"Inference failed: {e}", exc_info=True)
+            raise RuntimeError(f"Local model inference failed: {e}")
         except Exception as e:
             logger.error(f"Inference failed: {e}", exc_info=True)
             raise RuntimeError(f"Local model inference failed: {e}")
@@ -882,6 +948,159 @@ Guidelines:
 User Question: {query}
 
 Please answer based on the contract context provided above."""
+
+    # =========================================================================
+    # ReAct-style tool calling (Phase 2: Chat-first UI)
+    # =========================================================================
+
+    def process_with_tools(
+        self,
+        user_message: str,
+        tool_registry,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+        token_callback: Optional[Callable[[str], None]] = None,
+        max_iterations: int = 5,
+    ) -> List[Dict[str, str]]:
+        """
+        Process a user message with ReAct-style tool calling.
+
+        Runs a loop: generate -> check for TOOL_CALL -> execute tool ->
+        feed observation back -> repeat until final answer or max iterations.
+
+        Args:
+            user_message: The user's chat message.
+            tool_registry: ToolRegistry instance with available tools.
+            conversation_history: Prior messages for context.
+            progress_callback: Optional progress callback.
+            max_iterations: Max tool call rounds (default 5).
+
+        Returns:
+            List of message dicts: [{"role": ..., "content": ...}, ...]
+            Includes thoughts, tool calls, observations, and final answer.
+        """
+        from src.tool_registry import ToolRegistry
+
+        if not self._model_loaded:
+            self._load_model(progress_callback)
+
+        # Assemble system prompt from markdown files
+        system_prompt = tool_registry.get_system_prompt()
+        skill_prompt = tool_registry.get_skill_prompt("all")
+        full_system = f"{system_prompt}\n\n{skill_prompt}"
+
+        # Build conversation context
+        messages = []
+        if conversation_history:
+            # Include last N messages for context (keep it short for local models)
+            for msg in conversation_history[-6:]:
+                messages.append(msg)
+
+        messages.append({"role": "user", "content": user_message})
+
+        # The ReAct loop
+        result_messages = []
+        iteration = 0
+
+        while iteration < max_iterations:
+            iteration += 1
+
+            if progress_callback:
+                progress_callback(f"Thinking... (step {iteration})", int(20 + iteration * 15))
+
+            # Build the user prompt with conversation context
+            context_parts = []
+            for msg in messages:
+                role = msg["role"]
+                content = msg["content"]
+                if role == "user":
+                    context_parts.append(f"User: {content}")
+                elif role == "assistant":
+                    context_parts.append(f"Assistant: {content}")
+                elif role == "observation":
+                    context_parts.append(f"OBSERVATION: {content}")
+
+            user_prompt = "\n\n".join(context_parts)
+
+            # Run inference
+            try:
+                response = self._run_inference(
+                    system_message=full_system,
+                    user_message=user_prompt,
+                    max_tokens=self.MAX_TOKENS_QUERY * 2,
+                    temperature=0.3,
+                    token_callback=token_callback,
+                )
+            except Exception as e:
+                result_messages.append({
+                    "role": "error",
+                    "content": f"AI inference failed: {e}"
+                })
+                break
+
+            response = response.strip()
+
+            # Check for tool call
+            parsed = ToolRegistry.parse_tool_call(response)
+
+            if parsed:
+                tool_name, tool_args = parsed
+
+                # Extract thought (text before TOOL_CALL)
+                thought_match = re.search(r'THOUGHT:\s*(.+?)(?=TOOL_CALL:)', response, re.DOTALL)
+                thought = thought_match.group(1).strip() if thought_match else ""
+
+                if thought:
+                    result_messages.append({"role": "thought", "content": thought})
+
+                result_messages.append({
+                    "role": "tool_call",
+                    "content": f"{tool_name}({', '.join(f'{k}=\"{v}\"' for k, v in tool_args.items())})"
+                })
+
+                if progress_callback:
+                    progress_callback(f"Running {tool_name}...", int(30 + iteration * 15))
+
+                # Execute tool
+                observation = tool_registry.execute(tool_name, tool_args)
+                result_messages.append({"role": "observation", "content": observation})
+
+                # Truncate large observations to prevent context overflow
+                obs_for_context = observation
+                if len(obs_for_context) > 2000:
+                    obs_for_context = obs_for_context[:2000] + "\n\n[... results truncated for context ...]"
+
+                # Feed observation back into context
+                messages.append({"role": "assistant", "content": response})
+                messages.append({"role": "observation", "content": obs_for_context})
+
+                # For heavy tools (full reviews), skip additional iterations —
+                # the results are already displayed to the user
+                if tool_name in ("run_full_bid_review", "run_full_contract_analysis", "run_specs_extraction"):
+                    result_messages.append({
+                        "role": "assistant",
+                        "content": "The analysis is complete. Results have been displayed above."
+                    })
+                    break
+
+            else:
+                # No tool call — this is the final answer
+                # Strip any leftover THOUGHT: prefix
+                final = re.sub(r'^THOUGHT:\s*', '', response, flags=re.MULTILINE).strip()
+                result_messages.append({"role": "assistant", "content": final})
+                break
+        else:
+            # Max iterations reached
+            result_messages.append({
+                "role": "assistant",
+                "content": "I've reached the maximum number of analysis steps. "
+                           "Here's what I found so far based on the tool results above."
+            })
+
+        if progress_callback:
+            progress_callback("Complete", 100)
+
+        return result_messages
 
 
 # Backwards compatibility alias

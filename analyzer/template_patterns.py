@@ -67,15 +67,14 @@ TEMPLATE_PATTERNS = {
 
     "price_escalation": [
         r'price.*?(?:escalation|adjustment|increase)',
+        r'adjustment.*?(?:to|of)\s+(?:the\s+)?price',
+        r'Producer.*?Price\s+Index|PPI',
         r'(?:labor|material).*?(?:cost|price).*?adjustment',
         r'inflation.*?adjustment',
         r'economic.*?(?:adjustment|price)',
         r'cost.*?index',
         r'(?:appropriate|equitable)\s+adjustment\s+of\s+the\s+contract',
         r'negotiated\s+price',
-    ],
-
-    "fuel_price_adjustment": [
         r'fuel.*?(?:cost|price|surcharge|adjustment)',
         r'diesel.*?(?:cost|price)',
         r'petroleum.*?cost',
@@ -208,6 +207,9 @@ TEMPLATE_PATTERNS = {
         r'suspension.*?(?:work|contract)',
         r'stop\s+work',
         r'work\s+stoppage',
+        r'(?:right\s+to\s+)?delay\s+performance',
+        r'(?:stopped|delayed)\s+(?:for\s+)?(?:more\s+than\s+)?\d+',
+        r'stoppage\s+(?:or|and)\s+delay',
     ],
 
     "submittals": [
@@ -400,6 +402,9 @@ TEMPLATE_PATTERNS = {
         r'(?:subsurface|geotechnical)\s+(?:investigation|exploration)',
         r'excavat(?:e|ing|ion).*?(?:complete|finish)',
         r'(?:field|site)\s+conditions?[\s\S]{0,80}?(?:modif|alter)',
+        r'(?:free|unrestricted)\s+access\s+(?:to\s+)?(?:the\s+)?(?:work\s+)?site',
+        r'access\s+to\s+(?:the\s+)?(?:work\s+)?site',
+        r'other\s+(?:contractors?|parties)\s+(?:may\s+)?(?:perform|work)',
         r'[Cc]onditions?\s+that\s+occur\s+on\s+the\s+site',
         r'(?:borings|probings).*?(?:subsurface|soil\s+condition)',
     ],
@@ -453,6 +458,8 @@ TEMPLATE_PATTERNS = {
         r'(?:equal|E\.?E\.?O\.?)\s+(?:employment\s+)?opportunit(?:y|ies)',
         r'non[\s\-]discriminat(?:ion|ory)',
         r'affirmative\s+action',
+        r'anti[\s\-]?discriminat(?:ion|ory|e)',
+        r'(?:shall|will)\s+not\s+discriminate',
     ],
 
     "mwbe_dbe": [
@@ -721,7 +728,7 @@ ROMAN_NUMERAL_RE = re.compile(
 )
 
 SUBARTICLE_RE = re.compile(
-    r'(?:^|\n)\s*(\d{1,2}\.\d{1,2})\s+[A-Z][A-Za-z]',
+    r'(?:^|\n)\s*(\d{1,2}\.\d{1,3})\.?\s+[A-Z][A-Za-z]',
     re.MULTILINE
 )
 
@@ -795,6 +802,18 @@ def parse_contract_sections(
 
     # Build SectionBlock list with end_pos = next header's start_pos
     sections = []
+
+    # Capture preamble text before the first detected header
+    first_header_pos = deduped[0][0]
+    if first_header_pos > 200:
+        sections.append(SectionBlock(
+            header_text="CONTRACT PREAMBLE",
+            header_normalized="contract preamble",
+            start_pos=0,
+            end_pos=first_header_pos,
+            section_type="preamble"
+        ))
+
     for i, (pos, end, text, stype) in enumerate(deduped):
         next_pos = deduped[i + 1][0] if i + 1 < len(deduped) else text_len
         sections.append(SectionBlock(
@@ -815,81 +834,84 @@ def parse_contract_sections(
 # Keys MUST match TEMPLATE_PATTERNS keys exactly
 CATEGORY_SECTION_HINTS = {
     # Administrative & Commercial
-    "contract_term_renewal_extensions": ["agreement", "00700", "contract term", "duration", "term of contract"],
-    "notice_requirements": ["00700", "notice to proceed", "written notice", "notice requirement"],
-    "assignment_novation": ["00700", "assignment", "novation", "transfer of contract"],
-    "dispute_resolution": ["dispute resolution", "arbitration", "mediation", "00700", "claims process"],
-    "limitation_of_liability": ["00700", "limitation of liability", "liability cap", "consequential damages", "damage cap"],
-    "confidentiality": ["00700", "confidential", "proprietary", "non-disclosure"],
+    "contract_term_renewal_extensions": ["agreement", "contract term", "duration", "term of contract", "renewal", "extension"],
+    "notice_requirements": ["notice to proceed", "written notice", "notice requirement", "notices"],
+    "assignment_novation": ["assignment", "novation", "transfer of contract", "shall not assign"],
+    "dispute_resolution": ["dispute resolution", "arbitration", "mediation", "claims process", "disputes"],
+    "limitation_of_liability": ["limitation of liability", "liability cap", "consequential damages", "damage cap", "not liable"],
+    "confidentiality": ["confidential", "proprietary", "non-disclosure", "trade secret"],
 
-    "audit_rights": ["00700", "audit rights", "inspection of records", "books and records"],
-    "subcontracting": ["00700", "subcontract", "01400", "subcontractor approval"],
-    "order_of_precedence": ["00700", "order of precedence", "conflicting documents", "document hierarchy"],
-    "document_retention": ["00700", "record retention", "document retention", "retention period"],
+    "audit_rights": ["audit rights", "inspection of records", "books and records", "audit", "records"],
+    "subcontracting": ["subcontract", "01400", "subcontractor approval", "subcontractor"],
+    "order_of_precedence": ["order of precedence", "conflicting documents", "document hierarchy", "precedence"],
+    "document_retention": ["record retention", "document retention", "retention period", "maintain records"],
 
     # Financial
-    "retainage_progress_payments": ["payment", "00700", "retainage", "retention", "progress payment"],
+    "retainage_progress_payments": ["payment", "retainage", "retention", "progress payment", "final payment"],
     "mobilization_demobilization": ["mobilization", "01505", "01500", "demobilization"],
-    "price_escalation": ["escalation", "price adjustment", "00700", "fuel"],
-    "fuel_price_adjustment": ["fuel", "escalation", "00700", "price"],
-    "setoff_withholding": ["setoff", "withhold", "00700", "offset"],
-    "pay_when_paid_if_paid": ["pay when paid", "pay if paid", "00700", "payment condition"],
-    "change_orders": ["change order", "changes in the work", "00700", "modification of contract", "extra work"],
+    "price_escalation": ["escalation", "price adjustment", "adjustments to price", "fuel price", "fuel adjustment", "diesel", "ppi", "producer price index", "cost index"],
+    "setoff_withholding": ["setoff", "withhold", "offset", "deduct", "retain amounts"],
+    "pay_when_paid_if_paid": ["pay when paid", "pay if paid", "payment condition", "receipt of payment"],
+    "change_orders": ["change order", "changes in the work", "modification of contract", "extra work", "additional work"],
 
     # Insurance & Risk
-    "insurance_coverage": ["insurance", "00700", "00800", "supplemental"],
-    "bonding_surety_insurance": ["bond", "00610", "00600", "surety", "insurance"],
-    "indemnification": ["indemnif", "00700", "hold harmless"],
-    "duty_to_defend": ["indemnif", "00700", "duty to defend", "defense"],
-    "warranty": ["warranty", "00700", "guarantee", "correction"],
+    "insurance_coverage": ["insurance requirements", "insurance coverage", "certificates of insurance", "additional insured", "policy limits", "commercial general liability"],
+    "bonding_surety_insurance": ["bond", "00610", "00600", "surety", "performance bond", "payment bond"],
+    "indemnification": ["indemnif", "hold harmless", "defend and indemnify", "indemnity"],
+    "duty_to_defend": ["duty to defend", "defense obligation", "defend and indemnify", "defense cost"],
+    "warranty": ["warranty", "guarantee", "correction of work", "defects", "workmanship"],
 
     # Scope & Execution
-    "scope_of_work": ["summary of work", "01010", "01110", "scope", "01100"],
-    "deliverables": ["deliverable", "00700", "submittals", "01300"],
-    "delivery_deadlines": ["delivery deadline", "substantial completion", "00700", "final completion", "completion date"],
-    "submittals": ["submittals", "01300", "01340", "shop drawing"],
-    "site_conditions": ["site condition", "00700", "subsurface", "differing site"],
-    "environmental": ["environmental", "01500", "01560", "hazardous", "waste"],
-    "safety_osha": ["safety", "01500", "01560", "01530", "osha", "health"],
-    "permits_licensing": ["permit", "00700", "license", "01060"],
-    "performance_schedule": ["schedule", "01310", "01320", "01300", "progress schedule", "cpm"],
-    "worksite_coordination": ["coordination", "01040", "01500", "interface"],
-    "utility_coordination": ["utility", "01500", "01010", "coordination"],
-    "punch_list": ["punch list", "01700", "substantial completion", "final"],
+    "scope_of_work": ["summary of work", "01010", "01110", "scope of work", "01100", "scope"],
+    "deliverables": ["deliverable", "submittals", "01300", "as-built"],
+    "delivery_deadlines": ["delivery deadline", "substantial completion", "final completion", "completion date", "time for completion"],
+    "submittals": ["submittals", "01300", "01340", "shop drawing", "product data"],
+    "site_conditions": ["site condition", "subsurface", "differing site", "changed conditions",
+                        "site access", "access to work site", "cooperation", "work area", "other contractors"],
+    "environmental": ["environmental", "01560", "hazardous", "waste disposal", "contamination"],
+    "safety_osha": ["safety", "01560", "01530", "osha", "health and safety", "ppe", "safety program"],
+    "permits_licensing": ["permit", "license", "01060", "regulatory approval"],
+    "performance_schedule": ["schedule", "01310", "01320", "progress schedule", "cpm", "time is of the essence"],
+    "worksite_coordination": ["coordination", "01040", "interface", "other contractors"],
+    "utility_coordination": ["utility", "utility coordination", "locate", "utility conflict"],
+    "punch_list": ["punch list", "01700", "substantial completion", "final inspection"],
 
     # Termination
-    "termination_for_cause": ["termination", "00700", "default", "cause"],
-    "termination_for_convenience": ["termination for convenience", "terminate without cause", "00700", "owner may terminate"],
-    "suspension_of_work": ["suspension of work", "suspend work", "00700", "stop work order", "work stoppage"],
-    "delays": ["delay", "00700", "excusable", "time extension"],
+    "termination_for_cause": ["termination", "default", "cause", "material breach", "cure period"],
+    "termination_for_convenience": ["termination for convenience", "terminate without cause", "owner may terminate", "for any reason"],
+    "suspension_of_work": ["suspension of work", "suspend work", "stop work order",
+                          "work stoppage", "delay performance", "right to delay",
+                          "stopped or delayed"],
+    "delays": ["delay", "excusable", "time extension", "force majeure", "acts of god"],
 
     # Compliance & Regulatory
-    "prevailing_wage": ["prevailing wage", "00800", "davis-bacon", "wage rate", "supplemental"],
-    "certified_payroll": ["payroll", "00800", "certified", "prevailing wage"],
-    "mwbe_dbe": ["minority", "mbe", "dbe", "disadvantaged", "00800", "supplemental"],
-    "e_verify": ["e-verify", "immigration", "00800", "supplemental", "i-9"],
-    "drug_free_workplace": ["drug", "substance", "00800", "supplemental"],
-    "eeo": ["equal opportunity", "eeo", "00800", "supplemental", "nondiscrimination"],
-    "worker_classification": ["worker", "classification", "00800", "independent contractor"],
-    "apprenticeship": ["apprentice", "00800", "training", "supplemental"],
+    "prevailing_wage": ["prevailing wage", "davis-bacon", "wage rate", "wage determination"],
+    "certified_payroll": ["payroll", "certified payroll", "prevailing wage"],
+    "mwbe_dbe": ["minority", "mbe", "dbe", "disadvantaged business", "mwbe"],
+    "e_verify": ["e-verify", "immigration", "i-9", "employment eligibility"],
+    "drug_free_workplace": ["drug", "substance", "drug-free", "drug screening"],
+    "eeo": ["equal opportunity", "eeo", "nondiscrimination", "discrimination",
+            "anti-discrimination", "discriminate"],
+    "worker_classification": ["worker classification", "independent contractor", "employee vs contractor"],
+    "apprenticeship": ["apprentice", "training program", "workforce development"],
 
     # Special / Supplemental
-    "owner_supplied_support": ["owner furnished", "owner provided", "00700", "01600"],
-    "emergency_work": ["emergency", "00700", "urgent"],
-    "emergency_contingency": ["emergency", "contingency", "00700"],
-    "flow_down_clauses": ["flow down", "flow-down", "00700", "subcontract"],
-    "field_ticket": ["field ticket", "time and material", "00700"],
-    "release_orders": ["release order", "task order", "00700"],
-    "contractor_qualification": ["qualification", "00800", "experience", "00200"],
+    "owner_supplied_support": ["owner furnished", "owner provided", "01600"],
+    "emergency_work": ["emergency", "urgent", "emergency work"],
+    "emergency_contingency": ["emergency", "contingency", "emergency response"],
+    "flow_down_clauses": ["flow down", "flow-down", "subcontract requirements"],
+    "field_ticket": ["field ticket", "time and material", "force account"],
+    "release_orders": ["release order", "task order", "work authorization"],
+    "contractor_qualification": ["qualification", "experience", "00200", "prequalification"],
     "bid_protest": ["bid protest", "00100", "procurement"],
     "bid_tabulation": ["bid tabulation", "00100", "bid opening", "bid evaluation"],
 
     # Technology & Data
-    "ai_technology_use": ["technology", "00700", "artificial intelligence"],
-    "cybersecurity": ["cybersecurity", "00700", "data security"],
-    "data_ownership": ["data", "00700", "ownership", "intellectual"],
+    "ai_technology_use": ["artificial intelligence", "ai technology", "automation"],
+    "cybersecurity": ["cybersecurity", "data security", "breach notification"],
+    "data_ownership": ["data ownership", "intellectual property", "work product"],
     "digital_deliverables": ["digital", "bim", "cad", "01300"],
-    "use_of_aps_tools": ["software", "00700", "tools", "system"],
+    "use_of_aps_tools": ["software", "tools", "system"],
 }
 
 # Brief descriptions telling the AI what to look for in each category.
@@ -900,8 +922,7 @@ CATEGORY_SEARCH_DESCRIPTIONS = {
     "bonding_surety_insurance": "Performance bonds, payment bonds, surety requirements, bond amounts and conditions",
     "retainage_progress_payments": "Retainage percentage, progress payment schedules, final payment conditions, payment applications",
     "pay_when_paid_if_paid": "Payment contingent on owner paying general contractor, pay-when-paid or pay-if-paid conditions, subcontractor payment timing",
-    "price_escalation": "Price escalation clauses for labor, materials, or inflation adjustments, cost adjustment formulas",
-    "fuel_price_adjustment": "Fuel price adjustment provisions, fuel cost caps, fuel surcharge formulas",
+    "price_escalation": "Price escalation clauses for labor, materials, fuel, or inflation adjustments, cost adjustment formulas, fuel surcharge provisions",
     "change_orders": "Change order procedures, scope modifications, pricing of changes, written authorization requirements",
     "termination_for_convenience": "Owner or agency right to terminate without cause, compensation upon convenience termination",
     "termination_for_cause": "Termination for default by contractor, cure periods, grounds for cause termination",
@@ -916,7 +937,7 @@ CATEGORY_SEARCH_DESCRIPTIONS = {
     "scope_of_work": "Scope of work, work inclusions, exclusions, defined deliverables, summary of work",
     "performance_schedule": "Performance schedule, time for completion, critical path obligations, CPM schedule, milestone dates",
     "delays": "Delays, force majeure, acts of God, weather delays, owner-caused delays, excusable delays, time extensions",
-    "suspension_of_work": "Suspension of work, work stoppages, agency stop-work directives, resumption procedures",
+    "suspension_of_work": "Suspension of work, work stoppages, agency stop-work directives, resumption procedures, right to delay performance, project stopped or delayed for extended period",
     "submittals": "Submittals, shop drawings, product data, samples, approval requirements, submittal schedule",
     "emergency_work": "Emergency work obligations, urgent repairs, emergency response procedures",
     "permits_licensing": "Permits, licensing, regulatory approvals required for the work, permit fees",
@@ -940,14 +961,14 @@ CATEGORY_SEARCH_DESCRIPTIONS = {
     "flow_down_clauses": "Flow-down clauses, prime-to-subcontract risk pass-through, subcontract requirements",
     "subcontracting": "Subcontracting restrictions, subcontractor approval, substitution requirements",
     "safety_osha": "Safety standards, OSHA compliance, site-specific safety obligations, safety programs",
-    "site_conditions": "Site conditions, differing site conditions, changed circumstances, subsurface conditions",
+    "site_conditions": "Site conditions, differing site conditions, changed circumstances, subsurface conditions, site access provisions, access to work site, other contractors in work area",
     "environmental": "Environmental hazards, waste disposal, hazardous materials, environmental compliance",
     "order_of_precedence": "Order of precedence, conflicting documents, document hierarchy, interpretation rules",
     "setoff_withholding": "Setoff rights, withholding rights, owner right to deduct or withhold payment",
     # Section V: Regulatory & Compliance Terms
     "certified_payroll": "Certified payroll requirements, payroll recordkeeping, reporting obligations",
     "prevailing_wage": "Prevailing wage, Davis-Bacon Act, federal or state wage rate compliance, wage determinations",
-    "eeo": "Equal employment opportunity, non-discrimination requirements, affirmative action",
+    "eeo": "Equal employment opportunity, non-discrimination requirements, affirmative action, anti-discrimination clauses, prohibition against discrimination",
     "mwbe_dbe": "Minority business enterprise, DBE participation, disadvantaged business requirements, MBE/WBE goals",
     "apprenticeship": "Apprenticeship requirements, training programs, workforce development obligations",
     "e_verify": "E-Verify enrollment, immigration compliance, Form I-9, employment eligibility verification",
@@ -973,7 +994,7 @@ def _is_general_conditions_section(header_normalized: str) -> bool:
         return code < 2000  # Divisions 00xxx and 01xxx
     # Named general sections
     general_keywords = ['general condition', 'supplemental condition', 'special condition',
-                        'agreement', 'instruction', 'bid', 'proposal']
+                        'agreement', 'instruction', 'bid', 'proposal', 'preamble']
     return any(kw in header_normalized for kw in general_keywords)
 
 
@@ -1011,6 +1032,13 @@ def _score_match_by_section(
     # Flat contract — neutral score
     if section.section_type == 'flat':
         return 0.5
+
+    # Preamble — contains contract-level terms, score moderately high
+    if section.section_type == 'preamble':
+        hints = CATEGORY_SECTION_HINTS.get(category, [])
+        if hints and any(kw in section.header_normalized for kw in hints):
+            return 0.8
+        return 0.6
 
     hints = CATEGORY_SECTION_HINTS.get(category, [])
 

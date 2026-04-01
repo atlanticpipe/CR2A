@@ -2,9 +2,9 @@
 Analysis Engine Module
 
 Orchestrates the contract analysis workflow by integrating ContractUploader,
-LocalModelClient, and ResultParser components.
+AI model client (local Llama or Anthropic Claude), and ResultParser components.
 
-Uses local Llama 3.1 8B model for all AI analysis.
+Supports local Llama models and Claude API backends for AI analysis.
 """
 
 import logging
@@ -14,7 +14,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable, Dict, List, Tuple, Any
-from src.contract_uploader import ContractUploader
+from src.contract_uploader import ContractUploader, page_from_char_position
 from src.result_parser import ResultParser
 from src.analysis_models import AnalysisResult
 
@@ -31,6 +31,7 @@ class PreparedContract:
     exclude_zones: list
     extracted_clauses: dict = field(default_factory=dict)  # {cat_key: [matches]}
     indexed: object = None  # IndexedContract from DocumentRetriever
+    contract_type: str = ""  # "municipal" | "federal" | "state" | "private"
 
 
 class AnalysisEngine:
@@ -51,20 +52,27 @@ class AnalysisEngine:
         gpu_mode: str = "auto",
         ram_reserved_os_mb: int = None,
         gpu_offload_layers: int = None,
+        ai_backend: str = "local",
+        api_key: str = None,
+        claude_model: str = "claude-sonnet",
     ):
         """
-        Initialize Analysis Engine with local Llama model.
+        Initialize Analysis Engine with local Llama model or Claude API.
 
         Args:
             local_model_name: Name of local model to use (default: llama-3.2-3b-q4)
             gpu_mode: "auto" (auto-detect), "cpu" (force CPU), or "gpu" (force GPU)
             ram_reserved_os_mb: MB reserved for OS (None = auto-detect)
             gpu_offload_layers: Explicit GPU layer count (None = use gpu_mode)
+            ai_backend: "local" for Llama models, "claude" for Anthropic Claude API
+            api_key: Anthropic API key (required when ai_backend="claude")
+            claude_model: Claude model tier — "claude-sonnet" or "claude-opus"
 
         Raises:
-            ValueError: If model cannot be loaded
+            ValueError: If model cannot be loaded or API key is invalid
         """
-        logger.info(f"Initializing AnalysisEngine (model={local_model_name}, gpu_mode={gpu_mode})")
+        self.ai_backend = ai_backend
+        logger.info(f"Initializing AnalysisEngine (backend={ai_backend})")
 
         # Initialize components
         # Auto-detect Tesseract path for OCR support
@@ -77,41 +85,73 @@ class AnalysisEngine:
             self.uploader = ContractUploader()
         self.parser = ResultParser()
 
-        # Initialize local model
-        logger.info(f"Using local model: {local_model_name}")
-        from src.local_model_client import LocalModelClient
-        from src.model_manager import ModelManager
+        # Initialize AI client based on backend selection
+        if ai_backend == "claude":
+            logger.info(f"Using Claude API backend: {claude_model}")
+            from src.anthropic_client import AnthropicClient
 
-        model_mgr = ModelManager()
-        try:
-            model_path = model_mgr.get_model_path(local_model_name)
+            if not api_key:
+                raise ValueError(
+                    "Anthropic API key is required for Claude backend.\n\n"
+                    "Set the ANTHROPIC_API_KEY environment variable or "
+                    "enter your key in Settings."
+                )
 
-            # Determine n_gpu_layers: explicit offload_layers takes priority
-            if gpu_offload_layers is not None:
-                n_gpu_layers = None  # let LocalModelClient use gpu_offload_layers
-            elif gpu_mode == "cpu":
-                n_gpu_layers = 0
-            elif gpu_mode == "gpu":
-                n_gpu_layers = -1
-            else:
-                n_gpu_layers = None  # auto-detect
+            try:
+                self.ai_client = AnthropicClient(
+                    api_key=api_key,
+                    model_name=claude_model,
+                )
+                logger.info("Claude API client initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize Claude API client: {e}")
+                raise ValueError(
+                    f"Failed to initialize Claude API client.\n\n"
+                    f"Error: {e}\n\n"
+                    "Check your API key and internet connection."
+                )
+        else:
+            # Initialize local model
+            logger.info(f"Using local model: {local_model_name}")
+            from src.local_model_client import LocalModelClient
+            from src.model_manager import ModelManager
 
-            self.ai_client = LocalModelClient(
-                model_path=str(model_path),
-                model_name=local_model_name,
-                n_gpu_layers=n_gpu_layers,
-                ram_reserved_os_mb=ram_reserved_os_mb,
-                gpu_offload_layers=gpu_offload_layers,
-            )
-            logger.info("Local model client initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize local model: {e}")
-            raise ValueError(
-                f"Failed to load local model '{local_model_name}'.\n\n"
-                f"Error: {e}\n\n"
-                "Please download the model first:\n"
-                "Settings → Manage Models → Download"
-            )
+            model_mgr = ModelManager()
+            try:
+                model_path = model_mgr.get_model_path(local_model_name)
+
+                # Determine n_gpu_layers: explicit offload_layers takes priority
+                if gpu_offload_layers is not None:
+                    n_gpu_layers = None  # let LocalModelClient use gpu_offload_layers
+                elif gpu_mode == "cpu":
+                    n_gpu_layers = 0
+                elif gpu_mode == "gpu":
+                    n_gpu_layers = -1
+                else:
+                    n_gpu_layers = None  # auto-detect
+
+                self.ai_client = LocalModelClient(
+                    model_path=str(model_path),
+                    model_name=local_model_name,
+                    n_gpu_layers=n_gpu_layers,
+                    ram_reserved_os_mb=ram_reserved_os_mb,
+                    gpu_offload_layers=gpu_offload_layers,
+                )
+                logger.info("Local model client initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize local model: {e}")
+                raise ValueError(
+                    f"Failed to load local model '{local_model_name}'.\n\n"
+                    f"Error: {e}\n\n"
+                    "Please download the model first:\n"
+                    "Settings → Manage Models → Download"
+                )
+
+        # Initialize knowledge store for RAG-based learning
+        from src.knowledge_store import KnowledgeStore
+        self.knowledge_store = KnowledgeStore()
+        self.knowledge_store.initialize()
+        self.knowledge_store.load_and_index()
 
         logger.info("AnalysisEngine initialized successfully")
 
@@ -215,7 +255,13 @@ class AnalysisEngine:
         if progress_callback:
             progress_callback("Extracting text from contract...", 30)
 
-        contract_text = self.uploader.extract_text(file_path)
+        # Sub-range callback: map uploader's 0-100% into our 30-50% range
+        def extraction_progress(status, pct):
+            if progress_callback:
+                mapped = 30 + int(pct * 20 / 100)
+                progress_callback(status, mapped)
+
+        contract_text = self.uploader.extract_text(file_path, progress_callback=extraction_progress)
         if not contract_text or not contract_text.strip():
             raise ValueError("No text could be extracted from the contract")
 
@@ -319,16 +365,40 @@ class AnalysisEngine:
         logger.info(f"Retrieved {len(results)} sections for {cat_key} "
                     f"(top: score={top.combined_score:.4f}, found by: {layers})")
 
+        # Derive page number from character position in extracted text
+        from src.contract_uploader import page_from_char_position
+        clause_page = None
+        section_block = prepared.section_index[top.section_idx] if top.section_idx < len(prepared.section_index) else None
+        if section_block:
+            clause_page = page_from_char_position(prepared.indexed.contract_text, section_block.start_pos)
+
         if progress_callback:
             progress_callback(f"AI analyzing {display_name}...", 30)
 
         from analyzer.template_patterns import CATEGORY_SEARCH_DESCRIPTIONS
         cat_desc = CATEGORY_SEARCH_DESCRIPTIONS.get(cat_key, display_name)
 
+        # Retrieve relevant past knowledge for this category
+        knowledge_block = ""
+        if self.knowledge_store and self.knowledge_store.entry_count() > 0:
+            knowledge_entries = self.knowledge_store.retrieve_for_category(
+                cat_key, contract_type=getattr(prepared, 'contract_type', '')
+            )
+            if knowledge_entries:
+                knowledge_context = self.knowledge_store.format_for_prompt(knowledge_entries)
+                if knowledge_context:
+                    knowledge_block = (
+                        f'[Reference from past analyses]\n{knowledge_context}\n'
+                        f'Use the above as context only. Base your summary on the contract text below.\n\n'
+                    )
+
         user_msg = (
             f'Category: {cat_desc}\n\n'
+            f'{knowledge_block}'
             f'Below are sections from a construction contract. '
-            f'Write 1-3 plain sentences summarizing what they say about {cat_desc}. '
+            f'If there are multiple distinct clauses about {cat_desc} in different '
+            f'sections, describe each separately with ||| between them, prefixing '
+            f'each with its section header in [brackets].\n'
             f'Only describe what is written in the text below.\n'
             f'If the text below is completely unrelated to {cat_desc}, '
             f'respond with exactly "NOT FOUND" and nothing else.\n\n'
@@ -340,7 +410,7 @@ class AnalysisEngine:
                 self._PER_ITEM_SYSTEM_MSG,
                 user_msg,
                 progress_callback=progress_callback,
-                max_tokens=300
+                max_tokens=600
             )
 
             clause_summary = raw.strip() if raw else ""
@@ -353,11 +423,17 @@ class AnalysisEngine:
 
             # Check if AI says not found — still return prompt/response so GUI can log them
             summary_upper = clause_summary.upper()
-            # Detect NOT FOUND: starts with it, OR the only substantive content is NOT FOUND
-            # (handles cases like "Category: NOT FOUND\n\nSubcategory: NOT FOUND")
             stripped_text = re.sub(r'[^A-Z]', '', summary_upper)
+            # Check first ~150 chars for NOT FOUND signals to avoid false matches
+            # in long summaries that mention "not found" incidentally
+            first_chunk = summary_upper[:150]
             is_not_found = (
                 summary_upper.startswith("NOT FOUND")
+                or summary_upper.startswith("N/A")
+                or summary_upper.startswith("NONE FOUND")
+                or summary_upper.startswith("NO RELEVANT")
+                or summary_upper.startswith("THIS CLAUSE IS NOT")
+                or "NOT FOUND" in first_chunk
                 or (stripped_text.count("NOTFOUND") >= 1 and
                     len(stripped_text.replace("NOTFOUND", "")) < 50)
             )
@@ -366,14 +442,16 @@ class AnalysisEngine:
                 return (section_key, display_name, None, user_msg, raw)
 
             if clause_summary:
-                clause_block = {
-                    "Clause Location": clause_location,
-                    "Clause Summary": clause_summary,
-                }
-                logger.info(f"FOUND: {display_name}")
-                if progress_callback:
-                    progress_callback(f"Analyzed {display_name}!", 100)
-                return (section_key, display_name, clause_block, user_msg, raw)
+                # Parse multi-clause responses separated by |||
+                clause_blocks = self._parse_multi_clause_response(
+                    clause_summary, results, prepared, clause_location, clause_page
+                )
+                if clause_blocks:
+                    logger.info(f"FOUND: {display_name} ({len(clause_blocks)} instance(s))")
+                    if progress_callback:
+                        progress_callback(f"Analyzed {display_name}!", 100)
+                    # Return list of clause_blocks via the object slot
+                    return (section_key, display_name, clause_blocks, user_msg, raw)
             else:
                 fallback = self._regex_fallback_for_category(prepared, cat_key, section_key, display_name)
                 if fallback:
@@ -386,6 +464,78 @@ class AnalysisEngine:
             if fallback:
                 return (*fallback, user_msg, f"(AI error: {e})")
             return None
+
+    def _parse_multi_clause_response(
+        self,
+        ai_text: str,
+        results: list,
+        prepared: 'PreparedContract',
+        default_location: str,
+        default_page: Optional[int],
+    ) -> List[dict]:
+        """Parse AI response that may contain multiple clause instances separated by |||.
+
+        Returns a list of clause_block dicts.  For a single-clause response the list
+        has one element.
+        """
+        from src.contract_uploader import page_from_char_position
+
+        # Split on ||| delimiter
+        parts = [p.strip() for p in ai_text.split("|||") if p.strip()]
+        if not parts:
+            return []
+
+        # Build a lookup: section_header_upper → (section_block, RetrievalResult)
+        header_lookup = {}
+        for r in results:
+            h = r.section_header.upper() if r.section_header else ""
+            if h:
+                si = r.section_idx
+                sb = prepared.section_index[si] if si < len(prepared.section_index) else None
+                header_lookup[h] = (sb, r)
+
+        clause_blocks: List[dict] = []
+        for part in parts:
+            # Try to extract a [SECTION HEADER] prefix from the summary
+            loc_match = re.match(r'^\[([^\]]+)\]\s*', part)
+            if loc_match:
+                location = loc_match.group(1).strip().upper()
+                summary = part[loc_match.end():].strip()
+            else:
+                location = default_location
+                summary = part
+
+            if not summary:
+                continue
+
+            # Resolve page from the matched section header
+            page = default_page
+            if location in header_lookup:
+                sb, _ = header_lookup[location]
+                if sb:
+                    p = page_from_char_position(prepared.indexed.contract_text, sb.start_pos)
+                    if p:
+                        page = p
+            else:
+                # Fuzzy: try substring match against retrieved headers
+                for h, (sb, _) in header_lookup.items():
+                    if location in h or h in location:
+                        if sb:
+                            p = page_from_char_position(prepared.indexed.contract_text, sb.start_pos)
+                            if p:
+                                page = p
+                        location = h  # normalise to the canonical header
+                        break
+
+            block: dict = {
+                "Clause Location": location,
+                "Clause Summary": summary,
+            }
+            if page:
+                block["Clause Page"] = page
+            clause_blocks.append(block)
+
+        return clause_blocks
 
     @staticmethod
     def _get_location_from_section_index(position: int, section_index: list) -> str:
@@ -415,13 +565,19 @@ class AnalysisEngine:
             conf = str(best.get('confidence', ''))
             ctx = best.get('context', best.get('matched_text', ''))
             if not conf.startswith('fuzzy') and ctx:
+                position = best.get('position', 0)
                 location = self._get_location_from_section_index(
-                    best.get('position', 0), prepared.section_index
+                    position, prepared.section_index
                 )
-                return (section_key, display_name, {
+                from src.contract_uploader import page_from_char_position
+                page = page_from_char_position(prepared.indexed.contract_text, position)
+                block = {
                     "Clause Location": location,
                     "Clause Summary": ctx[:300],
-                })
+                }
+                if page:
+                    block["Clause Page"] = page
+                return (section_key, display_name, block)
         return None
 
     def build_comprehensive_result(
@@ -536,7 +692,13 @@ class AnalysisEngine:
             if progress_callback:
                 progress_callback("Extracting text from contract...", 15)
 
-            contract_text = self.uploader.extract_text(file_path)
+            # Sub-range callback: map uploader's 0-100% into our 15-20% range
+            def extraction_progress(status, pct):
+                if progress_callback:
+                    mapped = 15 + int(pct * 5 / 100)
+                    progress_callback(status, mapped)
+
+            contract_text = self.uploader.extract_text(file_path, progress_callback=extraction_progress)
             logger.info("Extracted %d characters from contract", len(contract_text))
 
             if not contract_text or not contract_text.strip():
@@ -738,7 +900,6 @@ class AnalysisEngine:
         "retainage_progress_payments": ("administrative_and_commercial_terms", "Retainage, Progress Payments & Final Payment Terms"),
         "pay_when_paid_if_paid": ("administrative_and_commercial_terms", "Pay-When-Paid, Pay-If-Paid, or Owner Payment Contingencies"),
         "price_escalation": ("administrative_and_commercial_terms", "Price Escalation Clauses (Labor, Materials, Fuel, Inflation Adjustments)"),
-        "fuel_price_adjustment": ("administrative_and_commercial_terms", "Fuel Price Adjustment / Fuel Cost Caps"),
         "change_orders": ("administrative_and_commercial_terms", "Change Orders, Scope Adjustments & Modifications"),
         "termination_for_convenience": ("administrative_and_commercial_terms", "Termination for Convenience (Owner/Agency Right to Terminate Without Cause)"),
         "termination_for_cause": ("administrative_and_commercial_terms", "Termination for Cause / Default by Contractor"),
@@ -1151,8 +1312,13 @@ class AnalysisEngine:
 
     _PER_ITEM_SYSTEM_MSG = (
         "You are a construction contract analyst. "
-        "Write a short plain-text summary (1-3 sentences maximum). "
-        "Do NOT use bullet points, numbered lists, headers, bold text, or sub-categories. "
+        "You will receive several labeled sections from a contract. "
+        "If there is ONE relevant clause, write a 1-3 sentence summary. "
+        "If there are MULTIPLE DISTINCT clauses about the topic in DIFFERENT sections "
+        "(e.g., notifications to the Owner vs. notifications to residents), "
+        "write a separate 1-3 sentence summary for each and separate them with ||| on its own line. "
+        "Prefix each summary with the section header in square brackets, e.g. [ARTICLE 5 - NOTICES]. "
+        "Do NOT use bullet points, numbered lists, bold text, or sub-categories. "
         "Do NOT include preamble like 'Here is a summary'. "
         "Just write plain flowing sentences about what the contract says."
     )
@@ -1167,7 +1333,7 @@ class AnalysisEngine:
         "Return ONLY the JSON object, no other text."
     )
 
-    # Batch size for summarization — keep small for 3B model reliability
+    # Default batch size for summarization — adjusted dynamically for small context windows
     _SUMMARIZE_BATCH_SIZE = 4
 
     def _hybrid_batch_analysis(
@@ -1202,8 +1368,13 @@ class AnalysisEngine:
         # --- Retrieve sections for ALL categories that have regex hits ---
         all_cat_keys = [ck for ck in extracted_clauses if extracted_clauses[ck]]
         total = len(all_cat_keys)
+        # Adapt batch size to available context window
+        batch_size = self._SUMMARIZE_BATCH_SIZE
+        ctx_size = getattr(self.ai_client, 'n_ctx', 0)
+        if ctx_size and ctx_size <= 8192:
+            batch_size = 2  # Smaller batches for 8K context to avoid overflow
         logger.info(f"Batch analysis: {total} categories to summarize, "
-                     f"batch size {self._SUMMARIZE_BATCH_SIZE}")
+                     f"batch size {batch_size} (ctx={ctx_size or 'api'})")
 
         # --- Retrieve + derive locations per category ---
         retrieved_texts = {}  # cat_key -> section text for AI
@@ -1212,19 +1383,22 @@ class AnalysisEngine:
         if progress_callback:
             progress_callback("Retrieving relevant sections...", 15)
 
+        # Limit per-category text for small context windows
+        max_chars_per_cat = 1000 if (ctx_size and ctx_size <= 8192) else 1500
+
         for cat_key in all_cat_keys:
             if indexed_contract is not None:
                 results = retriever.retrieve_for_category(cat_key, top_k=3)
                 if results:
-                    retrieved_texts[cat_key] = retriever.format_sections_for_ai(results, max_chars=1500)
+                    retrieved_texts[cat_key] = retriever.format_sections_for_ai(results, max_chars=max_chars_per_cat)
                     locations[cat_key] = results[0].section_header.upper() if results[0].section_header else "See contract"
                     continue
 
             # Fallback if no retriever or no results: use regex context
             best = extracted_clauses[cat_key][0]
             ctx = best.get('context', best.get('matched_text', ''))
-            if len(ctx) > 1500:
-                ctx = ctx[:1500]
+            if len(ctx) > max_chars_per_cat:
+                ctx = ctx[:max_chars_per_cat]
             retrieved_texts[cat_key] = ctx
             pos = best.get('position', 0)
             locations[cat_key] = self._get_location_from_section_index(pos, section_index)
@@ -1234,11 +1408,11 @@ class AnalysisEngine:
         # --- Batch-summarize with AI ---
         summaries = {}  # cat_key -> summary string
         cat_list = list(retrieved_texts.keys())
-        total_batches = (len(cat_list) + self._SUMMARIZE_BATCH_SIZE - 1) // self._SUMMARIZE_BATCH_SIZE
+        total_batches = (len(cat_list) + batch_size - 1) // batch_size
 
-        for batch_start in range(0, len(cat_list), self._SUMMARIZE_BATCH_SIZE):
-            sub_keys = cat_list[batch_start:batch_start + self._SUMMARIZE_BATCH_SIZE]
-            batch_num = batch_start // self._SUMMARIZE_BATCH_SIZE + 1
+        for batch_start in range(0, len(cat_list), batch_size):
+            sub_keys = cat_list[batch_start:batch_start + batch_size]
+            batch_num = batch_start // batch_size + 1
             pct = 25 + int(55 * batch_num / max(total_batches, 1))
 
             if progress_callback:
@@ -1252,6 +1426,12 @@ class AnalysisEngine:
             for cat_key in sub_keys:
                 clause_id = f"{cat_key}_0"
                 text = retrieved_texts[cat_key]
+                # Inject knowledge context (400 token budget in batch mode)
+                if self.knowledge_store and self.knowledge_store.entry_count() > 0:
+                    k_entries = self.knowledge_store.retrieve_for_category(cat_key)
+                    k_context = self.knowledge_store.format_for_prompt(k_entries, max_tokens=400)
+                    if k_context:
+                        text = f"[Past knowledge: {k_context}]\n\n{text}"
                 clause_blocks.append(f"### {clause_id}\n{text}")
                 batch_ids.append(clause_id)
 
@@ -1494,9 +1674,17 @@ class AnalysisEngine:
 
                     clause_summary = ai_result.get("clause_summary", "")
 
-                    # Extract page number
+                    # Extract page number — prefer AI answer but validate/fix
+                    # using character position if AI couldn't find markers
                     raw_page = ai_result.get("clause_page")
                     clause_page = int(raw_page) if isinstance(raw_page, (int, float)) and raw_page > 0 else None
+
+                    # If AI couldn't determine page, compute from regex
+                    # match character position in the full contract text
+                    if clause_page is None and cat_key in extracted_clauses:
+                        best_pos = extracted_clauses[cat_key][0].get('position')
+                        if best_pos is not None:
+                            clause_page = page_from_char_position(contract_text, best_pos)
 
                     # Parse redlines with validation
                     raw_redlines = ai_result.get("redlines", [])
@@ -1538,13 +1726,20 @@ class AnalysisEngine:
                         ctx = best.get('context', '')
                         # Only use regex fallback if it wasn't a fuzzy match
                         if not conf.startswith('fuzzy') and ctx:
-                            result[section_key][display_name] = {
+                            fallback_block = {
                                 "Clause Location": ctx[:200],
                                 "Clause Summary": "",
                                 "Flow-Down Obligations": [],
                                 "Redline Recommendations": [],
                                 "Harmful Language / Policy Conflicts": []
                             }
+                            # Compute page from regex position
+                            best_pos = best.get('position')
+                            if best_pos is not None:
+                                fb_page = page_from_char_position(contract_text, best_pos)
+                                if fb_page is not None:
+                                    fallback_block["Clause Page"] = fb_page
+                            result[section_key][display_name] = fallback_block
                             found_count += 1
                             logger.info(f"  REGEX FALLBACK: {display_name}")
                         else:
@@ -1559,13 +1754,19 @@ class AnalysisEngine:
                     best = extracted_clauses[cat_key][0]
                     ctx = best.get('context', best.get('matched_text', ''))
                     if ctx:
-                        result[section_key][display_name] = {
+                        err_block = {
                             "Clause Location": ctx[:200],
                             "Clause Summary": "",
                             "Flow-Down Obligations": [],
                             "Redline Recommendations": [],
                             "Harmful Language / Policy Conflicts": []
                         }
+                        best_pos = best.get('position')
+                        if best_pos is not None:
+                            err_page = page_from_char_position(contract_text, best_pos)
+                            if err_page is not None:
+                                err_block["Clause Page"] = err_page
+                        result[section_key][display_name] = err_block
                         found_count += 1
 
         logger.info(f"Per-item AI analysis complete: {found_count}/{total} categories found")
@@ -2106,7 +2307,6 @@ Output ONLY valid JSON, no explanations."""
             retainage_progress_payments=merge_clauses_to_block(admin_section.get('retainage_progress_payments', [])),
             pay_when_paid=merge_clauses_to_block(admin_section.get('pay_when_paid_if_paid', [])),  # Schema uses 'pay_when_paid'
             price_escalation=merge_clauses_to_block(admin_section.get('price_escalation', [])),
-            fuel_price_adjustment=merge_clauses_to_block(admin_section.get('fuel_price_adjustment', [])),
             change_orders=merge_clauses_to_block(admin_section.get('change_orders', [])),
             termination_for_convenience=merge_clauses_to_block(admin_section.get('termination_for_convenience', [])),
             termination_for_cause=merge_clauses_to_block(admin_section.get('termination_for_cause', [])),

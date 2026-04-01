@@ -85,21 +85,26 @@ class ContractUploader:
     
     @staticmethod
     def _find_bundled_tesseract() -> Optional[str]:
-        """Find bundled Tesseract executable in frozen (PyInstaller) builds."""
+        """Find bundled Tesseract executable in frozen or development builds."""
         import sys
+        candidates = []
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
-            candidates = [
+            candidates.extend([
                 os.path.join(base_path, 'tesseract', 'tesseract.exe'),
                 os.path.join(os.path.dirname(sys.executable), '_internal', 'tesseract', 'tesseract.exe'),
-            ]
-            for path in candidates:
-                if os.path.exists(path):
-                    # Also set TESSDATA_PREFIX so tesseract finds language files
-                    tessdata_dir = os.path.join(os.path.dirname(path), 'tessdata')
-                    if os.path.exists(tessdata_dir):
-                        os.environ['TESSDATA_PREFIX'] = os.path.dirname(path)
-                    return path
+            ])
+        # Also check build_tools/ relative to project root (development mode)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        candidates.append(os.path.join(project_root, 'build_tools', 'tesseract', 'tesseract.exe'))
+        for path in candidates:
+            if os.path.exists(path):
+                # Also set TESSDATA_PREFIX so tesseract finds language files
+                # TESSDATA_PREFIX must point to the tessdata/ directory itself
+                tessdata_dir = os.path.join(os.path.dirname(path), 'tessdata')
+                if os.path.exists(tessdata_dir):
+                    os.environ['TESSDATA_PREFIX'] = tessdata_dir
+                return path
         return None
 
     def validate_format(self, file_path: str) -> Tuple[bool, str]:
@@ -245,34 +250,35 @@ class ContractUploader:
                 'page_count': None
             }
 
-    def extract_text(self, file_path: str) -> str:
+    def extract_text(self, file_path: str, progress_callback=None) -> str:
         """
         Extract text content from PDF or DOCX file.
-        
+
         Args:
             file_path: Path to the contract file
-            
+            progress_callback: Optional callable(status, percent) for page-level progress
+
         Returns:
             Extracted text content as a string
-            
+
         Raises:
             ValueError: If file format is not supported
             Exception: If text extraction fails
         """
         logger.info("Extracting text from file: %s", file_path)
-        
+
         # Validate file format first
         is_valid, error_msg = self.validate_format(file_path)
         if not is_valid:
             logger.error("File validation failed: %s", error_msg)
             raise ValueError(f"Cannot extract text: {error_msg}")
-        
+
         path = Path(file_path)
         file_extension = path.suffix.lower()
-        
+
         try:
             if file_extension == '.pdf':
-                return self._extract_text_from_pdf(file_path)
+                return self._extract_text_from_pdf(file_path, progress_callback=progress_callback)
             elif file_extension == '.docx':
                 return self._extract_text_from_docx(file_path)
             elif file_extension == '.txt':
@@ -286,16 +292,17 @@ class ContractUploader:
             logger.error("Text extraction failed for %s: %s", file_path, e, exc_info=True)
             raise
     
-    def _extract_text_from_pdf(self, file_path: str) -> str:
+    def _extract_text_from_pdf(self, file_path: str, progress_callback=None) -> str:
         """
         Extract text from PDF file using PyPDF2.
-        
+
         Args:
             file_path: Path to PDF file
-            
+            progress_callback: Optional callable(status, percent) for page-level progress
+
         Returns:
             Extracted text content
-            
+
         Raises:
             Exception: If PDF reading fails
         """
@@ -326,13 +333,16 @@ class ContractUploader:
                 logger.debug("Extracting text from %d pages", page_count)
                 
                 for page_num, page in enumerate(pdf_reader.pages, start=1):
+                    if progress_callback:
+                        pct = int(100 * page_num / page_count)
+                        progress_callback(f"Reading page {page_num}/{page_count}...", pct)
                     try:
                         page_text = page.extract_text()
                         if page_text:
                             text_parts.append(f"\n--- Page {page_num} ---\n")
                             text_parts.append(page_text)
                     except Exception as page_error:
-                        logger.warning("Failed to extract text from page %d: %s", 
+                        logger.warning("Failed to extract text from page %d: %s",
                                      page_num, page_error)
                         # Continue with other pages
                         continue
@@ -345,7 +355,7 @@ class ContractUploader:
                     if self.enable_ocr:
                         logger.info("No text extracted from PDF, attempting OCR...")
                         try:
-                            extracted_text = self._extract_text_with_ocr(file_path)
+                            extracted_text = self._extract_text_with_ocr(file_path, progress_callback=progress_callback)
                             logger.info("Successfully extracted %d characters using OCR", len(extracted_text))
                             return extracted_text
                         except Exception as ocr_error:
@@ -518,12 +528,13 @@ class ContractUploader:
             logger.error(error_msg, exc_info=True)
             raise Exception(error_msg) from e
 
-    def _extract_text_with_ocr(self, file_path: str) -> str:
+    def _extract_text_with_ocr(self, file_path: str, progress_callback=None) -> str:
         """
         Extract text from image-based PDF using Tesseract OCR.
 
         Args:
             file_path: Path to PDF file
+            progress_callback: Optional callable(status, percent) for page-level progress
 
         Returns:
             Extracted text content from OCR
@@ -538,19 +549,23 @@ class ContractUploader:
         logger.info("Starting OCR extraction for: %s", file_path)
 
         try:
-            # Detect bundled poppler path for frozen applications
+            # Detect bundled poppler path for frozen or development builds
             poppler_path = None
+            candidates = []
             if getattr(sys, 'frozen', False):
                 base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-                candidates = [
+                candidates.extend([
                     os.path.join(base_path, 'poppler', 'bin'),
                     os.path.join(os.path.dirname(sys.executable), '_internal', 'poppler', 'bin'),
-                ]
-                for candidate in candidates:
-                    if os.path.exists(candidate):
-                        poppler_path = candidate
-                        logger.debug("Using bundled poppler at: %s", poppler_path)
-                        break
+                ])
+            # Also check build_tools/ relative to project root (development mode)
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            candidates.append(os.path.join(project_root, 'build_tools', 'poppler', 'bin'))
+            for candidate in candidates:
+                if os.path.exists(candidate):
+                    poppler_path = candidate
+                    logger.debug("Using bundled poppler at: %s", poppler_path)
+                    break
 
             # Convert PDF pages to images
             logger.debug("Converting PDF to images...")
@@ -560,10 +575,17 @@ class ContractUploader:
                 images = pdf2image.convert_from_path(file_path)
             logger.info("Converted PDF to %d images", len(images))
             
+            if progress_callback:
+                progress_callback("Converting PDF to images for OCR...", 5)
+
             # Extract text from each page image
             text_parts = []
+            total_pages = len(images)
             for page_num, image in enumerate(images, start=1):
-                logger.debug("Running OCR on page %d/%d", page_num, len(images))
+                logger.debug("Running OCR on page %d/%d", page_num, total_pages)
+                if progress_callback:
+                    pct = int(100 * page_num / total_pages)
+                    progress_callback(f"OCR processing page {page_num}/{total_pages}...", pct)
                 
                 try:
                     # Run Tesseract OCR on the image
@@ -595,3 +617,102 @@ class ContractUploader:
             error_msg = f"OCR extraction failed: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise Exception(error_msg) from e
+
+
+def find_text_in_pdf(pdf_path: str, search_text: str, page_hint: Optional[int] = None) -> Tuple[Optional[int], Optional[float]]:
+    """
+    Find the exact PDF coordinates of a text string using PyMuPDF.
+
+    Args:
+        pdf_path: Path to the PDF file.
+        search_text: Text to search for (typically a section header).
+        page_hint: Optional 1-based page number to search first.
+
+    Returns:
+        (page_number, y_coordinate) — 1-based page number and top y-position
+        in PDF points, or (None, None) if not found.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        logger.debug("PyMuPDF not available for coordinate lookup")
+        return (None, None)
+
+    if not search_text or not pdf_path or not os.path.isfile(pdf_path):
+        return (None, None)
+
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        logger.debug("Could not open PDF for coordinate search: %s", e)
+        return (None, None)
+
+    try:
+        # Clean the search text — strip numbering artifacts, limit length
+        clean = search_text.strip()
+        if len(clean) > 150:
+            clean = clean[:150]
+
+        # Build a list of pages to search: page_hint first (if given), then all others
+        pages_to_search = list(range(len(doc)))
+        if page_hint is not None and 1 <= page_hint <= len(doc):
+            hint_idx = page_hint - 1
+            pages_to_search.remove(hint_idx)
+            pages_to_search.insert(0, hint_idx)
+
+        # Try the full search text first, then progressively shorter prefixes
+        search_variants = [clean]
+        # Add a shorter prefix if the header is long (more likely to match)
+        if len(clean) > 40:
+            search_variants.append(clean[:60])
+        if len(clean) > 20:
+            search_variants.append(clean[:30])
+
+        for variant in search_variants:
+            for page_idx in pages_to_search:
+                page = doc[page_idx]
+                rects = page.search_for(variant, quads=False)
+                if rects:
+                    # Return the first match: 1-based page and top y-coordinate
+                    rect = rects[0]
+                    page_num = page_idx + 1
+                    y_top = rect.y0
+                    logger.debug("Found '%s' on page %d at y=%.1f", variant[:40], page_num, y_top)
+                    doc.close()
+                    return (page_num, y_top)
+
+        doc.close()
+        logger.debug("Text not found in PDF: '%s'", clean[:40])
+        return (None, None)
+
+    except Exception as e:
+        logger.debug("Error searching PDF for text coordinates: %s", e)
+        try:
+            doc.close()
+        except Exception:
+            pass
+        return (None, None)
+
+
+def page_from_char_position(contract_text: str, char_pos: int) -> Optional[int]:
+    """
+    Derive the PDF page number from a character position in extracted text.
+
+    Scans for ``--- Page N ---`` markers inserted during extraction and returns
+    the page number that contains the given character position.
+
+    Args:
+        contract_text: Full extracted text with page markers.
+        char_pos: Character offset into the text.
+
+    Returns:
+        1-based page number, or None if markers are not present.
+    """
+    import re
+    current_page = None
+    for m in re.finditer(r'--- Page (\d+)(?:\s*\(OCR\))? ---', contract_text):
+        marker_pos = m.start()
+        if marker_pos > char_pos:
+            break
+        current_page = int(m.group(1))
+    return current_page
