@@ -147,8 +147,8 @@ def detect_gpu_support() -> Tuple[bool, int, str]:
     logger.info("GPU offloading available (%s) — will offload all layers", backend)
     return True, -1, backend
 
-from src.schema_loader import SchemaLoader
-from src.fuzzy_matcher import FuzzyClauseMatcher
+from schema_loader import SchemaLoader
+from fuzzy_matcher import FuzzyClauseMatcher
 
 
 class LocalModelClient:
@@ -233,7 +233,7 @@ class LocalModelClient:
 
         # Context size: compute from RAM budget if provided, else use defaults
         if ram_reserved_os_mb is not None:
-            from src.hardware_info import compute_context_tokens, _detect_gpu
+            from hardware_info import compute_context_tokens, _detect_gpu
             try:
                 import psutil
                 total_ram_mb = int(psutil.virtual_memory().total / (1024 * 1024))
@@ -979,7 +979,7 @@ Please answer based on the contract context provided above."""
             List of message dicts: [{"role": ..., "content": ...}, ...]
             Includes thoughts, tool calls, observations, and final answer.
         """
-        from src.tool_registry import ToolRegistry
+        from tool_registry import ToolRegistry
 
         if not self._model_loaded:
             self._load_model(progress_callback)

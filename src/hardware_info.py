@@ -94,7 +94,7 @@ def compute_context_tokens(
     Returns:
         Estimated max n_ctx, clamped to [512, max_context].
     """
-    from src.model_manager import ModelManager
+    from model_manager import ModelManager
     registry = ModelManager.MODEL_REGISTRY
     model_info = registry.get(model_key)
     if not model_info:
@@ -134,7 +134,7 @@ def get_ram_breakdown(
     Returns:
         Dict with keys: weights_mb, gpu_offload_mb, context_cache_mb, estimated_tokens
     """
-    from src.model_manager import ModelManager
+    from model_manager import ModelManager
     registry = ModelManager.MODEL_REGISTRY
     model_info = registry.get(model_key)
     if not model_info:

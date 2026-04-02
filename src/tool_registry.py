@@ -450,7 +450,7 @@ class ToolRegistry:
         if self.analysis_engine:
             cat_map = self.analysis_engine.CATEGORY_MAP
         else:
-            from src.analysis_engine import AnalysisEngine
+            from analysis_engine import AnalysisEngine
             cat_map = AnalysisEngine.CATEGORY_MAP
 
         # Group by section

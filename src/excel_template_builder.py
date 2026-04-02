@@ -743,7 +743,7 @@ class ExcelTemplateBuilder:
                 clause_page = clause_block.get("Clause Page")
                 if file_ref.lower().endswith(".pdf") and clause_location_text:
                     try:
-                        from src.contract_uploader import find_text_in_pdf
+                        from contract_uploader import find_text_in_pdf
                         full_pdf_path = str(self.project_root / file_ref)
                         page_num, y_coord = find_text_in_pdf(
                             full_pdf_path, clause_location_text,
@@ -927,7 +927,7 @@ class ExcelTemplateBuilder:
                     clause_page = block.get("Clause Page")
                     if file_ref.lower().endswith(".pdf") and clause_location_text:
                         try:
-                            from src.contract_uploader import find_text_in_pdf
+                            from contract_uploader import find_text_in_pdf
                             full_pdf_path = str(self.project_root / file_ref)
                             page_num, y_coord = find_text_in_pdf(
                                 full_pdf_path, clause_location_text,

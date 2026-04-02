@@ -16,7 +16,7 @@ import jsonschema
 from jsonschema import Draft202012Validator, Draft7Validator
 
 if TYPE_CHECKING:
-    from src.schema_loader import SchemaLoader
+    from schema_loader import SchemaLoader
 
 
 @dataclass

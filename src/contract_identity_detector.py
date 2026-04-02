@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from src.version_database import VersionDatabase
+from version_database import VersionDatabase
 
 
 logger = logging.getLogger(__name__)
