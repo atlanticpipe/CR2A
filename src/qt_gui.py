@@ -11,6 +11,12 @@ import json
 import logging
 from pathlib import Path
 
+# Add paths so "from src.X" works in both development and frozen builds.
+# In dev: __file__ is src/qt_gui.py, parent.parent is project root.
+# Frozen: __file__ is _internal/src/qt_gui.py, parent.parent is _internal/.
+sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Use software rendering for Qt so the GPU is fully available for LLM inference.
 # Intel iGPU Vulkan compute (llama.cpp) conflicts with Qt's GPU rendering.
 os.environ.setdefault("QT_OPENGL", "software")
@@ -48,9 +54,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-# Add src to path for development
-sys.path.insert(0, str(Path(__file__).parent))
 
 # Use absolute imports for PyInstaller compatibility
 from src.analysis_engine import AnalysisEngine, PreparedContract
