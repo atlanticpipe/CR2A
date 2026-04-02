@@ -569,7 +569,8 @@ class SpecGenerator:
         
         lines.append(f"a = Analysis(")
         lines.append(f"    [r'{entry_point_str}'],")
-        lines.append(f"    pathex=[r'{project_root_str}'],")
+        src_dir_str = str(self.project_root / "src").replace("\\", "/")
+        lines.append(f"    pathex=[r'{project_root_str}', r'{src_dir_str}'],")
         # Add hookspath for custom PyInstaller hooks (e.g., hook-llama_cpp.py)
         hooks_dir = str(self.project_root / "build_tools").replace("\\", "/")
 
