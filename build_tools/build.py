@@ -1178,20 +1178,26 @@ class BuildManager:
         # Step 4: Execute PyInstaller via subprocess
         print(f"[3/4] Running PyInstaller...")
         try:
-            # Set QT_PLUGIN_PATH so PyInstaller's Qt hooks can find plugins
-            # (QLibraryInfo may return wrong paths on some installs)
+            # Set QT_PLUGIN_PATH so PyInstaller's Qt hooks can find plugins.
+            # IMPORTANT: Do NOT import PyQt5 here — on headless CI runners,
+            # importing PyQt5 can trigger a native Qt crash (access violation)
+            # that kills the entire build process with no traceback.
             build_env = os.environ.copy()
             try:
-                import PyQt5
-                pyqt5_dir = os.path.dirname(PyQt5.__file__)
-                pyqt5_plugins = os.path.join(pyqt5_dir, 'Qt5', 'plugins')
-                if os.path.isdir(pyqt5_plugins):
-                    build_env['QT_PLUGIN_PATH'] = pyqt5_plugins
-                    # Set platform plugin path so QCoreApplication doesn't hang
-                    # in PyInstaller's @isolated.decorate subprocess
-                    platforms_dir = os.path.join(pyqt5_plugins, 'platforms')
-                    if os.path.isdir(platforms_dir):
-                        build_env['QT_QPA_PLATFORM_PLUGIN_PATH'] = platforms_dir
+                # Find PyQt5 path without importing it (avoids native Qt init crash)
+                import importlib.util
+                spec = importlib.util.find_spec('PyQt5')
+                if spec and spec.origin:
+                    pyqt5_dir = os.path.dirname(spec.origin)
+                    pyqt5_plugins = os.path.join(pyqt5_dir, 'Qt5', 'plugins')
+                    if os.path.isdir(pyqt5_plugins):
+                        build_env['QT_PLUGIN_PATH'] = pyqt5_plugins
+                        platforms_dir = os.path.join(pyqt5_plugins, 'platforms')
+                        if os.path.isdir(platforms_dir):
+                            build_env['QT_QPA_PLATFORM_PLUGIN_PATH'] = platforms_dir
+                    # Ensure a headless-safe platform is selected
+                    if 'QT_QPA_PLATFORM' not in build_env:
+                        build_env['QT_QPA_PLATFORM'] = 'minimal'
             except Exception:
                 pass
 

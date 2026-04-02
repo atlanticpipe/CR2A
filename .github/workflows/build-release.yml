@@ -76,6 +76,21 @@ jobs:
           # Use 'minimal' platform (always available with PyQt5)
           echo "QT_QPA_PLATFORM=minimal" >> $env:GITHUB_ENV
 
+      - name: Diagnose PyInstaller environment
+        shell: pwsh
+        run: |
+          Write-Host "=== Testing PyInstaller import ==="
+          python -c "import PyInstaller; print('PyInstaller version:', PyInstaller.__version__)"
+          Write-Host "=== Testing PyQt5 import ==="
+          python -c "import PyQt5; print('PyQt5 path:', PyQt5.__file__)"
+          Write-Host "=== Testing PyInstaller CLI ==="
+          python -m PyInstaller --version
+          Write-Host "=== Testing spec eval ==="
+          python -c "from PyInstaller.utils.hooks import collect_data_files; print('collect_data_files works')"
+          Write-Host "=== Env vars ==="
+          Write-Host "QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
+          Write-Host "QT_PLUGIN_PATH=$env:QT_PLUGIN_PATH"
+
       - name: Build application (PyInstaller)
         run: |
           python build_tools/build.py --target gui
