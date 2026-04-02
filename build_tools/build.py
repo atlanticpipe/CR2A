@@ -1227,6 +1227,7 @@ class BuildManager:
                 )
         except FileNotFoundError:
             duration = time.time() - start_time
+            print("ERROR: PyInstaller not found. Install with: pip install pyinstaller")
             return BuildResult(
                 success=False,
                 target_name=config.name,
@@ -1236,7 +1237,10 @@ class BuildManager:
                 duration_seconds=duration
             )
         except Exception as e:
+            import traceback
             duration = time.time() - start_time
+            print(f"ERROR: Failed to execute PyInstaller: {e}")
+            traceback.print_exc()
             return BuildResult(
                 success=False,
                 target_name=config.name,
@@ -1383,9 +1387,14 @@ def main() -> int:
     
     # Execute build
     result = manager.build(args.target)
-    
+
     # Return appropriate exit code
-    return 0 if result.success else 1
+    if not result.success:
+        print(f"\nBUILD FAILED: {result.target_name}")
+        if result.error_message:
+            print(f"Error: {result.error_message}")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
