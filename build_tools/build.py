@@ -8,6 +8,7 @@ Windows executables using PyInstaller.
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
