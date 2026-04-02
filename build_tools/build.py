@@ -253,7 +253,7 @@ GUI_CONFIG = BuildConfig(
         "anthropic.types",
         "httpx",
     ],
-    collect_packages=["PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract", "anthropic"],
+    collect_packages=["src", "analyzer", "PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract", "anthropic"],
     excludes=[
         "pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook",
         # Heavy packages pulled in transitively but not needed at runtime
@@ -369,7 +369,7 @@ GUI_FULL_CONFIG = BuildConfig(
         "anthropic.types",
         "httpx",
     ],
-    collect_packages=["PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract", "anthropic"],
+    collect_packages=["src", "analyzer", "PyQt5", "tokenizers", "cryptography", "llama_cpp", "rapidfuzz", "PIL", "pdf2image", "pytesseract", "anthropic"],
     excludes=[
         "pytest", "hypothesis", "pytest-cov", "IPython", "jupyter", "notebook",
         "torch", "torchvision", "torchaudio", "sympy", "numpy.distutils",
