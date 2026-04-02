@@ -1201,7 +1201,7 @@ class BuildManager:
                 [
                     sys.executable, '-m', 'PyInstaller',
                     '--noconfirm',
-                    '--log-level', 'INFO',
+                    '--log-level', 'DEBUG',
                     str(spec_file_path)
                 ],
                 cwd=str(self.project_root),
