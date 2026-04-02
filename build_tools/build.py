@@ -480,10 +480,14 @@ class SpecGenerator:
         project_root_str = str(self.project_root).replace("\\", "/")
         entry_point_str = str(entry_point_abs).replace("\\", "/")
         
-        # Format data files as list of tuples
+        # Format data files as list of tuples (skip missing sources)
         datas_list = []
         for source, dest in config.data_files:
-            source_abs = str(self.project_root / source).replace("\\", "/")
+            source_path = self.project_root / source
+            if not source_path.exists():
+                print(f"  WARNING: data source '{source}' not found, skipping")
+                continue
+            source_abs = str(source_path).replace("\\", "/")
             datas_list.append(f"    (r'{source_abs}', r'{dest}')")
         datas_str = "[\n" + ",\n".join(datas_list) + "\n]" if datas_list else "[]"
         
@@ -514,12 +518,18 @@ class SpecGenerator:
         if config.collect_packages:
             lines.append("from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs")
             lines.append("")
-            
-            # Add collected data
+
+            # Add collected data (with try/except for optional packages)
             for pkg in config.collect_packages:
-                lines.append(f"{pkg}_datas = collect_data_files('{pkg}')")
-                lines.append(f"{pkg}_hiddenimports = collect_submodules('{pkg}')")
-                lines.append(f"{pkg}_binaries = collect_dynamic_libs('{pkg}')")
+                lines.append(f"try:")
+                lines.append(f"    {pkg}_datas = collect_data_files('{pkg}')")
+                lines.append(f"    {pkg}_hiddenimports = collect_submodules('{pkg}')")
+                lines.append(f"    {pkg}_binaries = collect_dynamic_libs('{pkg}')")
+                lines.append(f"except Exception:")
+                lines.append(f"    print('WARNING: package {pkg} not found, skipping collection')")
+                lines.append(f"    {pkg}_datas = []")
+                lines.append(f"    {pkg}_hiddenimports = []")
+                lines.append(f"    {pkg}_binaries = []")
             lines.append("")
         
         # Build binaries with collected packages
@@ -1182,32 +1192,31 @@ class BuildManager:
                     platforms_dir = os.path.join(pyqt5_plugins, 'platforms')
                     if os.path.isdir(platforms_dir):
                         build_env['QT_QPA_PLATFORM_PLUGIN_PATH'] = platforms_dir
-            except ImportError:
+            except Exception:
                 pass
 
+            sys.stdout.flush()
+            sys.stderr.flush()
             result = subprocess.run(
                 [
                     sys.executable, '-m', 'PyInstaller',
                     '--noconfirm',
+                    '--log-level', 'INFO',
                     str(spec_file_path)
                 ],
                 cwd=str(self.project_root),
-                capture_output=True,
-                text=True,
                 env=build_env,
             )
-            
+
             if result.returncode != 0:
                 duration = time.time() - start_time
-                error_output = result.stderr if result.stderr else result.stdout
                 print(f"\nPyInstaller failed with exit code {result.returncode}")
-                print(f"Error output:\n{error_output}")
                 return BuildResult(
                     success=False,
                     target_name=config.name,
                     output_path=None,
                     output_size=None,
-                    error_message=f"PyInstaller failed with exit code {result.returncode}: {error_output}",
+                    error_message=f"PyInstaller failed with exit code {result.returncode}",
                     duration_seconds=duration
                 )
         except FileNotFoundError:

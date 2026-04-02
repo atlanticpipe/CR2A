@@ -58,6 +58,8 @@ jobs:
           choco install nsis -y --no-progress
 
       - name: Build application (PyInstaller)
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           python build_tools/build.py --target gui
 
