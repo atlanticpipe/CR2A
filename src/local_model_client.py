@@ -39,14 +39,13 @@ if getattr(sys, 'frozen', False):
     os.environ['VK_ICD_FILENAMES'] = 'CR2A_no_vulkan.json'
     os.environ['VK_DRIVER_FILES'] = 'CR2A_no_vulkan.json'
 
-# llama-cpp-python is an optional dependency.  The import is deferred to
-# _ensure_llama() so that this module can be imported (and analysed by
-# PyInstaller) even when llama.dll is absent (e.g. CI CPU-only builds).
+# llama-cpp-python is an optional dependency. Import is attempted eagerly
+# at runtime but deferred during PyInstaller analysis (no llama.dll in CI).
 Llama = None
 LLAMA_CPP_AVAILABLE = False
 
 def _ensure_llama():
-    """Lazy-import llama_cpp on first use. Safe to call multiple times."""
+    """Import llama_cpp. Safe to call multiple times."""
     global Llama, LLAMA_CPP_AVAILABLE
     if LLAMA_CPP_AVAILABLE or Llama is not None:
         return
@@ -56,6 +55,9 @@ def _ensure_llama():
         LLAMA_CPP_AVAILABLE = True
     except (ImportError, OSError, RuntimeError) as e:
         logger.warning("llama-cpp-python not available: %s", e)
+
+# Eagerly try to load at import time (skipped during PyInstaller analysis)
+_ensure_llama()
 
 
 def _check_vulkan_devices() -> bool:
