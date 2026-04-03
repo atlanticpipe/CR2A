@@ -594,6 +594,9 @@ class SpecGenerator:
         else:
             lines.append(f"    runtime_hooks=[],")
         lines.append(f"    excludes={excludes_str},")
+        # Force src package to be collected as source files, not just PYZ bytecode.
+        # This ensures the package structure is preserved in the frozen bundle.
+        lines.append(f"    module_collection_mode={{'src': 'py'}},")
         lines.append(f"    noarchive=False,")
         lines.append(f")")
         

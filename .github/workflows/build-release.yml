@@ -95,6 +95,43 @@ jobs:
         run: |
           python build_tools/build.py --target gui
 
+      - name: Verify bundled modules
+        shell: pwsh
+        run: |
+          # Check the generated spec file
+          if (Test-Path "CR2A.spec") {
+            Write-Host "=== First 30 lines of spec ==="
+            Get-Content "CR2A.spec" -Head 30
+          }
+          # Check if src modules are in the PYZ archive
+          python -c @"
+          import zipfile, os
+          pyz = 'build/CR2A/CR2A.pkg'
+          if os.path.exists(pyz):
+              print(f'PYZ size: {os.path.getsize(pyz)} bytes')
+          # Check the warn file for missing modules
+          warn = 'build/CR2A/warn-CR2A.txt'
+          if os.path.exists(warn):
+              with open(warn) as f:
+                  lines = [l for l in f if 'src.' in l.lower()]
+              if lines:
+                  print(f'Warnings about src modules ({len(lines)}):')
+                  for l in lines[:20]:
+                      print(f'  {l.rstrip()}')
+              else:
+                  print('No warnings about src modules')
+          # Check the TOC for src modules
+          import glob
+          for toc in glob.glob('build/CR2A/*.toc'):
+              with open(toc, 'rb') as f:
+                  content = f.read()
+              if b'src.local_model_client' in content:
+                  print(f'src.local_model_client found in {os.path.basename(toc)}')
+                  break
+          else:
+              print('WARNING: src.local_model_client NOT found in any TOC file')
+          "@
+
       - name: Build installer (NSIS)
         run: |
           python build_tools/build.py --target installer
