@@ -14,9 +14,9 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Callable, Dict, List, Tuple, Any
-from contract_uploader import ContractUploader, page_from_char_position
-from result_parser import ResultParser
-from analysis_models import AnalysisResult
+from src.contract_uploader import ContractUploader, page_from_char_position
+from src.result_parser import ResultParser
+from src.analysis_models import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class AnalysisEngine:
         # Initialize AI client based on backend selection
         if ai_backend == "claude":
             logger.info(f"Using Claude API backend: {claude_model}")
-            from anthropic_client import AnthropicClient
+            from src.anthropic_client import AnthropicClient
 
             if not api_key:
                 raise ValueError(
@@ -113,8 +113,8 @@ class AnalysisEngine:
         else:
             # Initialize local model
             logger.info(f"Using local model: {local_model_name}")
-            from local_model_client import LocalModelClient
-            from model_manager import ModelManager
+            from src.local_model_client import LocalModelClient
+            from src.model_manager import ModelManager
 
             model_mgr = ModelManager()
             try:
@@ -148,7 +148,7 @@ class AnalysisEngine:
                 )
 
         # Initialize knowledge store for RAG-based learning
-        from knowledge_store import KnowledgeStore
+        from src.knowledge_store import KnowledgeStore
         self.knowledge_store = KnowledgeStore()
         self.knowledge_store.initialize()
         self.knowledge_store.load_and_index()
@@ -285,7 +285,7 @@ class AnalysisEngine:
             progress_callback("Building search index...", 85)
 
         # Build tri-layer retrieval index (regex map + keyword + TF-IDF)
-        from document_retriever import DocumentRetriever
+        from src.document_retriever import DocumentRetriever
         retriever = DocumentRetriever()
         indexed = retriever.index_contract(contract_text, section_index, extracted_clauses)
         logger.info("Retrieval index built: %d sections indexed", len(section_index))
@@ -336,7 +336,7 @@ class AnalysisEngine:
             progress_callback(f"Retrieving sections for {display_name}...", 10)
 
         # Use tri-layer retrieval to find the right sections
-        from document_retriever import DocumentRetriever
+        from src.document_retriever import DocumentRetriever
         retriever = DocumentRetriever()
         retriever._indexed = prepared.indexed
 
@@ -366,7 +366,7 @@ class AnalysisEngine:
                     f"(top: score={top.combined_score:.4f}, found by: {layers})")
 
         # Derive page number from character position in extracted text
-        from contract_uploader import page_from_char_position
+        from src.contract_uploader import page_from_char_position
         clause_page = None
         section_block = prepared.section_index[top.section_idx] if top.section_idx < len(prepared.section_index) else None
         if section_block:
@@ -478,7 +478,7 @@ class AnalysisEngine:
         Returns a list of clause_block dicts.  For a single-clause response the list
         has one element.
         """
-        from contract_uploader import page_from_char_position
+        from src.contract_uploader import page_from_char_position
 
         # Split on ||| delimiter
         parts = [p.strip() for p in ai_text.split("|||") if p.strip()]
@@ -569,7 +569,7 @@ class AnalysisEngine:
                 location = self._get_location_from_section_index(
                     position, prepared.section_index
                 )
-                from contract_uploader import page_from_char_position
+                from src.contract_uploader import page_from_char_position
                 page = page_from_char_position(prepared.indexed.contract_text, position)
                 block = {
                     "Clause Location": location,
@@ -596,10 +596,10 @@ class AnalysisEngine:
             overview: Optional contract overview dict
             supplemental: Optional supplemental risks list
         """
-        from analysis_models import ComprehensiveAnalysisResult
-        from result_parser import ComprehensiveResultParser
-        from schema_loader import SchemaLoader
-        from schema_validator import SchemaValidator
+        from src.analysis_models import ComprehensiveAnalysisResult
+        from src.result_parser import ComprehensiveResultParser
+        from src.schema_loader import SchemaLoader
+        from src.schema_validator import SchemaValidator
 
         response = {
             "schema_version": "v1.0.0",
@@ -661,10 +661,10 @@ class AnalysisEngine:
         Returns:
             ComprehensiveAnalysisResult object
         """
-        from analysis_models import ComprehensiveAnalysisResult
-        from result_parser import ComprehensiveResultParser
-        from schema_loader import SchemaLoader
-        from schema_validator import SchemaValidator
+        from src.analysis_models import ComprehensiveAnalysisResult
+        from src.result_parser import ComprehensiveResultParser
+        from src.schema_loader import SchemaLoader
+        from src.schema_validator import SchemaValidator
         from analyzer.template_patterns import extract_all_template_clauses, parse_contract_sections, detect_exclude_zones
 
         logger.info("Starting per-item AI analysis for: %s", file_path)
@@ -726,7 +726,7 @@ class AnalysisEngine:
             if progress_callback:
                 progress_callback("Building search index...", 25)
 
-            from document_retriever import DocumentRetriever
+            from src.document_retriever import DocumentRetriever
             retriever = DocumentRetriever()
             indexed = retriever.index_contract(contract_text, section_index, extracted_clauses)
 
@@ -1359,7 +1359,7 @@ class AnalysisEngine:
             response dict matching the comprehensive schema
         """
         import json as _json
-        from document_retriever import DocumentRetriever
+        from src.document_retriever import DocumentRetriever
 
         # Set up retriever with the indexed contract
         retriever = DocumentRetriever()
@@ -2177,7 +2177,7 @@ Output ONLY valid JSON, no explanations."""
         Returns:
             ComprehensiveAnalysisResult object
         """
-        from analysis_models import (
+        from src.analysis_models import (
             ComprehensiveAnalysisResult,
             ContractOverview,
             ContractMetadata,

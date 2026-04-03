@@ -18,7 +18,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QFont, QColor
 
 from analyzer.bid_spec_patterns import BID_ITEM_MAP, BID_ITEM_DESCRIPTIONS
-from bid_review_models import ChecklistItem, BidChecklistResult
+from src.bid_review_models import ChecklistItem, BidChecklistResult
 
 logger = logging.getLogger(__name__)
 

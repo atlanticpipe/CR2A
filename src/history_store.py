@@ -20,8 +20,8 @@ if os.name == 'nt':  # Windows
 else:  # Unix/Linux/Mac
     import fcntl
 
-from history_models import AnalysisRecord
-from analysis_models import AnalysisResult
+from src.history_models import AnalysisRecord
+from src.analysis_models import AnalysisResult
 
 
 logger = logging.getLogger(__name__)
@@ -423,8 +423,8 @@ class HistoryStore:
         
         try:
             # Import here to avoid circular dependency
-            from analysis_models import ComprehensiveAnalysisResult
-            from bid_review_models import BidChecklistResult
+            from src.analysis_models import ComprehensiveAnalysisResult
+            from src.bid_review_models import BidChecklistResult
 
             # Log result type at start
             result_type = type(analysis_result).__name__
@@ -741,8 +741,8 @@ class HistoryStore:
         """
         try:
             # Import here to avoid circular dependency
-            from analysis_models import ComprehensiveAnalysisResult
-            from result_parser import ComprehensiveResultParser
+            from src.analysis_models import ComprehensiveAnalysisResult
+            from src.result_parser import ComprehensiveResultParser
             
             analysis_file = self.storage_dir / f"{record_id}.json"
             

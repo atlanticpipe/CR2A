@@ -17,9 +17,9 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QTextCharFormat, QColor, QTextCursor
 
-from differential_storage import DifferentialStorage
-from version_manager import VersionManager
-from change_comparator import ChangeComparator, ClauseChangeType
+from src.differential_storage import DifferentialStorage
+from src.version_manager import VersionManager
+from src.change_comparator import ChangeComparator, ClauseChangeType
 
 
 logger = logging.getLogger(__name__)

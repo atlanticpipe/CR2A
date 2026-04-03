@@ -15,9 +15,9 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Use absolute imports for PyInstaller compatibility
-from contract_uploader import ContractUploader
-from analysis_engine import AnalysisEngine
-from query_engine import QueryEngine
+from src.contract_uploader import ContractUploader
+from src.analysis_engine import AnalysisEngine
+from src.query_engine import QueryEngine
 
 
 # Configure logging
@@ -166,7 +166,7 @@ class CR2A_CLI:
                 data = json.load(f)
             
             # Create a mock analysis result
-            from analysis_models import AnalysisResult
+            from src.analysis_models import AnalysisResult
             self.current_analysis = AnalysisResult(
                 parties=data.get('parties', {}),
                 key_terms=data.get('key_terms', []),

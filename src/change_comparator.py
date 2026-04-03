@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Dict, Optional
 
-from analysis_models import ClauseBlock, ComprehensiveAnalysisResult
+from src.analysis_models import ClauseBlock, ComprehensiveAnalysisResult
 
 
 logger = logging.getLogger(__name__)

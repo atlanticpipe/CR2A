@@ -11,10 +11,8 @@ import json
 import logging
 from pathlib import Path
 
-# Add paths so "fromX" works in both development and frozen builds.
-# In dev: __file__ is src/qt_gui.py, parent.parent is project root.
-# Frozen: __file__ is _internal/src/qt_gui.py, parent.parent is _internal/.
-sys.path.insert(0, str(Path(__file__).parent))
+# Add project root to path so "from src.X" works when running directly.
+# parent = src/, parent.parent = project root (where src/ is a package).
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Use software rendering for Qt so the GPU is fully available for LLM inference.
@@ -27,7 +25,7 @@ os.environ.setdefault("QT_OPENGL", "software")
 try:
     import llama_cpp as _llama_cpp
     _llama_cpp.llama_backend_init()
-    from local_model_client import LocalModelClient  # noqa: F811 — re-imported below
+    from src.local_model_client import LocalModelClient  # noqa: F811 — re-imported below
 except Exception:
     pass
 
@@ -56,15 +54,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Use absolute imports for PyInstaller compatibility
-from analysis_engine import AnalysisEngine, PreparedContract
-from query_engine import QueryEngine
-from local_model_client import LocalModelClient
-from config_manager import ConfigManager
-from history_store import HistoryStore, HistoryStoreError
-from history_tab import HistoryTab
-from specs_tab import SpecsTab
-from bid_review_tab import BidReviewTab
-from structured_analysis_view import StructuredAnalysisView
+from src.analysis_engine import AnalysisEngine, PreparedContract
+from src.query_engine import QueryEngine
+from src.local_model_client import LocalModelClient
+from src.config_manager import ConfigManager
+from src.history_store import HistoryStore, HistoryStoreError
+from src.history_tab import HistoryTab
+from src.specs_tab import SpecsTab
+from src.bid_review_tab import BidReviewTab
+from src.structured_analysis_view import StructuredAnalysisView
 
 import html as html_module
 import re as _re
@@ -874,7 +872,7 @@ class PrepareFolderThread(QThread):
             from analyzer.template_patterns import (
                 extract_all_template_clauses, parse_contract_sections, detect_exclude_zones
             )
-            from document_retriever import DocumentRetriever
+            from src.document_retriever import DocumentRetriever
 
             combined_text_parts = []
             combined_file_info = {
@@ -1224,11 +1222,11 @@ class CR2A_GUI(QMainWindow):
     def init_versioning(self):
         """Initialize versioning components for contract change tracking."""
         try:
-            from version_database import VersionDatabase
-            from differential_storage import DifferentialStorage
-            from contract_identity_detector import ContractIdentityDetector
-            from change_comparator import ChangeComparator
-            from version_manager import VersionManager
+            from src.version_database import VersionDatabase
+            from src.differential_storage import DifferentialStorage
+            from src.contract_identity_detector import ContractIdentityDetector
+            from src.change_comparator import ChangeComparator
+            from src.version_manager import VersionManager
             
             # Initialize version database
             self.version_db = VersionDatabase()
@@ -1298,7 +1296,7 @@ class CR2A_GUI(QMainWindow):
                     self.history_tab.history_store = self.history_store
                     self.history_tab.differential_storage = self.differential_storage
                     if self.differential_storage:
-                        from version_manager import VersionManager
+                        from src.version_manager import VersionManager
                         self.history_tab.version_manager = VersionManager(self.differential_storage)
                     else:
                         self.history_tab.version_manager = None
@@ -2180,7 +2178,7 @@ class CR2A_GUI(QMainWindow):
             return []
 
         from analyzer.bid_spec_patterns import BID_ITEM_MAP
-        from bid_review_tab import SECTION_DEFS
+        from src.bid_review_tab import SECTION_DEFS
 
         lines = []
         lines.append("BID SPECIFICATION REVIEW CHECKLIST")
@@ -2269,7 +2267,7 @@ class CR2A_GUI(QMainWindow):
             logger.info(f"Initializing Claude API engine: {claude_model}")
             self.statusBar().showMessage(f"Connecting to Claude API ({claude_model})...")
 
-            from api_key_manager import ApiKeyManager
+            from src.api_key_manager import ApiKeyManager
             mgr = ApiKeyManager(self.config_manager)
             api_key = mgr.get_key()
 
@@ -2289,7 +2287,7 @@ class CR2A_GUI(QMainWindow):
                 claude_model=claude_model,
             )
 
-            from document_retriever import DocumentRetriever
+            from src.document_retriever import DocumentRetriever
             self.retriever = DocumentRetriever()
 
         except Exception as e:
@@ -2334,7 +2332,7 @@ class CR2A_GUI(QMainWindow):
             logger.info(f"Initializing local AI engine: {model_name}")
 
             # Check if model needs to be downloaded
-            from model_manager import ModelManager
+            from src.model_manager import ModelManager
             model_mgr = ModelManager()
 
             if not model_mgr.is_model_cached(model_name):
@@ -2362,7 +2360,7 @@ class CR2A_GUI(QMainWindow):
                 gpu_offload_layers=gpu_offload_layers,
             )
 
-            from document_retriever import DocumentRetriever
+            from src.document_retriever import DocumentRetriever
             self.retriever = DocumentRetriever()
 
         except Exception as e:
@@ -2541,7 +2539,7 @@ class CR2A_GUI(QMainWindow):
 
         # Initialize project storage for the folder
         from pathlib import Path
-        from project_storage import ProjectStorage
+        from src.project_storage import ProjectStorage
         try:
             source_path = Path(self.current_folder)
             self.project_storage = ProjectStorage(source_path)
@@ -2586,7 +2584,7 @@ class CR2A_GUI(QMainWindow):
     def analyze_contract(self):
         """Start contract analysis (single file or folder batch)."""
         from pathlib import Path
-        from project_storage import ProjectStorage
+        from src.project_storage import ProjectStorage
 
         if not self.analysis_engine:
             QMessageBox.warning(self, "Error", "Analysis engine not initialized. Check API key.")
@@ -2644,10 +2642,10 @@ class CR2A_GUI(QMainWindow):
 
     def _reinit_storage_for_project(self):
         """Reinitialize storage components to use project paths."""
-        from version_database import VersionDatabase
-        from differential_storage import DifferentialStorage
-        from history_store import HistoryStore
-        from chat_history_manager import ChatHistoryManager
+        from src.version_database import VersionDatabase
+        from src.differential_storage import DifferentialStorage
+        from src.history_store import HistoryStore
+        from src.chat_history_manager import ChatHistoryManager
 
         try:
             # Reinitialize version database with project path
@@ -2673,7 +2671,7 @@ class CR2A_GUI(QMainWindow):
                 self.query_engine.chat_history_manager = self.chat_history_manager
 
             # Initialize session manager for auto-save/restore
-            from session_manager import SessionManager
+            from src.session_manager import SessionManager
             self.session_manager = SessionManager(self.project_storage.storage_root)
 
             # History tab removed in Phase 2 (chat-first UI)
@@ -2891,8 +2889,8 @@ class CR2A_GUI(QMainWindow):
         import uuid
         from datetime import datetime
         from pathlib import Path
-        from differential_storage import Contract, Clause, VersionMetadata
-        from analysis_models import ComprehensiveAnalysisResult
+        from src.differential_storage import Contract, Clause, VersionMetadata
+        from src.analysis_models import ComprehensiveAnalysisResult
         
         logger.info("Saving to differential storage...")
         
@@ -2949,7 +2947,7 @@ class CR2A_GUI(QMainWindow):
         """Store a new contract with version 1."""
         import uuid
         from datetime import datetime
-        from differential_storage import Contract, Clause
+        from src.differential_storage import Contract, Clause
         
         contract_id = str(uuid.uuid4())
         timestamp = datetime.now()
@@ -2972,14 +2970,14 @@ class CR2A_GUI(QMainWindow):
     
     def _store_contract_version(self, contract_id, current_version, new_analysis):
         """Store a new version of an existing contract."""
-        from differential_storage import Clause, VersionMetadata
+        from src.differential_storage import Clause, VersionMetadata
         from datetime import datetime
         
         # Reconstruct old version
         old_analysis_dict = self.version_manager.reconstruct_version(contract_id, current_version)
         
         try:
-            from analysis_models import ComprehensiveAnalysisResult
+            from src.analysis_models import ComprehensiveAnalysisResult
             old_analysis = ComprehensiveAnalysisResult.from_dict(old_analysis_dict)
         except Exception as e:
             logger.error("Failed to reconstruct previous version: %s", e)
@@ -3022,7 +3020,7 @@ class CR2A_GUI(QMainWindow):
     def _extract_clauses_from_analysis(self, analysis, contract_id, version, timestamp):
         """Extract clauses from analysis result for storage."""
         import uuid
-        from differential_storage import Clause
+        from src.differential_storage import Clause
         
         clauses = []
 
@@ -3106,7 +3104,7 @@ class CR2A_GUI(QMainWindow):
 
         # Initialize project storage
         from pathlib import Path
-        from project_storage import ProjectStorage
+        from src.project_storage import ProjectStorage
         try:
             source_path = Path(self.current_file)
             self.project_storage = ProjectStorage(source_path)
@@ -3149,7 +3147,7 @@ class CR2A_GUI(QMainWindow):
 
         # Detect contract type from content for knowledge retrieval
         if self.analysis_engine and hasattr(self.analysis_engine, 'knowledge_store'):
-            from knowledge_store import KnowledgeStore
+            from src.knowledge_store import KnowledgeStore
             prepared.contract_type = KnowledgeStore._detect_contract_type(
                 prepared.contract_text or ""
             )
@@ -3182,7 +3180,7 @@ class CR2A_GUI(QMainWindow):
         self.statusBar().showMessage(f"Contract loaded: {filename}")
 
         # Prepare bid review engine (for tool registry)
-        from bid_review_engine import BidReviewEngine
+        from src.bid_review_engine import BidReviewEngine
         ai_client = self.analysis_engine.ai_client if self.analysis_engine else None
         self.bid_review_engine = BidReviewEngine(ai_client)
         self.prepared_bid_review = self.bid_review_engine.prepare_bid_review(
@@ -3442,7 +3440,7 @@ class CR2A_GUI(QMainWindow):
     def _init_tool_registry(self):
         """Initialize the tool registry for chat-based tool calling."""
         try:
-            from tool_registry import ToolRegistry
+            from src.tool_registry import ToolRegistry
             self.tool_registry = ToolRegistry(
                 analysis_engine=self.analysis_engine,
                 bid_review_engine=self.bid_review_engine,
@@ -3479,7 +3477,7 @@ class CR2A_GUI(QMainWindow):
         if not self.project_storage:
             return
         try:
-            from excel_template_builder import ExcelTemplateBuilder
+            from src.excel_template_builder import ExcelTemplateBuilder
             # Gather contract file names
             contract_files = []
             if self.upload_mode == "folder" and self.folder_files:
@@ -3644,7 +3642,7 @@ class CR2A_GUI(QMainWindow):
         bid_engine = self.bid_review_tab.bid_engine
         prepared = self.bid_review_tab.prepared
         if not bid_engine or not prepared:
-            from bid_review_engine import BidReviewEngine
+            from src.bid_review_engine import BidReviewEngine
             bid_engine = BidReviewEngine(ai_client)
             prepared = bid_engine.prepare_bid_review(
                 contract_text=self.contract_text,
@@ -3722,7 +3720,7 @@ class CR2A_GUI(QMainWindow):
         # --- Restore bid review items (to tool registry) ---
         bid_items = self.session_manager.bid_review_item_results
         if bid_items and self.tool_registry:
-            from bid_review_models import ChecklistItem
+            from src.bid_review_models import ChecklistItem
             for item_key, item_dict in bid_items.items():
                 try:
                     item = ChecklistItem.from_dict(item_dict)
@@ -3739,7 +3737,7 @@ class CR2A_GUI(QMainWindow):
             for cat_key, clause_block in self.category_results.items():
                 self.excel_builder.update_contract_category(cat_key, clause_block, contract_file)
             if bid_items:
-                from bid_review_models import ChecklistItem
+                from src.bid_review_models import ChecklistItem
                 for item_key, item_dict in bid_items.items():
                     try:
                         item = ChecklistItem.from_dict(item_dict)
@@ -3769,7 +3767,7 @@ class CR2A_GUI(QMainWindow):
         if not self.bid_review_tab:
             return
 
-        from bid_review_models import ChecklistItem
+        from src.bid_review_models import ChecklistItem
         from analyzer.bid_spec_patterns import BID_ITEM_MAP
 
         for item_key, item_dict in item_results_dict.items():
@@ -3788,7 +3786,7 @@ class CR2A_GUI(QMainWindow):
         # Restore full BidChecklistResult if available
         if result_dict:
             try:
-                from bid_review_models import BidChecklistResult
+                from src.bid_review_models import BidChecklistResult
                 self.bid_review_tab._current_result = BidChecklistResult.from_dict(result_dict)
                 self.bid_review_tab.analyze_all_btn.setText("Re-analyze Checklist")
             except Exception as e:
@@ -4322,13 +4320,13 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(580)
 
         # Detect hardware once on open
-        from hardware_info import detect_hardware, estimate_os_ram_mb, RUNTIME_OVERHEAD_MB
+        from src.hardware_info import detect_hardware, estimate_os_ram_mb, RUNTIME_OVERHEAD_MB
         self._RUNTIME_OVERHEAD_MB = RUNTIME_OVERHEAD_MB
         self.hw_info = detect_hardware()
         self._os_ram_snapshot = estimate_os_ram_mb()
 
         # Import model registry for slider calculations
-        from model_manager import ModelManager
+        from src.model_manager import ModelManager
         self._model_registry = ModelManager.MODEL_REGISTRY
 
         # Block signals during init to prevent premature updates
@@ -4616,7 +4614,7 @@ class SettingsDialog(QDialog):
         QApplication.processEvents()
 
         try:
-            from api_key_manager import ApiKeyManager
+            from src.api_key_manager import ApiKeyManager
             mgr = ApiKeyManager(self.config_manager)
             if mgr.validate_key(key):
                 self.api_key_status.setText("Valid — connected to Claude API.")
@@ -4680,7 +4678,7 @@ class SettingsDialog(QDialog):
         # Compute breakdown
         model_key, info = self._get_selected_model_info()
         if info:
-            from hardware_info import get_ram_breakdown
+            from src.hardware_info import get_ram_breakdown
             gpu_layers = self.gpu_slider.value() if self.gpu_group.isVisible() else 0
             breakdown = get_ram_breakdown(
                 total_model_ram_mb=model_ram,
@@ -4806,7 +4804,7 @@ class SettingsDialog(QDialog):
 
         # Load API key from encrypted storage (if available)
         try:
-            from api_key_manager import ApiKeyManager
+            from src.api_key_manager import ApiKeyManager
             mgr = ApiKeyManager(self.config_manager)
             key = mgr.get_key()
             if key:
@@ -4878,7 +4876,7 @@ class SettingsDialog(QDialog):
             api_key = self.api_key_input.text().strip()
             if api_key:
                 try:
-                    from api_key_manager import ApiKeyManager
+                    from src.api_key_manager import ApiKeyManager
                     mgr = ApiKeyManager(self.config_manager)
                     mgr.set_key(api_key)
                 except Exception as e:
@@ -4933,7 +4931,7 @@ class ModelManagementDialog(QDialog):
     def init_model_manager(self):
         """Initialize ModelManager instance."""
         try:
-            from model_manager import ModelManager
+            from src.model_manager import ModelManager
             self.model_manager = ModelManager()
             logger.info("ModelManager initialized in dialog")
         except Exception as e:
@@ -5412,7 +5410,7 @@ class FirstRunDialog(QDialog):
     def init_model_manager(self):
         """Initialize ModelManager instance."""
         try:
-            from model_manager import ModelManager
+            from src.model_manager import ModelManager
             self.model_manager = ModelManager()
         except Exception as e:
             logger.error(f"Failed to initialize ModelManager: {e}", exc_info=True)

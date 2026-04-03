@@ -10,7 +10,7 @@ Supports optional verification mode for answer validation.
 
 import logging
 from typing import Dict, List, Any, Optional
-from analysis_models import AnalysisResult
+from src.analysis_models import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,7 @@ class QueryEngine:
             }
 
             # Create and save chat entry
-            from chat_history_manager import ChatHistoryManager
+            from src.chat_history_manager import ChatHistoryManager
             chat_entry = ChatHistoryManager.create_chat_entry(
                 question=question,
                 answer=answer_text,
@@ -174,7 +174,7 @@ class QueryEngine:
             logger.debug("Formatting context for query")
             
             # Detect schema format
-            from result_parser import ComprehensiveResultParser
+            from src.result_parser import ComprehensiveResultParser
             schema_format = ComprehensiveResultParser.detect_schema_format(analysis_result)
             
             logger.debug("Detected schema format: %s", schema_format)

@@ -11,7 +11,7 @@ all categories, with missing ones shown as "Not found in contract".
 """
 
 from typing import Dict, Any
-from analysis_models import (
+from src.analysis_models import (
     ComprehensiveAnalysisResult,
     AdministrativeAndCommercialTerms,
     TechnicalAndPerformanceTerms,

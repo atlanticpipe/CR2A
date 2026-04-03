@@ -15,11 +15,11 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
 from typing import Optional, Dict
 
-from history_store import HistoryStore
-from history_models import AnalysisRecord
-from differential_storage import DifferentialStorage
-from version_manager import VersionManager
-from version_comparison_view import VersionComparisonView
+from src.history_store import HistoryStore
+from src.history_models import AnalysisRecord
+from src.differential_storage import DifferentialStorage
+from src.version_manager import VersionManager
+from src.version_comparison_view import VersionComparisonView
 
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ class HistoryTab(QWidget):
         Returns:
             List of AnalysisRecord objects
         """
-        from history_models import AnalysisRecord
+        from src.history_models import AnalysisRecord
         
         try:
             # Get all contracts from differential storage

@@ -15,7 +15,7 @@ from datetime import datetime
 from functools import wraps
 from typing import List, Optional, Dict, Any, Callable, TypeVar
 
-from version_database import VersionDatabase, VersionDatabaseError
+from src.version_database import VersionDatabase, VersionDatabaseError
 
 
 logger = logging.getLogger(__name__)

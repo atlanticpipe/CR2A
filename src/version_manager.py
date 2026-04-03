@@ -11,14 +11,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 
-from differential_storage import (
+from src.differential_storage import (
     DifferentialStorage,
     Contract,
     Clause,
     VersionMetadata
 )
-from change_comparator import ContractDiff, ClauseChangeType
-from analysis_models import ComprehensiveAnalysisResult
+from src.change_comparator import ContractDiff, ClauseChangeType
+from src.analysis_models import ComprehensiveAnalysisResult
 
 
 logger = logging.getLogger(__name__)

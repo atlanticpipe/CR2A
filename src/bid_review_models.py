@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from analysis_models import ContractMetadata
+from src.analysis_models import ContractMetadata
 
 logger = logging.getLogger(__name__)
 

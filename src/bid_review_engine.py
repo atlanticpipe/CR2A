@@ -20,7 +20,7 @@ from analyzer.bid_spec_patterns import (
     SEARCH_KEYWORDS,
     extract_bid_spec_items,
 )
-from bid_review_models import (
+from src.bid_review_models import (
     BidChecklistResult,
     CIPPDesignRequirements,
     CIPPItems,
@@ -33,8 +33,8 @@ from bid_review_models import (
     SpincastItems,
     StandardContractItems,
 )
-from analysis_models import ContractMetadata
-from contract_uploader import page_from_char_position
+from src.analysis_models import ContractMetadata
+from src.contract_uploader import page_from_char_position
 
 logger = logging.getLogger(__name__)
 

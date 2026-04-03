@@ -204,7 +204,7 @@ class StructuredAnalysisView(QWidget):
         possible categories. The boxes are stored in self.category_boxes for
         later data filling.
         """
-        from schema_completer import SchemaCompleter
+        from src.schema_completer import SchemaCompleter
         
         logger.info("Building template with all sections and categories")
         
@@ -261,7 +261,7 @@ class StructuredAnalysisView(QWidget):
         Returns:
             List of category names for this section
         """
-        from schema_completer import SchemaCompleter
+        from src.schema_completer import SchemaCompleter
         
         if section_key == "administrative_and_commercial_terms":
             return SchemaCompleter.ADMINISTRATIVE_CATEGORIES

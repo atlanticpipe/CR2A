@@ -11,7 +11,7 @@ schema (ComprehensiveAnalysisResult).
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Type, TypeVar
-from analysis_models import (
+from src.analysis_models import (
     AnalysisResult,
     ContractMetadata,
     Clause,
@@ -29,8 +29,8 @@ from analysis_models import (
     RegulatoryAndComplianceTerms,
     DataTechnologyAndDeliverables,
 )
-from schema_validator import SchemaValidator
-from schema_completer import SchemaCompleter
+from src.schema_validator import SchemaValidator
+from src.schema_completer import SchemaCompleter
 
 
 logger = logging.getLogger(__name__)
