@@ -1,8 +1,7 @@
 name: Build & Release Installer
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:  # Manual trigger only
 
 # Only run one build at a time per branch
 concurrency:
