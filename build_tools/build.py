@@ -1170,6 +1170,13 @@ class BuildManager:
         print(f"[2/4] Generating PyInstaller spec file...")
         spec_content = self.spec_generator.generate(config)
         
+        # Print first part of spec for CI debugging
+        spec_lines = spec_content.split('\n')
+        print(f"  Generated spec file ({len(spec_lines)} lines)")
+        for line in spec_lines[:25]:
+            print(f"    {line}")
+        print(f"    ...")
+
         # Step 3: Write spec file to temp location
         spec_file_path = self.project_root / f"{config.name}.spec"
         try:
@@ -1217,7 +1224,7 @@ class BuildManager:
                 [
                     sys.executable, '-m', 'PyInstaller',
                     '--noconfirm',
-                    '--log-level', 'DEBUG',
+                    '--log-level', 'WARN',
                     str(spec_file_path)
                 ],
                 cwd=str(self.project_root),
