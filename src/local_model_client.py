@@ -45,7 +45,7 @@ try:
     from llama_cpp import Llama
     LLAMA_CPP_AVAILABLE = True
 
-except (ImportError, OSError) as e:
+except (ImportError, OSError, RuntimeError) as e:
     LLAMA_CPP_AVAILABLE = False
     logger.warning("llama-cpp-python not available: %s", e)
 
