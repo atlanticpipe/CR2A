@@ -152,7 +152,7 @@ CLI_CONFIG = BuildConfig(
 # Standard build configuration (without bundled model)
 GUI_CONFIG = BuildConfig(
     name="CR2A",
-    entry_point=Path("src/qt_gui.py"),
+    entry_point=Path("cr2a_main.py"),
     output_name="CR2A",
     console_mode=False,
     onefile=False,
@@ -267,7 +267,7 @@ GUI_CONFIG = BuildConfig(
 # Full build configuration (with bundled Llama model)
 GUI_FULL_CONFIG = BuildConfig(
     name="CR2A_Full",
-    entry_point=Path("src/qt_gui.py"),
+    entry_point=Path("cr2a_main.py"),
     output_name="CR2A_Full",
     console_mode=False,
     onefile=False,
