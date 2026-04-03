@@ -25,7 +25,6 @@ os.environ.setdefault("QT_OPENGL", "software")
 try:
     import llama_cpp as _llama_cpp
     _llama_cpp.llama_backend_init()
-    from src.local_model_client import LocalModelClient  # noqa: F811 — re-imported below
 except Exception:
     pass
 

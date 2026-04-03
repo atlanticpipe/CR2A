@@ -39,15 +39,23 @@ if getattr(sys, 'frozen', False):
     os.environ['VK_ICD_FILENAMES'] = 'CR2A_no_vulkan.json'
     os.environ['VK_DRIVER_FILES'] = 'CR2A_no_vulkan.json'
 
-# Try to import llama-cpp-python (optional dependency)
-# Catch OSError too: Vulkan-compiled builds raise OSError if vulkan-1.dll is missing
-try:
-    from llama_cpp import Llama
-    LLAMA_CPP_AVAILABLE = True
+# llama-cpp-python is an optional dependency.  The import is deferred to
+# _ensure_llama() so that this module can be imported (and analysed by
+# PyInstaller) even when llama.dll is absent (e.g. CI CPU-only builds).
+Llama = None
+LLAMA_CPP_AVAILABLE = False
 
-except (ImportError, OSError, RuntimeError) as e:
-    LLAMA_CPP_AVAILABLE = False
-    logger.warning("llama-cpp-python not available: %s", e)
+def _ensure_llama():
+    """Lazy-import llama_cpp on first use. Safe to call multiple times."""
+    global Llama, LLAMA_CPP_AVAILABLE
+    if LLAMA_CPP_AVAILABLE or Llama is not None:
+        return
+    try:
+        from llama_cpp import Llama as _Llama
+        Llama = _Llama
+        LLAMA_CPP_AVAILABLE = True
+    except (ImportError, OSError, RuntimeError) as e:
+        logger.warning("llama-cpp-python not available: %s", e)
 
 
 def _check_vulkan_devices() -> bool:
@@ -93,6 +101,7 @@ def detect_gpu_support() -> Tuple[bool, int, str]:
         - recommended_layers: -1 to offload all layers, 0 for CPU-only
         - backend_name: "vulkan", "cuda", "metal", "cpu"
     """
+    _ensure_llama()
     if not LLAMA_CPP_AVAILABLE:
         return False, 0, "cpu"
 
@@ -203,6 +212,7 @@ class LocalModelClient:
         Raises:
             ImportError: If llama-cpp-python is not installed
         """
+        _ensure_llama()
         if not LLAMA_CPP_AVAILABLE:
             raise ImportError(
                 "llama-cpp-python is required for local models.\n"
