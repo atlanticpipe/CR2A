@@ -1297,15 +1297,9 @@ class BuildManager:
         print(f"      Cleaning up build artifacts...")
         self.artifact_cleaner.clean_post_build(config.name)
 
-        # Step 6b: Remove Vulkan backend DLL from llama_cpp in dist.
-        # The pip-installed llama-cpp-python ships ggml-vulkan.dll which causes
-        # access violation crashes in the frozen build (Vulkan init fails in
-        # PyInstaller's bundled environment). Removing it forces CPU-only.
-        if not config.onefile:
-            vulkan_dll = output_path.parent / "_internal" / "llama_cpp" / "lib" / "ggml-vulkan.dll"
-            if vulkan_dll.exists():
-                vulkan_dll.unlink()
-                print(f"      Removed ggml-vulkan.dll (CPU-only build)")
+        # Step 6b: Keep ggml-vulkan.dll (llama.dll depends on it at load time)
+        # but disable Vulkan at runtime via VK_ICD_FILENAMES env var in the
+        # runtime hook (runtime_hook_pyqt5.py) and local_model_client.py.
         
         duration = time.time() - start_time
         
