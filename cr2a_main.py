@@ -14,15 +14,32 @@ if getattr(sys, 'frozen', False):
     bundle_dir = sys._MEIPASS
     if bundle_dir not in sys.path:
         sys.path.insert(0, bundle_dir)
-    # Disable Vulkan ICD discovery — prevents ggml-vulkan.dll from crashing
-    # with an access violation when no Vulkan driver is available.
-    os.environ['VK_ICD_FILENAMES'] = 'CR2A_no_vulkan.json'
-    os.environ['VK_DRIVER_FILES'] = 'CR2A_no_vulkan.json'
     # Add llama_cpp/lib to DLL search path
     _llama_lib = os.path.join(bundle_dir, 'llama_cpp', 'lib')
     if os.path.isdir(_llama_lib):
         os.add_dll_directory(_llama_lib)
         os.environ['PATH'] = _llama_lib + os.pathsep + os.environ.get('PATH', '')
+    # Only disable Vulkan if no GPU is detected (preserve Intel iGPU XPU).
+    # Check the Windows registry for display adapters before deciding.
+    _has_gpu = False
+    try:
+        import winreg
+        _cls = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _cls) as _k:
+            _i = 0
+            while True:
+                try:
+                    winreg.EnumKey(_k, _i)
+                    _has_gpu = True
+                    break
+                except OSError:
+                    break
+                _i += 1
+    except Exception:
+        pass
+    if not _has_gpu:
+        os.environ['VK_ICD_FILENAMES'] = 'CR2A_no_vulkan.json'
+        os.environ['VK_DRIVER_FILES'] = 'CR2A_no_vulkan.json'
 
 # Use software rendering for Qt so the GPU is fully available for LLM inference.
 os.environ.setdefault("QT_OPENGL", "software")
