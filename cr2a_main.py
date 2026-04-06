@@ -19,27 +19,14 @@ if getattr(sys, 'frozen', False):
     if os.path.isdir(_llama_lib):
         os.add_dll_directory(_llama_lib)
         os.environ['PATH'] = _llama_lib + os.pathsep + os.environ.get('PATH', '')
-    # Only disable Vulkan if no GPU is detected (preserve Intel iGPU XPU).
-    # Check the Windows registry for display adapters before deciding.
-    _has_gpu = False
-    try:
-        import winreg
-        _cls = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _cls) as _k:
-            _i = 0
-            while True:
-                try:
-                    winreg.EnumKey(_k, _i)
-                    _has_gpu = True
-                    break
-                except OSError:
-                    break
-                _i += 1
-    except Exception:
-        pass
-    if not _has_gpu:
-        os.environ['VK_ICD_FILENAMES'] = 'CR2A_no_vulkan.json'
-        os.environ['VK_DRIVER_FILES'] = 'CR2A_no_vulkan.json'
+    # Remove bundled vulkan-1.dll so the system Vulkan loader is used.
+    # The bundled copy fails to find ICD drivers; the system one works.
+    _bundled_vulkan = os.path.join(bundle_dir, 'vulkan-1.dll')
+    if os.path.exists(_bundled_vulkan):
+        try:
+            os.remove(_bundled_vulkan)
+        except OSError:
+            pass
 
 # Use software rendering for Qt so the GPU is fully available for LLM inference.
 os.environ.setdefault("QT_OPENGL", "software")

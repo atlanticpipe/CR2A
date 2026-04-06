@@ -33,11 +33,6 @@ if getattr(sys, 'frozen', False):
     if os.path.isdir(_llama_lib_dir):
         os.add_dll_directory(_llama_lib_dir)
         os.environ['PATH'] = _llama_lib_dir + os.pathsep + os.environ.get('PATH', '')
-    # Prevent Vulkan backend from crashing — point ICD to a nonexistent
-    # file so Vulkan finds no drivers and ggml-vulkan skips GPU init
-    # gracefully instead of crashing with an access violation.
-    os.environ['VK_ICD_FILENAMES'] = 'CR2A_no_vulkan.json'
-    os.environ['VK_DRIVER_FILES'] = 'CR2A_no_vulkan.json'
 
 # llama-cpp-python is an optional dependency. Import is attempted eagerly
 # at runtime but deferred during PyInstaller analysis (no llama.dll in CI).
