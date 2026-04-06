@@ -1116,7 +1116,7 @@ Please answer based on the contract context provided above."""
 
                 result_messages.append({
                     "role": "tool_call",
-                    "content": f"{tool_name}({', '.join(f'{k}=\"{v}\"' for k, v in tool_args.items())})"
+                    "content": "{}({})".format(tool_name, ', '.join('{}="{}"'.format(k, v) for k, v in tool_args.items()))
                 })
 
                 if progress_callback:
