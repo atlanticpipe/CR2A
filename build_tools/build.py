@@ -1297,9 +1297,14 @@ class BuildManager:
         print(f"      Cleaning up build artifacts...")
         self.artifact_cleaner.clean_post_build(config.name)
 
-        # Step 6b: Keep ggml-vulkan.dll (llama.dll depends on it at load time)
-        # but disable Vulkan at runtime via VK_ICD_FILENAMES env var in the
-        # runtime hook (runtime_hook_pyqt5.py) and local_model_client.py.
+        # Step 6b: Remove bundled vulkan-1.dll so the system Vulkan loader is
+        # used instead. The bundled copy can't find ICD drivers, causing crashes.
+        # The system vulkan-1.dll properly discovers the Intel iGPU.
+        if not config.onefile:
+            bundled_vulkan = output_path.parent / "_internal" / "vulkan-1.dll"
+            if bundled_vulkan.exists():
+                bundled_vulkan.unlink()
+                print(f"      Removed bundled vulkan-1.dll (using system Vulkan)")
         
         duration = time.time() - start_time
         

@@ -19,14 +19,9 @@ if getattr(sys, 'frozen', False):
     if os.path.isdir(_llama_lib):
         os.add_dll_directory(_llama_lib)
         os.environ['PATH'] = _llama_lib + os.pathsep + os.environ.get('PATH', '')
-    # Remove bundled vulkan-1.dll so the system Vulkan loader is used.
-    # The bundled copy fails to find ICD drivers; the system one works.
-    _bundled_vulkan = os.path.join(bundle_dir, 'vulkan-1.dll')
-    if os.path.exists(_bundled_vulkan):
-        try:
-            os.remove(_bundled_vulkan)
-        except OSError:
-            pass
+    # Note: bundled vulkan-1.dll is removed at build time (build.py step 6b)
+    # so ggml-vulkan.dll uses the system Vulkan loader which can find the
+    # Intel iGPU ICD driver.
 
 # Use software rendering for Qt so the GPU is fully available for LLM inference.
 os.environ.setdefault("QT_OPENGL", "software")
