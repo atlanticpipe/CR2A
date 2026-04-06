@@ -181,8 +181,11 @@ def _probe_opencl() -> BackendInfo:
 def _probe_ipex_llm() -> BackendInfo:
     try:
         import ipex_llm  # noqa: F401
-        # Verify the llama_cpp shim is available
-        from ipex_llm.llama_cpp import Llama as _  # noqa: F401
+        # Try the newer API path first, then the older ggml path
+        try:
+            from ipex_llm.llama_cpp import Llama as _  # noqa: F401
+        except (ImportError, ModuleNotFoundError):
+            from ipex_llm.ggml.model.llama import Llama as _  # noqa: F401
         return BackendInfo(IPEX_LLM, True, _PRIORITY[IPEX_LLM],
                            "IPEX-LLM Intel GPU acceleration available", "")
     except ImportError:

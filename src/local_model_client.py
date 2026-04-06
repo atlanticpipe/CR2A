@@ -56,13 +56,17 @@ def _ensure_llama():
         logger.warning("llama-cpp-python not available: %s", e)
 
 def _ensure_ipex():
-    """Import IPEX-LLM's Llama shim. Safe to call multiple times."""
+    """Import IPEX-LLM's Llama class. Safe to call multiple times."""
     global IpexLlama, IPEX_LLM_AVAILABLE
     if IPEX_LLM_AVAILABLE or IpexLlama is not None:
         return
     try:
         os.environ.setdefault("SYCL_CACHE_PERSISTENT", "1")
-        from ipex_llm.llama_cpp import Llama as _IpexLlama
+        # Try newer API path first, then older ggml path
+        try:
+            from ipex_llm.llama_cpp import Llama as _IpexLlama
+        except (ImportError, ModuleNotFoundError):
+            from ipex_llm.ggml.model.llama import Llama as _IpexLlama
         IpexLlama = _IpexLlama
         IPEX_LLM_AVAILABLE = True
         logger.info("IPEX-LLM available for Intel GPU acceleration")
