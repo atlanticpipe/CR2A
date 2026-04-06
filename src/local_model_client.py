@@ -522,14 +522,9 @@ class LocalModelClient:
         logger.info(f"Loading model from: {self.model_path}{gpu_info}")
 
         # Determine load order: try GPU first (if configured), then CPU fallback
-        # In frozen (PyInstaller) builds, llama-cpp-python is CPU-only from pip,
-        # so skip GPU attempts to avoid access violation crashes in Vulkan init.
         load_attempts = []
-        is_frozen = getattr(sys, 'frozen', False)
-        if self.n_gpu_layers != 0 and not is_frozen:
+        if self.n_gpu_layers != 0:
             load_attempts.append(("gpu", self.n_gpu_layers))
-        elif is_frozen and self.n_gpu_layers != 0:
-            logger.info("Frozen build detected — skipping GPU, using CPU-only inference")
         load_attempts.append(("cpu", 0))
 
         last_error = None
