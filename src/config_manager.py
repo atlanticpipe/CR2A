@@ -100,6 +100,9 @@ class ConfigManager:
                 self.config["max_file_size"] = self.DEFAULT_CONFIG["max_file_size"]
 
 
+            # Validate unreasonable values that would cripple inference
+            self._validate_config()
+
             logger.info("Configuration loaded successfully")
             return self.config.copy()
 
@@ -109,6 +112,27 @@ class ConfigManager:
         except Exception as e:
             logger.warning("Error loading config file: %s. Using defaults.", e)
             return self.config.copy()
+
+    def _validate_config(self) -> None:
+        """Reset config values that would cripple inference."""
+        try:
+            import psutil
+            total_ram_mb = int(psutil.virtual_memory().total / (1024 * 1024))
+        except Exception:
+            total_ram_mb = 16384
+
+        reserved = self.config.get("ram_reserved_os_mb")
+        if reserved is not None and reserved > total_ram_mb * 0.9:
+            logger.warning("ram_reserved_os_mb (%d) leaves <10%% for model — resetting to auto", reserved)
+            self.config["ram_reserved_os_mb"] = None
+
+        threads = self.config.get("local_model_threads")
+        if threads is not None and threads < 2:
+            import multiprocessing
+            cores = multiprocessing.cpu_count()
+            if cores > 2:
+                logger.warning("local_model_threads=%d on %d-core CPU — resetting to auto", threads, cores)
+                self.config["local_model_threads"] = None
 
     def save_config(self, config: Optional[Dict[str, Any]] = None) -> bool:
         """

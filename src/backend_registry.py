@@ -181,13 +181,18 @@ def _probe_opencl() -> BackendInfo:
 def _probe_ipex_llm() -> BackendInfo:
     try:
         import ipex_llm  # noqa: F401
-        # Try the newer API path first, then the older ggml path
+        # The newer API (ipex_llm.llama_cpp) supports GGUF v3 models.
+        # The older API (ipex_llm.ggml.model.llama) does NOT — it only
+        # reads the legacy GGML format and silently fails on GGUF v3.
         try:
             from ipex_llm.llama_cpp import Llama as _  # noqa: F401
+            return BackendInfo(IPEX_LLM, True, _PRIORITY[IPEX_LLM],
+                               "IPEX-LLM Intel GPU acceleration available", "")
         except (ImportError, ModuleNotFoundError):
-            from ipex_llm.ggml.model.llama import Llama as _  # noqa: F401
-        return BackendInfo(IPEX_LLM, True, _PRIORITY[IPEX_LLM],
-                           "IPEX-LLM Intel GPU acceleration available", "")
+            # Only the old ggml API is available — incompatible with GGUF v3
+            return BackendInfo(IPEX_LLM, False, _PRIORITY[IPEX_LLM],
+                               "ipex-llm installed but too old for GGUF v3 models",
+                               "Upgrade: pip install --pre --upgrade ipex-llm[cpp]")
     except ImportError:
         return BackendInfo(IPEX_LLM, False, _PRIORITY[IPEX_LLM],
                            "ipex-llm package not installed",
