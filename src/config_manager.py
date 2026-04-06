@@ -34,6 +34,7 @@ class ConfigManager:
         "local_model_threads": None,  # None = auto-detect CPU cores
         "local_model_path": None,  # Custom model path (overrides model_name)
         "gpu_mode": "auto",  # "auto" = auto-detect, "cpu" = force CPU-only, "gpu" = force GPU
+        "gpu_backend": "auto",  # "auto", "vulkan", "sycl", "opencl", "ipex", "cpu"
         "ram_reserved_os_mb": None,  # None = auto-detect; MB of RAM reserved for OS
         "gpu_offload_layers": None,  # None = auto-detect; explicit layer count for GPU offload
         # AI backend settings
@@ -350,6 +351,19 @@ class ConfigManager:
         self.config["gpu_mode"] = mode
         logger.info(f"GPU mode set to: {mode}")
 
+    def get_gpu_backend(self) -> str:
+        """Get GPU backend preference ("auto", "vulkan", "sycl", "opencl", "ipex", "cpu")."""
+        return self.config.get("gpu_backend", self.DEFAULT_CONFIG["gpu_backend"])
+
+    def set_gpu_backend(self, backend: str) -> None:
+        """Set GPU backend preference."""
+        valid = ("auto", "vulkan", "sycl", "opencl", "ipex", "cpu")
+        if backend not in valid:
+            logger.warning("Invalid GPU backend: %s. Using auto.", backend)
+            backend = "auto"
+        self.config["gpu_backend"] = backend
+        logger.info("GPU backend set to: %s", backend)
+
     def get_ram_reserved_os_mb(self) -> Optional[int]:
         """Get MB of RAM reserved for OS, or None for auto-detect."""
         return self.config.get("ram_reserved_os_mb", self.DEFAULT_CONFIG["ram_reserved_os_mb"])
@@ -386,6 +400,7 @@ class ConfigManager:
             "local_model_threads": self.get_local_model_threads(),
             "local_model_path": self.get_local_model_path(),
             "gpu_mode": self.get_gpu_mode(),
+            "gpu_backend": self.get_gpu_backend(),
             "ram_reserved_os_mb": self.get_ram_reserved_os_mb(),
             "gpu_offload_layers": self.get_gpu_offload_layers(),
         }

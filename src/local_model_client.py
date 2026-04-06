@@ -39,6 +39,10 @@ if getattr(sys, 'frozen', False):
 Llama = None
 LLAMA_CPP_AVAILABLE = False
 
+# IPEX-LLM provides a drop-in Llama replacement with Intel SYCL acceleration.
+IpexLlama = None
+IPEX_LLM_AVAILABLE = False
+
 def _ensure_llama():
     """Import llama_cpp. Safe to call multiple times."""
     global Llama, LLAMA_CPP_AVAILABLE
@@ -51,8 +55,23 @@ def _ensure_llama():
     except (ImportError, OSError, RuntimeError) as e:
         logger.warning("llama-cpp-python not available: %s", e)
 
-# Eagerly try to load at import time (skipped during PyInstaller analysis)
+def _ensure_ipex():
+    """Import IPEX-LLM's Llama shim. Safe to call multiple times."""
+    global IpexLlama, IPEX_LLM_AVAILABLE
+    if IPEX_LLM_AVAILABLE or IpexLlama is not None:
+        return
+    try:
+        os.environ.setdefault("SYCL_CACHE_PERSISTENT", "1")
+        from ipex_llm.llama_cpp import Llama as _IpexLlama
+        IpexLlama = _IpexLlama
+        IPEX_LLM_AVAILABLE = True
+        logger.info("IPEX-LLM available for Intel GPU acceleration")
+    except (ImportError, OSError, RuntimeError) as e:
+        logger.debug("ipex-llm not available: %s", e)
+
+# Eagerly try to load at import time
 _ensure_llama()
+_ensure_ipex()
 
 
 def _check_vulkan_devices() -> bool:
@@ -87,71 +106,37 @@ def _check_vulkan_devices() -> bool:
         return False
 
 
-def detect_gpu_support() -> Tuple[bool, int, str]:
+def detect_gpu_support(preference: str = "auto") -> Tuple[bool, int, str]:
     """
-    Detect whether llama-cpp-python was compiled with GPU support
-    and whether a usable GPU is available.
+    Detect the best available GPU backend for inference.
+
+    Uses the backend registry to probe SYCL, IPEX-LLM, Vulkan, OpenCL,
+    and CPU backends, returning the best match.
+
+    Args:
+        preference: "auto" or a specific backend name ("sycl", "ipex", "vulkan", etc.)
 
     Returns:
         (gpu_available, recommended_layers, backend_name)
-        - gpu_available: True if GPU offloading is supported and a device exists
+        - gpu_available: True if a GPU backend is available
         - recommended_layers: -1 to offload all layers, 0 for CPU-only
-        - backend_name: "vulkan", "cuda", "metal", "cpu"
+        - backend_name: "sycl", "ipex", "vulkan", "opencl", "cpu", etc.
     """
     _ensure_llama()
-    if not LLAMA_CPP_AVAILABLE:
+    _ensure_ipex()
+
+    from src.backend_registry import get_best_backend, CPU
+
+    best = get_best_backend(preference)
+    if best.available and best.name != CPU:
+        logger.info("GPU backend selected: %s (%s)", best.name, best.reason)
+        return True, -1, best.name
+    elif best.available:
+        logger.info("CPU-only inference (no GPU backend available)")
         return False, 0, "cpu"
-
-    import sys
-    if sys.platform == 'win32':
-        # Use registry check to detect GPUs (avoids calling Vulkan APIs directly)
-        if not _check_vulkan_devices():
-            logger.info("No GPU found — using CPU-only inference")
-            return False, 0, "cpu"
-        logger.info("Vulkan GPU available — enabling GPU offload")
-        return True, -1, "vulkan"
-
-    # Non-Windows: safe to call llama_supports_gpu_offload()
-    try:
-        from llama_cpp import llama_supports_gpu_offload
-        if not llama_supports_gpu_offload():
-            logger.info("GPU offload not supported by this llama-cpp-python build (CPU-only)")
-            return False, 0, "cpu"
-    except (ImportError, AttributeError, OSError) as e:
-        logger.info("Cannot check GPU support: %s", e)
+    else:
+        logger.warning("No inference backend available: %s", best.reason)
         return False, 0, "cpu"
-
-    # Detect which backend via system info (non-Windows only)
-    import threading
-    result = {"backend": "gpu"}
-
-    def _detect_backend():
-        try:
-            import llama_cpp
-            sys_info = llama_cpp.llama_print_system_info()
-            if isinstance(sys_info, bytes):
-                sys_info = sys_info.decode()
-            sys_info_lower = sys_info.lower()
-            if "vulkan" in sys_info_lower:
-                result["backend"] = "vulkan"
-            elif "cuda" in sys_info_lower:
-                result["backend"] = "cuda"
-            elif "metal" in sys_info_lower:
-                result["backend"] = "metal"
-            logger.info("GPU backend detected: %s", result["backend"])
-        except Exception as e:
-            logger.debug("Could not read system info: %s", e)
-
-    detect_thread = threading.Thread(target=_detect_backend, daemon=True)
-    detect_thread.start()
-    detect_thread.join(timeout=10)
-    if detect_thread.is_alive():
-        logger.warning("GPU backend detection timed out — falling back to CPU")
-        return False, 0, "cpu"
-
-    backend = result["backend"]
-    logger.info("GPU offloading available (%s) — will offload all layers", backend)
-    return True, -1, backend
 
 from src.schema_loader import SchemaLoader
 from src.fuzzy_matcher import FuzzyClauseMatcher
@@ -192,6 +177,7 @@ class LocalModelClient:
         temperature: float = DEFAULT_TEMPERATURE,
         ram_reserved_os_mb: Optional[int] = None,
         gpu_offload_layers: Optional[int] = None,
+        gpu_backend: str = "auto",
     ):
         """
         Initialize local model client.
@@ -205,15 +191,18 @@ class LocalModelClient:
             temperature: Sampling temperature (0.0 = deterministic)
             ram_reserved_os_mb: MB reserved for OS (if set, n_ctx is computed from remaining RAM)
             gpu_offload_layers: Explicit layer count for GPU offload (overrides n_gpu_layers)
+            gpu_backend: Backend preference ("auto", "sycl", "ipex", "vulkan", "opencl", "cpu")
 
         Raises:
             ImportError: If llama-cpp-python is not installed
         """
         _ensure_llama()
-        if not LLAMA_CPP_AVAILABLE:
+        _ensure_ipex()
+        if not LLAMA_CPP_AVAILABLE and not IPEX_LLM_AVAILABLE:
             raise ImportError(
-                "llama-cpp-python is required for local models.\n"
-                "Install with: pip install llama-cpp-python"
+                "llama-cpp-python or ipex-llm is required for local models.\n"
+                "Install with: pip install llama-cpp-python\n"
+                "For Intel GPU: pip install --pre ipex-llm[cpp]"
             )
 
         self.model_path = Path(model_path) if model_path else None
@@ -222,19 +211,22 @@ class LocalModelClient:
         self.temperature = temperature
 
         # GPU layer selection: explicit offload_layers > n_gpu_layers > auto-detect
+        self.gpu_backend_preference = gpu_backend
         if gpu_offload_layers is not None:
             self.n_gpu_layers = gpu_offload_layers
-            self.gpu_backend = "manual"
-            logger.info("Using explicit GPU offload: %d layers", gpu_offload_layers)
+            gpu_available, _, detected_backend = detect_gpu_support(gpu_backend)
+            self.gpu_backend = detected_backend if gpu_available else "cpu"
+            logger.info("Using explicit GPU offload: %d layers (backend=%s)", gpu_offload_layers, self.gpu_backend)
         elif n_gpu_layers is not None:
             self.n_gpu_layers = n_gpu_layers
-            self.gpu_backend = "manual"
+            gpu_available, _, detected_backend = detect_gpu_support(gpu_backend)
+            self.gpu_backend = detected_backend if gpu_available else "cpu"
         else:
-            gpu_available, recommended_layers, backend = detect_gpu_support()
+            gpu_available, recommended_layers, detected_backend = detect_gpu_support(gpu_backend)
             self.n_gpu_layers = recommended_layers
-            self.gpu_backend = backend
+            self.gpu_backend = detected_backend
             if gpu_available:
-                logger.info("Auto-detected %s GPU — offloading all layers", backend)
+                logger.info("Auto-detected %s backend — offloading all layers", detected_backend)
             else:
                 logger.info("No GPU detected — using CPU-only inference")
 
@@ -495,6 +487,53 @@ class LocalModelClient:
                 return ctx_size
         return 8192  # Safe default for unknown models
 
+    def _probe_gpu_in_subprocess(self) -> bool:
+        """Test if GPU loading works without crashing the main process.
+
+        Spawns a short-lived subprocess that tries to load the model with
+        n_gpu_layers=1 using the selected backend. Returns True if it exits
+        cleanly, False on crash (e.g., Vulkan access violation).
+        """
+        import subprocess
+
+        # Choose the right import based on backend
+        if self.gpu_backend == "ipex":
+            import_line = "from ipex_llm.llama_cpp import Llama"
+        else:
+            import_line = "from llama_cpp import Llama"
+
+        script = (
+            "import sys, os\n"
+            f"os.environ['PATH'] = {repr(os.environ.get('PATH', ''))}\n"
+            "os.environ.setdefault('SYCL_CACHE_PERSISTENT', '1')\n"
+            "try:\n"
+            f"    {import_line}\n"
+            f"    m = Llama(model_path={repr(str(self.model_path))}, "
+            "n_ctx=512, n_gpu_layers=1, n_batch=128, verbose=False)\n"
+            "    del m\n"
+            "    print('OK')\n"
+            "except Exception as e:\n"
+            "    print(f'FAIL: {e}')\n"
+            "    sys.exit(1)\n"
+        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True, text=True, timeout=60,
+            )
+            ok = result.returncode == 0 and "OK" in result.stdout
+            if ok:
+                logger.info("GPU probe succeeded (%s backend)", self.gpu_backend)
+            else:
+                logger.warning("GPU probe failed (%s): rc=%d, out=%s, err=%s",
+                               self.gpu_backend, result.returncode,
+                               result.stdout.strip()[:200],
+                               result.stderr.strip()[:200])
+            return ok
+        except Exception as e:
+            logger.warning("GPU probe subprocess error: %s", e)
+            return False
+
     def _load_model(
         self,
         progress_callback: Optional[Callable[[str, int], None]] = None
@@ -521,10 +560,18 @@ class LocalModelClient:
         gpu_info = f", gpu_layers={self.n_gpu_layers}, backend={self.gpu_backend}" if self.n_gpu_layers != 0 else ", CPU-only"
         logger.info(f"Loading model from: {self.model_path}{gpu_info}")
 
-        # Determine load order: try GPU first (if configured), then CPU fallback
+        # Determine load order: try GPU first (if configured), then CPU fallback.
+        # In frozen builds, Vulkan GPU can cause access violations that kill
+        # the process (uncatchable). Probe in a subprocess first.
         load_attempts = []
         if self.n_gpu_layers != 0:
-            load_attempts.append(("gpu", self.n_gpu_layers))
+            if getattr(sys, 'frozen', False):
+                if self._probe_gpu_in_subprocess():
+                    load_attempts.append(("gpu", self.n_gpu_layers))
+                else:
+                    logger.warning("GPU probe failed in subprocess, using CPU-only")
+            else:
+                load_attempts.append(("gpu", self.n_gpu_layers))
         load_attempts.append(("cpu", 0))
 
         last_error = None
@@ -539,7 +586,15 @@ class LocalModelClient:
                 # Intel iGPU Vulkan crashes with default n_batch=512 on large prompts.
                 # Use n_batch=128 for GPU to keep Vulkan buffer sizes manageable.
                 n_batch = 128 if gpu_layers != 0 else 512
-                self._model = Llama(
+
+                # Select the right Llama constructor based on backend
+                if self.gpu_backend == "ipex" and IPEX_LLM_AVAILABLE and gpu_layers != 0:
+                    _Constructor = IpexLlama
+                    logger.info("Using IPEX-LLM Llama constructor (Intel SYCL)")
+                else:
+                    _Constructor = Llama
+
+                self._model = _Constructor(
                     model_path=str(self.model_path),
                     n_ctx=self.n_ctx,
                     n_threads=self.n_threads,

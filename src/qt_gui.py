@@ -2350,11 +2350,13 @@ class CR2A_GUI(QMainWindow):
             self.statusBar().showMessage(f"Initializing local AI ({model_name})...")
 
             gpu_mode = self.config_manager.get_gpu_mode() if self.config_manager else "auto"
+            gpu_backend = self.config_manager.get_gpu_backend() if self.config_manager else "auto"
             ram_reserved_os_mb = self.config_manager.get_ram_reserved_os_mb() if self.config_manager else None
             gpu_offload_layers = self.config_manager.get_gpu_offload_layers() if self.config_manager else None
             self.analysis_engine = AnalysisEngine(
                 local_model_name=model_name,
                 gpu_mode=gpu_mode,
+                gpu_backend=gpu_backend,
                 ram_reserved_os_mb=ram_reserved_os_mb,
                 gpu_offload_layers=gpu_offload_layers,
             )
@@ -4552,12 +4554,28 @@ class SettingsDialog(QDialog):
         layout.addWidget(ram_group)
 
         # =====================================================================
-        # E. GPU Offload Slider
+        # E. GPU Backend & Offload
         # =====================================================================
-        self.gpu_group = QGroupBox("GPU Offload")
+        self.gpu_group = QGroupBox("GPU Acceleration")
         gpu_layout = QVBoxLayout()
         self.gpu_group.setLayout(gpu_layout)
 
+        # Backend selection dropdown
+        backend_row = QHBoxLayout()
+        backend_row.addWidget(QLabel("Compute Backend:"))
+        self.gpu_backend_combo = QComboBox()
+        self._populate_backend_combo()
+        backend_row.addWidget(self.gpu_backend_combo, 1)
+        gpu_layout.addLayout(backend_row)
+
+        # Backend status label
+        self.backend_status_label = QLabel("")
+        self.backend_status_label.setStyleSheet("color: #666; font-size: 11px;")
+        gpu_layout.addWidget(self.backend_status_label)
+        self._update_backend_status()
+
+        # GPU offload slider
+        gpu_layout.addWidget(QLabel("GPU Layer Offload:"))
         self.gpu_slider = QSlider(Qt.Horizontal)
         self.gpu_slider.setTickPosition(QSlider.TicksBelow)
         self.gpu_slider.setTickInterval(1)
@@ -4696,6 +4714,47 @@ class SettingsDialog(QDialog):
 
             # Warning check
             self._check_allocation_warnings(model_ram, breakdown)
+
+    def _populate_backend_combo(self):
+        """Populate the GPU backend dropdown with detected backends."""
+        from src.backend_registry import detect_available_backends, get_display_name
+        self.gpu_backend_combo.clear()
+        self.gpu_backend_combo.addItem("Auto (best available)", "auto")
+        backends = detect_available_backends()
+        for b in backends:
+            display = get_display_name(b.name)
+            if not b.available:
+                display += f"  [{b.reason}]"
+            self.gpu_backend_combo.addItem(display, b.name)
+            idx = self.gpu_backend_combo.count() - 1
+            if not b.available:
+                # Gray out unavailable backends
+                model = self.gpu_backend_combo.model()
+                item = model.item(idx)
+                item.setEnabled(False)
+                if b.install_hint:
+                    self.gpu_backend_combo.setItemData(idx, b.install_hint, Qt.ToolTipRole)
+        # Set current selection from config
+        current = self.config_manager.get_gpu_backend()
+        for i in range(self.gpu_backend_combo.count()):
+            if self.gpu_backend_combo.itemData(i) == current:
+                self.gpu_backend_combo.setCurrentIndex(i)
+                break
+        self.gpu_backend_combo.currentIndexChanged.connect(self._update_backend_status)
+
+    def _update_backend_status(self):
+        """Update the backend status label."""
+        from src.backend_registry import get_best_backend, get_display_name
+        idx = self.gpu_backend_combo.currentIndex()
+        pref = self.gpu_backend_combo.itemData(idx) if idx >= 0 else "auto"
+        best = get_best_backend(pref or "auto")
+        if best.available:
+            name = get_display_name(best.name)
+            self.backend_status_label.setText(f"Active: {name} — {best.reason}")
+            self.backend_status_label.setStyleSheet("color: #080; font-size: 11px;")
+        else:
+            self.backend_status_label.setText(f"No GPU backend available — CPU only")
+            self.backend_status_label.setStyleSheet("color: #c60; font-size: 11px;")
 
     def _update_gpu_label(self):
         """Update GPU slider label showing layers and GB."""
@@ -4893,6 +4952,11 @@ class SettingsDialog(QDialog):
             self.config_manager.set_ram_reserved_os_mb(self.ram_slider.value())
             gpu_layers = self.gpu_slider.value() if self.gpu_group.isVisible() else None
             self.config_manager.set_gpu_offload_layers(gpu_layers)
+
+            # Save GPU backend preference
+            gpu_backend = self.gpu_backend_combo.currentData()
+            if gpu_backend:
+                self.config_manager.set_gpu_backend(gpu_backend)
 
             # Derive gpu_mode for backward compat
             if gpu_layers is None or gpu_layers == 0:

@@ -29,6 +29,8 @@ class HardwareInfo:
     gpu_name: Optional[str] = None
     gpu_type: str = "none"      # "discrete", "integrated", "none"
     gpu_vram_mb: Optional[int] = None  # dedicated VRAM (discrete only)
+    gpu_arch: str = "unknown"   # Intel arch: "Xe-HPG", "Xe-LP", "pre-Xe", etc.
+    sycl_compatible: bool = False  # True if GPU supports SYCL (Intel Xe+)
 
 
 def detect_hardware() -> HardwareInfo:
@@ -51,12 +53,19 @@ def detect_hardware() -> HardwareInfo:
     # --- GPU ---
     info.gpu_name, info.gpu_type, info.gpu_vram_mb = _detect_gpu()
 
+    # Detect Intel GPU architecture and SYCL compatibility
+    if info.gpu_name:
+        info.gpu_arch, info.sycl_compatible = detect_intel_gpu_arch(info.gpu_name)
+    else:
+        info.gpu_arch, info.sycl_compatible = "unknown", False
+
     logger.info(
         "Hardware detected: CPU=%s (%dC/%dT), RAM=%d MB total / %d MB available, "
-        "GPU=%s (%s, VRAM=%s MB)",
+        "GPU=%s (%s, arch=%s, SYCL=%s, VRAM=%s MB)",
         info.cpu_name, info.cpu_cores, info.cpu_threads,
         info.total_ram_mb, info.available_ram_mb,
-        info.gpu_name or "none", info.gpu_type,
+        info.gpu_name or "none", info.gpu_type, info.gpu_arch,
+        info.sycl_compatible,
         info.gpu_vram_mb if info.gpu_vram_mb is not None else "shared"
     )
     return info
@@ -312,6 +321,56 @@ def _classify_gpu(desc: str) -> str:
         return "integrated"
 
     return "integrated"  # default to integrated for unknown
+
+
+def detect_intel_gpu_arch(desc: str) -> tuple:
+    """Detect Intel GPU architecture generation and SYCL compatibility.
+
+    Returns:
+        (arch_name, sycl_compatible)
+        arch_name: "Xe-HPG" (Arc discrete), "Xe-LPG" (Meteor/Lunar Lake),
+                   "Xe-LP" (11th/12th gen), "Xe" (generic Xe), "pre-Xe", "unknown"
+        sycl_compatible: True for Xe architecture and newer (11th gen+)
+    """
+    desc_lower = desc.lower()
+    if "intel" not in desc_lower:
+        return ("unknown", False)
+
+    # Arc discrete GPUs — Xe-HPG (Alchemist) or Xe2-HPG (Battlemage)
+    if "arc" in desc_lower:
+        for marker in ("a3", "a5", "a7", "b5", "b7"):
+            if marker in desc_lower:
+                return ("Xe-HPG", True)
+        # Arc integrated (Meteor Lake / Lunar Lake)
+        return ("Xe-LPG", True)
+
+    # Iris Xe / UHD Xe — 11th gen (Tiger Lake) / 12th gen (Alder Lake)
+    if "iris xe" in desc_lower or "iris(r) xe" in desc_lower:
+        return ("Xe-LP", True)
+    # 12th/13th/14th gen UHD with Xe cores
+    if "uhd" in desc_lower:
+        # UHD 7xx = 12th gen+ (Xe-LP), UHD 6xx = 10th gen (pre-Xe)
+        import re
+        m = re.search(r"uhd\s*(\d+)", desc_lower)
+        if m:
+            model = int(m.group(1))
+            if model >= 700:
+                return ("Xe-LP", True)
+            return ("pre-Xe", False)
+        # No model number — conservatively assume Xe
+        return ("Xe-LP", True)
+
+    # Iris Plus — 10th gen (Ice Lake, pre-Xe for compute but has some support)
+    if "iris plus" in desc_lower:
+        return ("pre-Xe", False)
+
+    # Generic "Intel(R) Graphics" without model number — likely 12th gen+
+    # Modern Intel drivers use this name for Xe-LP integrated graphics
+    if desc_lower.strip() in ("intel(r) graphics", "intel graphics"):
+        return ("Xe-LP", True)
+
+    # Unknown Intel GPU — conservatively assume pre-Xe
+    return ("unknown", False)
 
 
 def _read_gpu_vram(gpu_key) -> Optional[int]:

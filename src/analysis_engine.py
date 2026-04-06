@@ -50,6 +50,7 @@ class AnalysisEngine:
         self,
         local_model_name: str = "llama-3.2-3b-q4",
         gpu_mode: str = "auto",
+        gpu_backend: str = "auto",
         ram_reserved_os_mb: int = None,
         gpu_offload_layers: int = None,
         ai_backend: str = "local",
@@ -62,6 +63,7 @@ class AnalysisEngine:
         Args:
             local_model_name: Name of local model to use (default: llama-3.2-3b-q4)
             gpu_mode: "auto" (auto-detect), "cpu" (force CPU), or "gpu" (force GPU)
+            gpu_backend: GPU compute backend ("auto", "sycl", "ipex", "vulkan", "opencl", "cpu")
             ram_reserved_os_mb: MB reserved for OS (None = auto-detect)
             gpu_offload_layers: Explicit GPU layer count (None = use gpu_mode)
             ai_backend: "local" for Llama models, "claude" for Anthropic Claude API
@@ -136,6 +138,7 @@ class AnalysisEngine:
                     n_gpu_layers=n_gpu_layers,
                     ram_reserved_os_mb=ram_reserved_os_mb,
                     gpu_offload_layers=gpu_offload_layers,
+                    gpu_backend=gpu_backend,
                 )
                 logger.info("Local model client initialized successfully")
             except Exception as e:
