@@ -1601,6 +1601,12 @@ class CR2A_GUI(QMainWindow):
         self.workspace_status_label.setStyleSheet("font-size: 11px; padding: 2px 8px;")
         toolbar.addWidget(self.workspace_status_label)
 
+        pe_report_btn = QPushButton("P&&E Report")
+        pe_report_btn.setStyleSheet("padding: 4px 10px; font-size: 11px; font-weight: bold;")
+        pe_report_btn.setToolTip("Export Price & Escalation report with renewal dates/terms")
+        pe_report_btn.clicked.connect(self.export_pe_report)
+        toolbar.addWidget(pe_report_btn)
+
         settings_btn = QPushButton("Settings")
         settings_btn.setStyleSheet("padding: 4px 10px; font-size: 11px;")
         settings_btn.clicked.connect(self.open_settings)
@@ -2031,7 +2037,131 @@ class CR2A_GUI(QMainWindow):
             QMessageBox.information(self, "Export Complete", f"Full export saved to:\n{filename}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export:\n{str(e)}")
-    
+
+    def export_pe_report(self):
+        """Export a Price & Escalation report including renewal dates/terms."""
+        analysis = self.get_or_build_current_analysis()
+        if not analysis or not hasattr(analysis, 'administrative_and_commercial_terms'):
+            QMessageBox.warning(
+                self, "No Analysis",
+                "No contract analysis available.\n\n"
+                "Please run a full contract analysis first (use the 'Analyze Contract' button)."
+            )
+            return
+
+        admin = analysis.administrative_and_commercial_terms
+        if not admin:
+            QMessageBox.warning(
+                self, "No Data",
+                "Administrative & Commercial Terms section not found in the analysis."
+            )
+            return
+
+        pe_block = admin.price_escalation
+        renewal_block = admin.contract_term_renewal_extensions
+
+        if not pe_block and not renewal_block:
+            QMessageBox.information(
+                self, "No P&E Data",
+                "Neither Price Escalation nor Contract Term/Renewal data was found in the analysis."
+            )
+            return
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export P&E Report",
+            "price_escalation_report.txt",
+            "Text Files (*.txt);;All Files (*)"
+        )
+
+        if not filename:
+            return
+
+        try:
+            report = self._generate_pe_report(pe_block, renewal_block)
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(report)
+            QMessageBox.information(self, "Export Complete", f"P&E Report exported to:\n{filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export P&E report:\n{str(e)}")
+
+    def _generate_pe_report(self, pe_block, renewal_block):
+        """Generate a Price & Escalation report with renewal dates/terms section."""
+        lines = []
+        lines.append("PRICE & ESCALATION REPORT")
+        lines.append("=" * 60)
+        lines.append("")
+
+        if self.current_analysis and self.current_analysis.metadata:
+            meta = self.current_analysis.metadata
+            lines.append(f"Document: {meta.filename}")
+            lines.append(f"Analyzed: {meta.analyzed_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append("")
+
+        # ── Section 1: Price Escalation ──
+        lines.append("SECTION 1: PRICE ESCALATION CLAUSES")
+        lines.append("-" * 60)
+        lines.append("")
+
+        if pe_block:
+            if pe_block.clause_location:
+                lines.append(f"  Location:  {pe_block.clause_location}")
+            if pe_block.clause_page is not None:
+                lines.append(f"  Page:      {pe_block.clause_page}")
+            if pe_block.clause_summary:
+                lines.append(f"  Summary:   {pe_block.clause_summary}")
+            lines.append("")
+
+            if pe_block.redline_recommendations:
+                lines.append("  Redline Recommendations:")
+                for i, rec in enumerate(pe_block.redline_recommendations, 1):
+                    rec_text = f"[{rec.action}] {rec.text}" if hasattr(rec, 'action') else str(rec)
+                    lines.append(f"    {i}. {rec_text}")
+                lines.append("")
+
+            if pe_block.harmful_language_policy_conflicts:
+                lines.append("  Harmful Language / Policy Conflicts:")
+                for item in pe_block.harmful_language_policy_conflicts:
+                    lines.append(f"    - {item}")
+                lines.append("")
+        else:
+            lines.append("  No price escalation clauses found in this contract.")
+            lines.append("")
+
+        # ── Section 2: Renewal Dates & Terms ──
+        lines.append("SECTION 2: RENEWAL DATES & TERMS")
+        lines.append("-" * 60)
+        lines.append("")
+
+        if renewal_block:
+            if renewal_block.clause_location:
+                lines.append(f"  Location:  {renewal_block.clause_location}")
+            if renewal_block.clause_page is not None:
+                lines.append(f"  Page:      {renewal_block.clause_page}")
+            if renewal_block.clause_summary:
+                lines.append(f"  Summary:   {renewal_block.clause_summary}")
+            lines.append("")
+
+            if renewal_block.redline_recommendations:
+                lines.append("  Redline Recommendations:")
+                for i, rec in enumerate(renewal_block.redline_recommendations, 1):
+                    rec_text = f"[{rec.action}] {rec.text}" if hasattr(rec, 'action') else str(rec)
+                    lines.append(f"    {i}. {rec_text}")
+                lines.append("")
+
+            if renewal_block.harmful_language_policy_conflicts:
+                lines.append("  Harmful Language / Policy Conflicts:")
+                for item in renewal_block.harmful_language_policy_conflicts:
+                    lines.append(f"    - {item}")
+                lines.append("")
+        else:
+            lines.append("  No contract term, renewal, or extension clauses found in this contract.")
+            lines.append("")
+
+        lines.append("=" * 60)
+        lines.append("END OF P&E REPORT")
+        return "\n".join(lines)
+
     def _generate_analysis_report(self):
         """Generate a text report from the current analysis, including all tabs."""
         lines = []

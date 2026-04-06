@@ -1179,7 +1179,7 @@ def extract_clauses_for_category(
     category: str,
     patterns: List[str],
     context_size: int = 3000,
-    exclude_zones: List[Tuple[int, int]] = None,
+    exclude_zones: Optional[List[Tuple[int, int]]] = None,
     section_index: Optional[List[SectionBlock]] = None
 ) -> List[Dict]:
     """
